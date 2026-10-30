@@ -34,6 +34,28 @@ Base.:*(x::GiacExpr, A::AbstractArray) = map(a -> x * a, A)
 Base.:*(A::AbstractArray, x::GiacExpr) = map(a -> a * x, A)
 Base.:/(A::AbstractArray, x::GiacExpr) = map(a -> a / x, A)
 
+# In broadcasting an expression is a scalar: `t .* A` scales every entry by `t`.
+Base.broadcastable(x::GiacExpr) = Ref(x)
+
+"""
+    mul!(C, A, B, α::GiacExpr, β::GiacExpr)
+
+`C = α A B + β C` in place, for symbolic scale factors. LinearAlgebra's methods take `Number`s,
+which `GiacExpr` is not, and array packages built on the 5-argument form (BlockArrays, through
+ArrayLayouts) pass the element type's `one` and `zero`.
+"""
+function LinearAlgebra.mul!(C::AbstractVecOrMat{GiacExpr}, A::AbstractVecOrMat, B::AbstractVecOrMat,
+                            α::GiacExpr, β::GiacExpr)
+    AB = A * B
+    # β is usually zero, and C may be uninitialized then
+    if isequal(β, zero(GiacExpr))
+        C .= isequal(α, one(GiacExpr)) ? AB : α .* AB
+    else
+        C .= α .* AB .+ β .* C
+    end
+    return C
+end
+
 """
     s * I
 
@@ -233,9 +255,18 @@ LaTeX for an expression or an array of expressions (a bracketed matrix; a vector
 an adjoint vector a row).
 """
 giac_latex(e) = _entry_latex(e)
-function giac_latex(A::AbstractVecOrMat)
+giac_latex(A::AbstractVecOrMat) = _matrix_latex(A)
+
+"""
+    _matrix_latex(A; rowbreaks = (), colbreaks = ())
+
+A bracketed matrix. `rowbreaks` and `colbreaks` hold the rows and columns after which a partition
+line is drawn (a block matrix's block boundaries).
+"""
+function _matrix_latex(A::AbstractVecOrMat; rowbreaks = (), colbreaks = ())
     M = A isa AbstractVector ? reshape(A, :, 1) : A
-    entries = [_entry_latex(M[i, j]) for i in axes(M, 1), j in axes(M, 2)]
+    nr, nc = size(M)
+    entries = [_entry_latex(M[i, j]) for i in 1:nr, j in 1:nc]
     # matrix cells are set at text size, which shrinks fractions; set them at display size, and
     # pad each row with an invisible strut so the rows separate and the brackets, which TeX
     # draws slightly short of their contents, still enclose them
@@ -243,13 +274,16 @@ function giac_latex(A::AbstractVecOrMat)
     tall && (entries = replace.(entries, "\\frac" => "\\dfrac"))
     # a square root over powers raises its row too, though less than a display fraction
     pad = tall ? _ROW_STRUT : any(e -> occursin("\\sqrt", e), entries) ? _ROOT_STRUT : ""
-    rows = [pad * join(entries[i, :], " & ") for i in axes(entries, 1)]
+    rows = [((i - 1) in rowbreaks ? "\\hline " : "") * pad * join(entries[i, :], " & ") for i in 1:nr]
     # a column of plain numbers is right-aligned, so digits line up by place value and signs hang
     # to the left; a column with anything symbolic stays centred
-    align = join(all(_is_plain_number, M[:, j]) ? "r" : "c" for j in axes(M, 2))
-    all(==('c'), align) && return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
+    align = [all(i -> _is_plain_number(M[i, j]), 1:nr) ? 'r' : 'c' for j in 1:nc]
+    if all(==('c'), align) && isempty(rowbreaks) && isempty(colbreaks)
+        return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
+    end
+    spec = join(string(align[j], j in colbreaks ? "|" : "") for j in 1:nc)
     # an `array` pads its outer edges by the column separation, which `bmatrix` drops
-    return "\\left[\\hspace{-5pt}\\begin{array}{$align}" * join(rows, " \\\\ ") *
+    return "\\left[\\hspace{-5pt}\\begin{array}{$spec}" * join(rows, " \\\\ ") *
            "\\end{array}\\hspace{-5pt}\\right]"
 end
 

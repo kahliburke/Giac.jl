@@ -14,6 +14,7 @@ libcxxwrap_julia_jll = "3eaa8342-bff7-56a5-9981-c04077f7cee7"
 libgiac_julia_jll = "ec39d2da-6bdf-580b-ada4-cd6e059515c9"
 
 [weakdeps]
+BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
 LibPARI = "75bc234d-eb99-4f80-8816-cb1dc773483e"
 MathJSON = "77215b4b-6f01-425c-beac-950ae6536d4d"
 ModelContextProtocol = "c58f755f-f2a7-4f48-bf29-4e9659b78499"
@@ -23,6 +24,7 @@ Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 TermInterface = "8ea1fca8-c5ef-4a55-8b96-4e9afe9c9a3c"
 
 [extensions]
+GiacBlockArraysExt = "BlockArrays"
 GiacLibPARIExt = "LibPARI"
 GiacMCPExt = "ModelContextProtocol"
 GiacMathJSONExt = "MathJSON"
@@ -32,6 +34,7 @@ GiacSymbolicsExt = "Symbolics"
 GiacTermInterfaceExt = "TermInterface"
 
 [compat]
+BlockArrays = "1"
 Aqua = "0.8"
 CSV = "0.10"
 CommonSolve = "0.2"
@@ -57,6 +60,7 @@ libcxxwrap_julia_jll = "0.14.10"
 libgiac_julia_jll = "0.5.2"
 
 [extras]
+BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
@@ -73,4 +77,4 @@ TermInterface = "8ea1fca8-c5ef-4a55-8b96-4e9afe9c9a3c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Aqua", "Documenter", "Symbolics", "MathJSON", "ModelContextProtocol", "DataFrames", "CSV", "TermInterface", "Random", "ForwardDiff", "LibPARI", "Nemo"]
+test = ["Test", "Aqua", "BlockArrays", "Documenter", "Symbolics", "MathJSON", "ModelContextProtocol", "DataFrames", "CSV", "TermInterface", "Random", "ForwardDiff", "LibPARI", "Nemo"]

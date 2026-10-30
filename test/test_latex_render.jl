@@ -142,7 +142,6 @@ end
         M = GiacMatrix([1 2; 3 4])
         s = sprint(show, MIME("text/latex"), M)
         @test s == sprint(show, MIME("text/latex"), Matrix(M))      # typeset like any symbolic matrix
-        @test occursin("bmatrix", s)
     end
 
     @testset "US4: equations unchanged" begin

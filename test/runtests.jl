@@ -23,6 +23,7 @@ using LinearAlgebra
     include("test_linalg.jl")
     include("test_array_algebra.jl")
     include("test_rules.jl")
+    include("test_blockarrays.jl")
     include("test_codegen.jl")
     include("test_matrix_iteration.jl")
     include("test_memory.jl")
