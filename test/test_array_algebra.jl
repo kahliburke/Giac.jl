@@ -210,7 +210,8 @@ end
     @test count(" = ", d3.rows[2][2]) == 1 && occursin("\\nabla", d3.rows[2][2])
     @test d3.rows[3][2] == "\\text{since \$S\$ is symmetric}"
     tex3 = sprint(show, MIME("text/latex"), d3)
-    @test occursin("&\\text{by definition}", tex3) && count("&=", tex3) == 1
+    # notes are flush-left rows of an outer array; the steps between them stay aligned
+    @test startswith(tex3, "\$\$\\begin{array}{l}\\text{by definition}") && count("&=", tex3) == 1
 
     # written left sides: transpose, dot, reserved letters
     @test Giac.written_latex(:(x' * P * x)) == "x^{\\mathsf{T}} P x"

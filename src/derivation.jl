@@ -12,17 +12,38 @@ struct Derivation
 end
 
 function Base.show(io::IO, ::MIME"text/latex", d::Derivation)
-    print(io, "\$\$\\begin{aligned}")
-    for (k, (l, r)) in enumerate(d.rows)
-        k > 1 && print(io, " \\\\[", _row_gap(d.rows[k - 1], (l, r)), "] ")
-        print(io, isempty(l) ? "&$r" : "$l &= $r")                   # a text row has no left side
+    any(_is_note, d.rows) || return print(io, "\$\$", _aligned(d.rows, ""), "\$\$")
+    # Notes are headings, flush left; each run of steps between them is an aligned block,
+    # indented. Every block's left column is as wide as the widest left side, so the `=` signs
+    # line up across blocks.
+    widest = "\\hphantom{\\begin{matrix}" * join((l for (l, _) in d.rows if !isempty(l)), " \\\\ ") * "\\end{matrix}}"
+    parts, gaps, run = String[], String[], Tuple{String, String}[]
+    flush() = isempty(run) || (push!(parts, "\\quad " * _aligned(run, widest)); empty!(run))
+    for row in d.rows
+        if _is_note(row)
+            flush()
+            push!(parts, last(row))
+        else
+            push!(run, row)
+        end
     end
-    print(io, "\\end{aligned}\$\$")
+    flush()
+    print(io, "\$\$\\begin{array}{l}")
+    for (k, p) in enumerate(parts)
+        k > 1 && print(io, _is_note_part(p) ? " \\\\[20pt] " : " \\\\[4pt] ")
+        print(io, p)
+    end
+    print(io, "\\end{array}\$\$")
 end
 
-# Space before a row: a note sits close to the step it introduces, with room above it.
-_is_note(row) = isempty(first(row))
-_row_gap(prev, row) = _is_note(row) ? "20pt" : _is_note(prev) ? "2pt" : "14pt"
+_is_note(row) = isempty(first(row))                  # a text row has no left side
+_is_note_part(p) = startswith(p, "\\text{")
+
+"An aligned block of steps; `pad` widens every left side to a common width (see `show`)."
+function _aligned(rows, pad)
+    lines = (isempty(pad) ? "$l &= $r" : "$pad\\mathllap{$l} &= $r" for (l, r) in rows)
+    return "\\begin{aligned}" * join(lines, " \\\\[14pt] ") * "\\end{aligned}"
+end
 
 "A note as a text row: `&`, `%` and `#` are escaped; `\$…\$` inside it is math."
 _text_row(s::AbstractString) = ("", "\\text{" * replace(s, "&" => "\\&", "%" => "\\%", "#" => "\\#") * "}")
