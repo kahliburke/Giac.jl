@@ -39,11 +39,12 @@ end
 _is_note(row) = isempty(first(row))                  # a text row has no left side
 _is_note_part(p) = startswith(p, "\\text{")
 
-# Vertical space comes from empty rows. KaTeX treats `\\[gap]` as a minimum depth for the row
-# above, not as added space, so after a tall matrix it adds nothing; an empty row always adds
-# its height. (Below a note, a one-line text row, `\\[8pt]` does add its full amount.)
-const _STEP_SPACER = " \\\\ \\\\ "
-const _NOTE_SPACER = " \\\\ \\rule{0pt}{1.4em} \\\\ "
+# Vertical space comes from empty rows. KaTeX treats a positive `\\[gap]` as a minimum depth for
+# the row above, not as added space, so after a tall matrix it adds nothing; an empty row always
+# adds its height (about 1.5em in `aligned`), and a negative gap is subtracted outright, which
+# trims it to the space wanted. (Below a note, a one-line text row, `\\[8pt]` adds its full amount.)
+const _STEP_SPACER = " \\\\ \\\\[-0.9em] "
+const _NOTE_SPACER = " \\\\ \\rule{0pt}{1em} \\\\ "
 
 "An aligned block of steps; `pad` widens every left side to a common width (see `show`)."
 function _aligned(rows, pad)
