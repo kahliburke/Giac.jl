@@ -40,7 +40,7 @@
         E = eigen(M)
         @test all(iszero, Giac.Commands.simplify.(M * E.vectors - E.vectors * Diagonal(E.values)))
         @test eigvecs(M) == E.vectors
-        @test startswith(sprint(show, MIME("text/latex"), E), "\$\$\\lambda = \\left[\\hspace{-5pt}\\begin{array}{rr}-1 & -2")
+        @test startswith(sprint(show, MIME("text/latex"), E), "\$\$\\Lambda = " * Giac.giac_latex(GiacExpr[-1 0; 0 -2]))
         @test length(eigvals(GiacExpr[0 1; -k -3])) == 2
         @test string.(eigvals(GiacExpr[1 1; 0 1])) == ["1", "1"]
         @test_throws ArgumentError eigen(GiacExpr[1 1; 0 1])     # not diagonalizable

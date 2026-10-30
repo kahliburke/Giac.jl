@@ -310,9 +310,12 @@ end
 
 LinearAlgebra.eigvecs(A::AbstractMatrix{GiacExpr}) = eigen(A).vectors
 
-# eigenvalues as a row, each above its eigenvector in the columns of V
-Base.show(io::IO, ::MIME"text/latex", E::Eigen{GiacExpr}) =
-    print(io, "\$\$\\lambda = ", giac_latex(permutedims(E.values)), ", \\quad V = ", giac_latex(E.vectors), "\$\$")
+# Λ = diag(λ) beside V, eigenvectors as columns: the factors of A = VΛV⁻¹
+function Base.show(io::IO, ::MIME"text/latex", E::Eigen{GiacExpr})
+    n = length(E.values)
+    Λ = GiacExpr[i == j ? E.values[i] : zero(GiacExpr) for i in 1:n, j in 1:n]
+    print(io, "\$\$\\Lambda = ", giac_latex(Λ), ", \\quad V = ", giac_latex(E.vectors), "\$\$")
+end
 
 LinearAlgebra.rank(A::AbstractMatrix{GiacExpr}) = to_julia(Commands.invoke_cmd(:rank, GiacMatrix(A)))
 
