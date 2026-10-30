@@ -229,8 +229,11 @@ Declare a symbolic matrix `A` (an ordinary `Matrix{GiacExpr}`) whose entries are
 lowercased matrix name and their indices, the usual `aᵢⱼ` convention: `@giac_matrix A[2, 2]`
 gives `A = [a11 a12; a21 a22]` and binds `a11, a12, a21, a22`. With `symmetric`, entry `(j, i)`
 is entry `(i, j)`, so `@giac_matrix P[2, 2] symmetric` gives `[p11 p12; p12 p22]`. Dimensions
-may be integers or ranges, as for [`giac_array`](@ref). Several declarations can be given at once:
-`@giac_matrix A[2, 2] P[2, 2] symmetric`.
+may be integers or ranges, as for [`giac_array`](@ref).
+
+Several declarations can be given at once. `symmetric` applies to the declaration it follows:
+`@giac_matrix A[2, 2] P[2, 2] symmetric` declares a general `A` and a symmetric `P`;
+`@giac_matrix A[2, 2] symmetric P[2, 2] symmetric` makes both symmetric.
 """
 macro giac_matrix(args...)
     isempty(args) && throw(ArgumentError("@giac_matrix needs a declaration such as A[2, 2]"))
