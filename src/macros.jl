@@ -153,6 +153,104 @@ function _format_indices(base::Symbol, indices::Tuple, needs_sep::Bool)
 end
 
 """
+    giac_identifier(name::AbstractString) -> GiacExpr
+
+The symbolic identifier (or unevaluated call, e.g. `"u(t)"`) `name`, created without evaluating
+it. Evaluating a bare name returns whatever value a Giac context has assigned to it, so a
+"variable" made that way can silently be a stored value instead.
+"""
+giac_identifier(name::AbstractString) =
+    giac_eval("'" * replace(name, GIAC_RESERVED_LETTERS...) * "'")
+
+# Letters Giac's parser reserves (Δ and Σ are set operators), spelled out instead. Giac typesets
+# the spelled-out names as the letters again: `Delta` renders as \Delta.
+const GIAC_RESERVED_LETTERS = ("Δ" => "Delta", "Σ" => "Sigma", "∂" => "partial")
+
+"""
+    giac_array(base::Symbol, dims...; symmetric = false) -> Array{GiacExpr}
+
+A Julia array of symbolic entries named from `base` and their indices, following the same
+naming scheme as [`GiacMatrix(base, dims...)`](@ref) (`a12`, `a_1_10`, `a_m1`). Each dimension
+is an integer `n` (meaning `1:n`) or a range. With `symmetric = true` (two equal ranges) entry
+`(i, j)` and `(j, i)` are the same variable, named with `i ≤ j`.
+
+The result is an ordinary `Array{GiacExpr}`, so Julia's generic linear algebra, slicing and
+broadcasting apply to it.
+
+```julia
+giac_array(:x, 2)                     # [x1, x2]
+giac_array(:a, 2, 2)                  # [a11 a12; a21 a22]
+giac_array(:p, 2, 2; symmetric=true)  # [p11 p12; p12 p22]
+```
+"""
+function giac_array(base::Symbol, dims::Union{Integer, OrdinalRange}...; symmetric::Bool = false)
+    isempty(dims) && throw(ArgumentError("giac_array needs at least one dimension"))
+    ranges = map(_to_range, dims)
+    needs_sep = _needs_separator_for_macro_ranges(ranges)
+    entry(idx) = giac_identifier(string(_format_indices(base, idx, needs_sep)))
+    if symmetric
+        (length(ranges) == 2 && ranges[1] == ranges[2]) ||
+            throw(ArgumentError("a symmetric array needs two equal index ranges, got $(ranges)"))
+        r = ranges[1]
+        return GiacExpr[entry(i ≤ j ? (i, j) : (j, i)) for i in r, j in r]
+    end
+    return GiacExpr[entry(idx) for idx in Iterators.product(ranges...)]
+end
+
+"""
+Code for an array declaration `name = giac_array(base, dims...)`. When every dimension is a
+literal, each distinct entry is also bound to a variable of its own name (`a11`, `a12`, …).
+"""
+function _array_declaration(name::Symbol, base::Symbol, dims; symmetric::Bool = false)
+    decl = :($(esc(name)) = giac_array($(QuoteNode(base)), $(map(esc, dims)...); symmetric = $symmetric))
+    literal_range(d) = _is_range_expr(d) && all(a -> a isa Integer, d.args[2:end])
+    literal = all(d -> d isa Integer || literal_range(d), dims)
+    literal || return decl
+    ranges = _eval_dim_to_range.(dims)
+    needs_sep = _needs_separator_for_macro_ranges(ranges)
+    bindings = Expr[]
+    seen = Set{Symbol}()
+    for (k, idx) in enumerate(Iterators.product(ranges...))
+        symmetric && idx[1] > idx[2] && continue
+        entry = _format_indices(base, idx, needs_sep)
+        entry in seen && continue
+        push!(seen, entry)
+        cart = Tuple(CartesianIndices(Tuple(length.(ranges)))[k])
+        push!(bindings, :($(esc(entry)) = $(esc(name))[$(cart...)]))
+    end
+    return Expr(:block, decl, bindings...)
+end
+
+"""
+    @giac_matrix A[m, n]
+    @giac_matrix P[n, n] symmetric
+
+Declare a symbolic matrix `A` (an ordinary `Matrix{GiacExpr}`) whose entries are named with the
+lowercased matrix name and their indices, the usual `aᵢⱼ` convention: `@giac_matrix A[2, 2]`
+gives `A = [a11 a12; a21 a22]` and binds `a11, a12, a21, a22`. With `symmetric`, entry `(j, i)`
+is entry `(i, j)`, so `@giac_matrix P[2, 2] symmetric` gives `[p11 p12; p12 p22]`. Dimensions
+may be integers or ranges, as for [`giac_array`](@ref). Several declarations can be given at once:
+`@giac_matrix A[2, 2] P[2, 2] symmetric`.
+"""
+macro giac_matrix(args...)
+    isempty(args) && throw(ArgumentError("@giac_matrix needs a declaration such as A[2, 2]"))
+    decls = Expr[]
+    names = Symbol[]
+    i = 1
+    while i <= length(args)
+        spec = args[i]
+        (spec isa Expr && spec.head == :ref && spec.args[1] isa Symbol) ||
+            throw(ArgumentError("@giac_matrix expects declarations like A[2, 2], got $spec"))
+        symmetric = i < length(args) && args[i+1] === :symmetric
+        name = spec.args[1]
+        push!(decls, _array_declaration(name, Symbol(lowercase(string(name))), spec.args[2:end]; symmetric))
+        push!(names, name)
+        i += symmetric ? 2 : 1
+    end
+    return Expr(:block, decls..., Expr(:tuple, map(esc, names)...))
+end
+
+"""
     @giac_var sym...
     @giac_var func(args...)
 
@@ -233,14 +331,22 @@ macro giac_var(args...)
         throw(ArgumentError("@giac_var requires at least one argument"))
     end
 
-    # Process each argument using helper function
-    processed = [_process_giac_var_arg(arg) for arg in args]
-
-    # Generate assignment expressions: varname = giac_eval(giac_string)
-    exprs = [:($(esc(varname)) = giac_eval($giac_string)) for (varname, giac_string) in processed]
+    # `x[1:2]` / `x[3]` declares an array of entries x1, x2, … (see `giac_array`); everything
+    # else is a variable or an unevaluated function call
+    exprs = Expr[]
+    varnames = Symbol[]
+    for arg in args
+        if arg isa Expr && arg.head == :ref && arg.args[1] isa Symbol
+            push!(exprs, _array_declaration(arg.args[1], arg.args[1], arg.args[2:end]))
+            push!(varnames, arg.args[1])
+        else
+            varname, giac_string = _process_giac_var_arg(arg)
+            push!(exprs, :($(esc(varname)) = giac_identifier($giac_string)))
+            push!(varnames, varname)
+        end
+    end
 
     # Return tuple of created variables
-    varnames = [p[1] for p in processed]
     result = Expr(:tuple, [esc(v) for v in varnames]...)
 
     return Expr(:block, exprs..., result)
@@ -401,7 +507,7 @@ macro giac_several_vars(base, dims...)
     for indices in index_combinations
         varname = _format_indices(base, indices, needs_sep)
         push!(varnames, varname)
-        push!(exprs, :($(esc(varname)) = giac_eval($(string(varname)))))
+        push!(exprs, :($(esc(varname)) = giac_identifier($(string(varname)))))
     end
 
     # Return tuple of created variables

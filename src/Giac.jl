@@ -98,6 +98,10 @@ include("Commands.jl")
 # Include Constants submodule (053-symbolic-pi-constant)
 include("Constants.jl")
 
+# Symbolic linear algebra on Julia arrays (needs Commands and the introspection helpers)
+include("array_algebra.jl")
+include("rewrite.jl")
+
 # Types
 export GiacExpr, GiacContext, GiacMatrix, GiacError, HelpResult, GiacInput
 
@@ -110,10 +114,10 @@ export D, Differential, DerivativeExpr, DerivativePoint, DerivativeCondition
 export expand_derivatives
 
 # Core functions
-export giac_eval, to_julia, list_commands, help_count
+export giac_eval, giac_identifier, to_julia, list_commands, help_count
 
 # Macros (011-giac-symbol-macro, 012-giac-several-var)
-export @giac_var, @giac_several_vars
+export @giac_var, @giac_several_vars, @giac_matrix, giac_array, express
 
 # Command invocation (009-commands-submodule)
 # invoke_cmd replaces giac_cmd - available from main module and Giac.Commands
@@ -159,6 +163,11 @@ using .Commands: invoke_cmd
 
 # Re-export hold_cmd and release from Commands submodule (055-held-cmd-display)
 using .Commands: hold_cmd, release
+
+# `solve` is CommonSolve's generic function (Commands extends it), so exporting it cannot clash
+# with other packages that export CommonSolve.solve (the SciML ecosystem).
+using .Commands: solve
+export solve
 
 # Conversion functions (extended by GiacSymbolicsExt, GiacMathJSONExt, GiacSymPyExt, and GiacNemoExt)
 export to_giac, to_symbolics, to_mathjson, to_sympy, to_nemo
