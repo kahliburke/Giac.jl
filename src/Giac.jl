@@ -102,6 +102,7 @@ include("Constants.jl")
 include("array_algebra.jl")
 include("rewrite.jl")
 include("derivation.jl")
+include("rules.jl")
 
 # Types
 export GiacExpr, GiacContext, GiacMatrix, GiacError, HelpResult, GiacInput
