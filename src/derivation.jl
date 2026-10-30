@@ -12,9 +12,17 @@ struct Derivation
 end
 
 function Base.show(io::IO, ::MIME"text/latex", d::Derivation)
-    rows = (isempty(l) ? "&$r" : "$l &= $r" for (l, r) in d.rows)       # a text row has no left side
-    print(io, "\$\$\\begin{aligned}", join(rows, " \\\\[6pt] "), "\\end{aligned}\$\$")
+    print(io, "\$\$\\begin{aligned}")
+    for (k, (l, r)) in enumerate(d.rows)
+        k > 1 && print(io, " \\\\[", _row_gap(d.rows[k - 1], (l, r)), "] ")
+        print(io, isempty(l) ? "&$r" : "$l &= $r")                   # a text row has no left side
+    end
+    print(io, "\\end{aligned}\$\$")
 end
+
+# Space before a row: a note sits close to the step it introduces, with room above it.
+_is_note(row) = isempty(first(row))
+_row_gap(prev, row) = _is_note(row) ? "20pt" : _is_note(prev) ? "2pt" : "14pt"
 
 "A note as a text row: `&`, `%` and `#` are escaped; `\$…\$` inside it is math."
 _text_row(s::AbstractString) = ("", "\\text{" * replace(s, "&" => "\\&", "%" => "\\%", "#" => "\\#") * "}")
