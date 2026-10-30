@@ -64,6 +64,29 @@ using Giac.Rules
         @test sprint(show, pythagoras) == "Rule(sin(~t) ^ 2 + cos(~t) ^ 2 => 1)"
     end
 
+    @testset "sums match up to sign" begin
+        @giac_matrix A[2, 2]
+        @giac_var Δ
+        det_rule = @rule a11 * a22 - a12 * a21 => Δ
+        @test R(a12 * a21 - a11 * a22, det_rule) == "-Delta"
+        @test R(a12 * a21 - a11 * a22 + 5, det_rule) == "-Delta+5"
+        @test R(-sin(a)^2 - cos(a)^2 + b, pythagoras) == "-1+b"
+        @test R(x * y + z * w, factor_out) == "x*y+z*w"                 # still no match either way
+    end
+
+    @testset "typesetting" begin
+        tex = sprint(show, MIME("text/latex"), pythagoras)
+        @test startswith(tex, "\$\$") && occursin("\\to", tex) && !occursin("~", tex)
+        @test occursin("\\sin", tex)
+        rs = @rules begin
+            sin(~t)^2 + cos(~t)^2 => 1
+            ~u * ~v + ~u * ~w => ~u * (~v + ~w)
+        end
+        @test count("\\to", sprint(show, MIME("text/latex"), rs)) == 2
+        cubes = @rule ~v^~n => (string(~n) == "3" ? ~v : nothing)       # Julia logic: shown as code
+        @test occursin("\\texttt{", sprint(show, MIME("text/latex"), cubes))
+    end
+
     @testset "errors" begin
         @test_throws ErrorException rewrite(x, @rule(~v => ~v + 1); maxpasses = 5)
         @test_throws ArgumentError Giac.Rules._rule_expr(:(x + y))

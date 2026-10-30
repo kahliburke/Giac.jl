@@ -156,14 +156,42 @@ end
 
 Base.show(io::IO, r::Rule) = print(io, "Rule(", r.source, ")")
 
+# typeset with slots as plain names: `sin(~t)^2 + cos(~t)^2 => 1` as sin²t + cos²t → 1
+function _rule_latex(r::Rule)
+    plain(ex) = _replace_slots((name, _) -> name, ex)
+    side(ex) = _is_math(plain(ex)) ? Giac.written_latex(plain(ex)) :
+               "\\texttt{" * replace(_code_string(plain(ex)), r"([_{}&%#$])" => s"\\\1") * "}"
+    return side(r.source.args[2]) * " \\;\\to\\; " * side(r.source.args[3])
+end
+
+# Written code Giac can typeset: names, numbers, and calls of named functions on such terms.
+# Anything else (a conditional, a comparison, a string) is Julia logic and shown as code.
+_is_math(::Union{Symbol, Number}) = true
+_is_math(ex::Expr) = ex.head === :call && ex.args[1] isa Symbol &&
+                     ex.args[1] ∉ (:(==), :(!=), :(===), :isequal, :string, :<, :>, :(<=), :(>=)) &&
+                     all(_is_math, ex.args[2:end])
+_is_math(_) = false
+
+# one line of code; a conditional prints as `c ? a : b` (Julia prints its `Expr` as an `if` block)
+_code_string(ex) = ex isa Expr && ex.head === :if && length(ex.args) == 3 ?
+                   join(_code_string.(ex.args), " ? ", " : ") : string(ex)
+
+Base.show(io::IO, ::MIME"text/latex", r::Rule) = print(io, "\$\$", _rule_latex(r), "\$\$")
+Base.show(io::IO, ::MIME"text/latex", rs::AbstractVector{Rule}) =
+    print(io, "\$\$\\begin{aligned}", join(("&" * _rule_latex(r) for r in rs), " \\\\ "), "\\end{aligned}\$\$")
+
 function (r::Rule)(e::GiacExpr)
     p = r.lhs
-    if p isa Term && haskey(_AC, p.head)
-        # at the top of a rule, terms the pattern does not use are kept beside the replacement
-        _head(e) == p.head || return nothing
-        return _match_ac(p.head, p.args, 1, arguments(e), Bindings(), (b, rest) -> _replace(r, b, rest), false)
-    end
-    return _match(p, e, Bindings(), b -> _replace(r, b, GiacExpr[]))
+    p isa Term && haskey(_AC, p.head) || return _match(p, e, Bindings(), b -> _replace(r, b, GiacExpr[]))
+    # at the top of a rule, terms the pattern does not use are kept beside the replacement
+    _head(e) == p.head || return nothing
+    v = _match_ac(p.head, p.args, 1, arguments(e), Bindings(), (b, rest) -> _replace(r, b, rest), false)
+    v === nothing && p.head == "+" || return v
+    # a sum matches up to sign: if the rule rewrites -e to v, e is -v
+    negated = -e
+    _head(negated) == "+" || return nothing
+    v = _match_ac(p.head, p.args, 1, arguments(negated), Bindings(), (b, rest) -> _replace(r, b, rest), false)
+    return v === nothing ? nothing : -v
 end
 
 function _replace(r::Rule, b, rest)
