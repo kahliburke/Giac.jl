@@ -52,3 +52,33 @@ end
     @test_throws ArgumentError build_function(x + y, x; backend = :julia)   # y is not an argument
     @test_throws ArgumentError build_function([x], x; backend = :nope)
 end
+
+@testset "array ~ scalar" begin
+    @giac_var q[1:2]
+    G = [q1 * (1 - q1 - q2), q2 * (2q1 - 1)]
+    eqs = G ~ 0
+    @test eqs isa Vector{GiacExpr} && length(eqs) == 2
+    @test length(solve(G ~ 0, q)) == 3                     # three equilibria
+end
+
+@testset "assuming" begin
+    @giac_var k m
+    @test string(assuming(() -> sqrt(k^2), k > 0)) == "k"
+    @test string(sqrt(k^2)) == "abs(k)"                      # removed afterwards
+    @test string(assuming(k > 0, k < 1) do
+        sqrt(k^2)
+    end) == "k"
+    @test string(assuming(() -> sqrt(k^2) + sqrt(m^2), k > 0, m > 0)) == "k+m"
+    @test_throws ErrorException assuming(k > 0) do
+        error("raised inside")
+    end
+    @test string(sqrt(k^2)) == "abs(k)"                      # removed after an error too
+end
+
+@testset "series remainder typeset as O" begin
+    @giac_var t x
+    T(e) = Giac._entry_latex(e)
+    @test endswith(T(Giac.Commands.series(exp(t), t, 0, 3)), "+O\\left(t^{4}\\right)")
+    @test endswith(T(Giac.Commands.series(exp(t), t, 1, 2)), "+O\\left(\\left(t-1\\right)^{3}\\right)")
+    @test !occursin("order", T(Giac.Commands.series(sin(x), x, 0, 4)))
+end

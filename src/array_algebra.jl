@@ -76,6 +76,8 @@ function Base.:~(A::AbstractArray{GiacExpr}, B::AbstractArray)
 end
 Base.:~(A::AbstractMatrix{GiacExpr}, J::UniformScaling) =
     A ~ _add_scaled_identity(fill(zero(GiacExpr), size(A)), _numeric(J.λ))
+# every entry equal to the same value: `f(x) ~ 0` for equilibria
+Base.:~(A::AbstractArray{GiacExpr}, b::Union{Number, GiacExpr}) = map(a -> a ~ b, A)
 
 """
     solve(eqs::AbstractArray{GiacExpr}, X::AbstractMatrix{GiacExpr}) -> Matrix{GiacExpr}
@@ -147,8 +149,9 @@ const _MARK_TEX = Dict('★' => "^{\\star}", '′' => "'", '″' => "''", '̂' =
     tidy_latex(s) -> String
 
 Clean up Giac's LaTeX for KaTeX/MathJax: Unicode Greek letters become TeX commands (Giac emits
-`\\mathrm{τ}`), `★` and primes in names become superscripts, and a few spellings are normalised
-(`\\frac1{b}` → `\\frac{1}{b}`, `\\mathrm{det}` → `\\det`, `\\mathrm{trace}` → `\\operatorname{tr}`).
+`\\mathrm{τ}`), `★` and primes in names become superscripts, a few spellings are normalised
+(`\\frac1{b}` → `\\frac{1}{b}`, `\\mathrm{det}` → `\\det`, `\\mathrm{trace}` → `\\operatorname{tr}`),
+and a series remainder `t^{4} \\mathrm{order\\_size}(t)` becomes `O(t^{4})`.
 """
 function tidy_latex(s::AbstractString)
     # \mathrm{…} around a name containing Unicode letters or marks: typeset the parts directly
@@ -156,8 +159,12 @@ function tidy_latex(s::AbstractString)
     s = replace(s, r"[α-ωΓ-Ω★′″]" => m -> _tex_char(only(m)))
     s = replace(s, r"\\frac(\d)\{" => s"\\frac{\1}{")
     s = replace(s, "\\mathrm{det}" => "\\det", "\\mathrm{trace}" => "\\operatorname{tr}")
+    # a series' remainder `t^{4} order_size(t)` is O(t⁴)
+    s = replace(s, _ORDER_TERM => s"O\\left(\1\\right)")
     return s
 end
+
+const _ORDER_TERM = r"(\\left\([^()]*\\right\)\^\{\d+\}|[A-Za-z]\w*(?:_\{\d+\})?(?:\^\{\d+\})?) \\mathrm\{order\\_size\}\\left\([^()]*\\right\)"
 
 _tex_char(c::Char) = haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] * " " :
                      haskey(_MARK_TEX, c) ? _MARK_TEX[c] : string(c)
