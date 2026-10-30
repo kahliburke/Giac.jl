@@ -149,6 +149,15 @@ Base.:(==)(a::GiacExpr, b::Number) = a == convert(GiacExpr, b)
 Base.:(==)(a::Number, b::GiacExpr) = convert(GiacExpr, a) == b
 
 """
+    isequal(a::GiacExpr, b::GiacExpr)
+
+Structural equality: the same expression as Giac stores it. This is what `Dict`, `Set` and
+`unique` use, and it agrees with `hash`. `==` is mathematical equality instead (`x + 1 == 1 + x`
+and `sin(x)^2 + cos(x)^2 == 1` are both `true`), decided by simplifying the difference.
+"""
+Base.isequal(a::GiacExpr, b::GiacExpr) = string(a) == string(b)
+
+"""
     hash(expr::GiacExpr, h::UInt)
 
 Hash a GIAC expression for use in dictionaries and sets.

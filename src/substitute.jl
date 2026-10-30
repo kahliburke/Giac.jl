@@ -162,3 +162,31 @@ GiacExpr: 9
 """
 substitute(m::GiacMatrix, pairs::Pair{<:GiacExpr}...)::GiacMatrix =
     substitute(m, isempty(pairs) ? Dict{GiacExpr,Any}() : Dict(pairs))
+
+# ============================================================================
+# Vectors of variables, mixed pairs, and arrays of expressions
+# ============================================================================
+
+# A pair of arrays substitutes entry by entry: `x => [1, 2]` for `x = [x1, x2]`.
+_substitution_pairs(p::Pair{<:AbstractArray, <:AbstractArray}) =
+    size(first(p)) == size(last(p)) ? Pair.(vec(first(p)), vec(last(p))) :
+    throw(DimensionMismatch("cannot substitute values of size $(size(last(p))) for variables of size $(size(first(p)))"))
+_substitution_pairs(p::Pair) = (p,)
+
+"""
+    substitute(expr, x => [1, 2], y => 3, ...)
+
+Pairs may map a vector (or array) of variables to values of the same shape, entry by entry,
+and may be mixed with scalar pairs.
+"""
+function substitute(expr::GiacExpr, pairs::Pair...)::GiacExpr
+    isempty(pairs) && return expr
+    return substitute(expr, Dict{GiacExpr, Any}(p for q in pairs for p in _substitution_pairs(q)))
+end
+
+"""
+    substitute(A::AbstractArray{GiacExpr}, pairs...) -> Array{GiacExpr}
+
+Substitute in every entry of an array of expressions.
+"""
+substitute(A::AbstractArray{GiacExpr}, args...) = map(e -> substitute(e, args...), A)

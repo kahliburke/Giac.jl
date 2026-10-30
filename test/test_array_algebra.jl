@@ -22,6 +22,37 @@
         @test string.(Giac.Commands.simplify.(A * sol - x)) == ["0", "0"]
     end
 
+    @testset "symbolic scalars with arrays and I" begin
+        @giac_var s t
+        @test string.(s * I - A) == ["-a11+s" "-a12"; "-a21" "-a22+s"]
+        @test string.(A - I * s) == ["a11-s" "a12"; "a21" "a22-s"]
+        @test string(det(s * I - GiacExpr[0 1; -2 -3])) == "s^2+3*s+2"
+        @test string.(t * x) == ["t*x1", "t*x2"]
+        @test string.([1 2] * t) == ["t" "2*t"]
+        @test string.(x / t) == ["x1/t", "x2/t"]
+        @test size(A ~ s * I) == (2, 2)
+    end
+
+    @testset "spectra, rank, null space, exp" begin
+        @giac_var t k
+        M = GiacExpr[0 1; -2 -3]
+        @test string.(eigvals(M)) == ["-1", "-2"]
+        E = eigen(M)
+        @test all(iszero, Giac.Commands.simplify.(M * E.vectors - E.vectors * Diagonal(E.values)))
+        @test eigvecs(M) == E.vectors
+        @test length(eigvals(GiacExpr[0 1; -k -3])) == 2
+        @test string.(eigvals(GiacExpr[1 1; 0 1])) == ["1", "1"]
+        @test_throws ArgumentError eigen(GiacExpr[1 1; 0 1])     # not diagonalizable
+        @test rank(M) == 2 && rank(GiacExpr[1 2; 2 4]) == 1
+        N = nullspace(GiacExpr[1 2; 2 4])
+        @test size(N) == (2, 1) && all(iszero, GiacExpr[1 2; 2 4] * N)
+        @test size(nullspace(M)) == (2, 0)
+        Φ = exp(M * t)
+        @test string(Φ[1, 1]) == "2*exp(-t)-exp(-2*t)"
+        @test string.(substitute(Φ, t => 0)) == ["1" "0"; "0" "1"]
+        @test all(iszero, Giac.Commands.simplify.(map(e -> Giac.Commands.diff(e, t), Φ) - M * Φ))   # Φ' = MΦ
+    end
+
     @testset "GiacMatrix ⇄ Matrix" begin
         M = GiacMatrix(A)
         @test M isa GiacMatrix && size(M) == (2, 2)

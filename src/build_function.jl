@@ -167,6 +167,8 @@ runtime benchmark.
 function build_function(expr::GiacExpr, vars::GiacExpr...; backend::Symbol = :giac)
     if backend === :giac
         return _BuildFunction(expr, vars)
+    elseif backend === :julia
+        return _compile(expr, vars)                    # src/codegen.jl
     elseif backend === :symbolics
         # If GiacSymbolicsExt hasn't loaded, no method is defined and we
         # surface a clear error pointing at Symbolics. Otherwise dispatch
@@ -181,6 +183,6 @@ function build_function(expr::GiacExpr, vars::GiacExpr...; backend::Symbol = :gi
             "build_function. Or use the default backend = :giac."))
     else
         throw(ArgumentError(
-            "unknown backend $backend; expected :giac or :symbolics"))
+            "unknown backend $backend; expected :giac, :julia or :symbolics"))
     end
 end

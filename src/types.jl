@@ -326,7 +326,9 @@ GiacExpr: y+2*x
 # See also
 - [`substitute`](@ref): the underlying operation
 """
-(expr::GiacExpr)(first_pair::Pair{<:GiacExpr}, rest::Pair{<:GiacExpr}...)::GiacExpr =
+const _SubstitutionKey = Union{GiacExpr, AbstractArray{GiacExpr}}
+
+(expr::GiacExpr)(first_pair::Pair{<:_SubstitutionKey}, rest::Pair{<:_SubstitutionKey}...)::GiacExpr =
     substitute(expr, first_pair, rest...)
 
 # ============================================================================
