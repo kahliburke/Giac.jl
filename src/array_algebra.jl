@@ -232,13 +232,17 @@ giac_latex(e) = _entry_latex(e)
 function giac_latex(A::AbstractVecOrMat)
     M = A isa AbstractVector ? reshape(A, :, 1) : A
     entries = [_entry_latex(M[i, j]) for i in axes(M, 1), j in axes(M, 2)]
-    # matrix cells are set at text size, which shrinks fractions; set them at display size and
-    # open up the rows to make room
+    # matrix cells are set at text size, which shrinks fractions; set them at display size, and
+    # pad each row with an invisible strut so the rows separate and the brackets, which TeX
+    # draws slightly short of their contents, still enclose them
     tall = any(e -> occursin("\\frac", e), entries)
     tall && (entries = replace.(entries, "\\frac" => "\\dfrac"))
-    rows = [join(entries[i, :], " & ") for i in axes(entries, 1)]
-    return "\\begin{bmatrix}" * join(rows, tall ? " \\\\[1.5em] " : " \\\\ ") * "\\end{bmatrix}"
+    pad = tall ? _ROW_STRUT : ""
+    rows = [pad * join(entries[i, :], " & ") for i in axes(entries, 1)]
+    return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
 end
+
+const _ROW_STRUT = "\\rule[-1.4em]{0pt}{3.3em}"
 
 Base.show(io::IO, ::MIME"text/latex", A::AbstractVecOrMat{GiacExpr}) = print(io, "\$\$", giac_latex(A), "\$\$")
 

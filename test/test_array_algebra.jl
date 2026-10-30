@@ -137,7 +137,8 @@ end
     @test Giac.giac_latex(r) == "\\begin{bmatrix}r_{1} \\\\ r_{2}\\end{bmatrix}"
     @test Giac.giac_latex(r') == "\\begin{bmatrix}r_{1} & r_{2}\\end{bmatrix}"
     @test Giac.giac_latex(r1) == "r_{1}"
-    @test Giac.giac_latex([1 / r1 0; 0 1]) == "\\begin{bmatrix}\\dfrac{1}{r_{1}} & 0 \\\\[1.5em] 0 & 1\\end{bmatrix}"
+    strut = "\\rule[-1.4em]{0pt}{3.3em}"
+    @test Giac.giac_latex([1 / r1 0; 0 1]) == "\\begin{bmatrix}$(strut)\\dfrac{1}{r_{1}} & 0 \\\\ $(strut)0 & 1\\end{bmatrix}"
     @test startswith(sprint(show, MIME("text/latex"), [r1 r2]), "\$\$\\begin{bmatrix}")
     # solve's lists are sets; points are column vectors
     @test Giac.giac_latex(solve([r1 * (1 - r1), r2] ~ 0, r)) ==
