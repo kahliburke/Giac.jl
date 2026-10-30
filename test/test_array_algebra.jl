@@ -40,6 +40,7 @@
         E = eigen(M)
         @test all(iszero, Giac.Commands.simplify.(M * E.vectors - E.vectors * Diagonal(E.values)))
         @test eigvecs(M) == E.vectors
+        @test startswith(sprint(show, MIME("text/latex"), E), "\$\$\\lambda = \\begin{bmatrix}-1 & -2")
         @test length(eigvals(GiacExpr[0 1; -k -3])) == 2
         @test string.(eigvals(GiacExpr[1 1; 0 1])) == ["1", "1"]
         @test_throws ArgumentError eigen(GiacExpr[1 1; 0 1])     # not diagonalizable
@@ -189,6 +190,19 @@ end
     end
     @test d2.rows[1][2] == "s" && d2.rows[2][2] == "2 s"
 
+    # chains show the middle terms as written; strings are text rows
+    d3 = @derivation begin
+        "by definition"
+        diff(W, s) ~ ∇(W, q) ⋅ q ~ Giac.Commands.expand(q' * S * q)
+        raw"since $S$ is symmetric"
+    end
+    @test length(d3.rows) == 3
+    @test d3.rows[1] == ("", "\\text{by definition}")
+    @test count(" = ", d3.rows[2][2]) == 1 && occursin("\\nabla", d3.rows[2][2])
+    @test d3.rows[3][2] == "\\text{since \$S\$ is symmetric}"
+    tex3 = sprint(show, MIME("text/latex"), d3)
+    @test occursin("&\\text{by definition}", tex3) && count("&=", tex3) == 1
+
     # written left sides: transpose, dot, reserved letters
     @test Giac.written_latex(:(x' * P * x)) == "x^{\\mathsf{T}} P x"
     @test occursin("\\Delta", Giac.written_latex(:(Δ + 1)))
@@ -203,6 +217,10 @@ end
     @test T("\\mathrm{det}\\left(P\\right)") == "\\det\\left(P\\right)"
     @test T("\\mathrm{trace}(A)") == "\\operatorname{tr}(A)"
     @test T("x_{1}+\\mathrm{Pstar}") == "x_{1}+\\mathrm{Pstar}"         # ASCII names untouched
+    @test T("A₀") == "A_{0}" && T("\\mathrm{A₁₂}") == "A_{12}"
+    @test T("x̄") == "\\bar{x}" && T("θ̇") == "\\dot{\\theta}" && T("\\mathrm{q̇1}") == "\\dot{q}_{1}"
+    @giac_var A₀ x̄
+    @test Giac.giac_latex(A₀ + x̄) == "A_{0}+\\bar{x}"
     @giac_var τ
     @test Giac.giac_latex(τ^2) == "\\tau^{2}"
 end

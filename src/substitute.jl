@@ -171,13 +171,16 @@ substitute(m::GiacMatrix, pairs::Pair{<:GiacExpr}...)::GiacMatrix =
 _substitution_pairs(p::Pair{<:AbstractArray, <:AbstractArray}) =
     size(first(p)) == size(last(p)) ? Pair.(vec(first(p)), vec(last(p))) :
     throw(DimensionMismatch("cannot substitute values of size $(size(last(p))) for variables of size $(size(first(p)))"))
+# a tuple of values keeps exact constants that an array literal would promote: `x => (π, 0)`
+_substitution_pairs(p::Pair{<:AbstractArray, <:Tuple}) = _substitution_pairs(first(p) => collect(Any, last(p)))
 _substitution_pairs(p::Pair) = (p,)
 
 """
     substitute(expr, x => [1, 2], y => 3, ...)
 
 Pairs may map a vector (or array) of variables to values of the same shape, entry by entry,
-and may be mixed with scalar pairs.
+and may be mixed with scalar pairs. Give the values as a tuple, `x => (π, 0)`, to keep exact
+constants: the array literal `[π, 0]` is a `Vector{Float64}`.
 """
 function substitute(expr::GiacExpr, pairs::Pair...)::GiacExpr
     isempty(pairs) && return expr

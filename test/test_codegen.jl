@@ -21,6 +21,8 @@ end
     A = GiacExpr[0 1; -2 -3]
     @test string.(substitute(A * q, q => [1, 1])) == ["1", "-5"]
     @test_throws DimensionMismatch substitute(q1, q => [1, 2, 3])
+    @test string(substitute(sin(q1) + q2, q => (π, 0))) == "0"        # a tuple keeps π exact
+    @test string(substitute(q1 + q2, q => [π, 0])) != "pi"             # the array literal is Float64
 end
 
 @testset "to_expr" begin

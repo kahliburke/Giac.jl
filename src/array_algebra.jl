@@ -143,7 +143,7 @@ const _GREEK_TEX = Dict(
     'ω' => "\\omega", 'Γ' => "\\Gamma", 'Θ' => "\\Theta", 'Λ' => "\\Lambda", 'Ξ' => "\\Xi",
     'Π' => "\\Pi", 'Υ' => "\\Upsilon", 'Φ' => "\\Phi", 'Ψ' => "\\Psi", 'Ω' => "\\Omega")
 
-const _MARK_TEX = Dict('★' => "^{\\star}", '′' => "'", '″' => "''", '̂' => "", '̃' => "")
+const _MARK_TEX = Dict('★' => "^{\\star}", '′' => "'", '″' => "''")
 
 """
     tidy_latex(s) -> String
@@ -156,6 +156,9 @@ and a series remainder `t^{4} \\mathrm{order\\_size}(t)` becomes `O(t^{4})`.
 function tidy_latex(s::AbstractString)
     # \mathrm{…} around a name containing Unicode letters or marks: typeset the parts directly
     s = replace(s, r"\\mathrm\{([^{}]*[^\x00-\x7F][^{}]*)\}" => m -> _tex_name(chop(m; head = 8, tail = 1)))
+    # the same for names Giac leaves bare: accents (x̄, θ̇) and subscript digits (A₀)
+    s = replace(s, r"\p{L}\p{M}" => m -> _tex_accented(m))
+    s = replace(s, r"[₀-₉]+" => m -> _tex_subscript(m))
     s = replace(s, r"[α-ωΓ-Ω★′″]" => m -> _tex_char(only(m)))
     s = replace(s, r"\\frac(\d)\{" => s"\\frac{\1}{")
     s = replace(s, "\\mathrm{det}" => "\\det", "\\mathrm{trace}" => "\\operatorname{tr}")
@@ -169,16 +172,31 @@ const _ORDER_TERM = r"(\\left\([^()]*\\right\)\^\{\d+\}|[A-Za-z]\w*(?:_\{\d+\})?
 _tex_char(c::Char) = haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] * " " :
                      haskey(_MARK_TEX, c) ? _MARK_TEX[c] : string(c)
 
+const _ACCENT_TEX = Dict('̂' => "\\hat", '̃' => "\\tilde", '̄' => "\\bar", '̅' => "\\bar",
+                         '̇' => "\\dot", '̈' => "\\ddot", '⃗' => "\\vec")
+
+"A letter with a combining accent (`x̄`, `θ̇`) as `\\bar{x}`, `\\dot{\\theta}`."
+function _tex_accented(s::AbstractString)
+    base, mark = first(s), last(s)
+    haskey(_ACCENT_TEX, mark) || return string(base)
+    return _ACCENT_TEX[mark] * "{" * (haskey(_GREEK_TEX, base) ? _GREEK_TEX[base] : string(base)) * "}"
+end
+
+"Subscript digits `₁₂` as `_{12}`."
+_tex_subscript(s::AbstractString) = "_{" * map(c -> Char(Int(c) - Int('₀') + Int('0')), s) * "}"
+
 function _tex_name(name::AbstractString)
-    # Greek letters → commands, marks → superscripts, digit runs → subscripts (as Giac does for
-    # `x1`), multi-letter ASCII runs → upright text
+    # Greek letters → commands, accented letters → accents, marks → superscripts, digit runs
+    # (plain or subscript) → subscripts, as Giac does for `x1`, multi-letter ASCII runs → upright
     parts = String[]
-    for run in eachmatch(r"[A-Za-z]+|[0-9]+|.", name)
+    for run in eachmatch(r"\p{L}\p{M}|[A-Za-z]+(?!\p{M})|[0-9]+|[₀-₉]+|.", name)
         r = run.match
         c = first(r)
-        push!(parts, haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] :
+        push!(parts, length(r) == 2 && !isascii(r) && haskey(_ACCENT_TEX, last(r)) ? _tex_accented(r) :
+                     haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] :
                      haskey(_MARK_TEX, c) ? _MARK_TEX[c] :
                      isdigit(c) ? "_{$r}" :
+                     c in '₀':'₉' ? _tex_subscript(r) :
                      length(r) > 1 ? "\\mathrm{$r}" : r)
     end
     return join(parts)
@@ -252,6 +270,10 @@ function LinearAlgebra.eigen(A::AbstractMatrix{GiacExpr})
 end
 
 LinearAlgebra.eigvecs(A::AbstractMatrix{GiacExpr}) = eigen(A).vectors
+
+# eigenvalues as a row, each above its eigenvector in the columns of V
+Base.show(io::IO, ::MIME"text/latex", E::Eigen{GiacExpr}) =
+    print(io, "\$\$\\lambda = ", giac_latex(permutedims(E.values)), ", \\quad V = ", giac_latex(E.vectors), "\$\$")
 
 LinearAlgebra.rank(A::AbstractMatrix{GiacExpr}) = to_julia(Commands.invoke_cmd(:rank, GiacMatrix(A)))
 
