@@ -91,7 +91,12 @@ symmetric unknown, say) count once. Throws if there is no solution or more than 
 P★ = solve(P*A + A'*P ~ -I, P)
 ```
 """
-function Commands.solve(eqs::AbstractArray{GiacExpr}, X::AbstractMatrix{GiacExpr})
+Commands.solve(eqs::AbstractArray{GiacExpr}, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix(eqs, X)
+# the generated `solve(::GiacInput, …)` and `solve(::GiacMatrix, …)` also accept these arguments
+Commands.solve(eqs::AbstractVector{GiacExpr}, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix(eqs, X)
+Commands.solve(eqs::GiacMatrix, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix(eqs, X)
+
+function _solve_for_matrix(eqs, X)
     unknowns = unique(string, filter(is_identifier, vec(X)))
     # the same equation can come out with its terms in a different order: compare normal forms
     equations = unique(e -> string(Commands.normal(e)), vec(eqs))
@@ -241,7 +246,8 @@ function giac_latex(A::AbstractVecOrMat)
     # draws slightly short of their contents, still enclose them
     tall = any(e -> occursin("\\frac", e), entries)
     tall && (entries = replace.(entries, "\\frac" => "\\dfrac"))
-    pad = tall ? _ROW_STRUT : ""
+    # a square root over powers raises its row too, though less than a display fraction
+    pad = tall ? _ROW_STRUT : any(e -> occursin("\\sqrt", e), entries) ? _ROOT_STRUT : ""
     rows = [pad * join(entries[i, :], " & ") for i in axes(entries, 1)]
     # a column of plain numbers is right-aligned, so digits line up by place value and signs hang
     # to the left; a column with anything symbolic stays centred
@@ -253,6 +259,7 @@ function giac_latex(A::AbstractVecOrMat)
 end
 
 const _ROW_STRUT = "\\rule[-1.4em]{0pt}{3.3em}"
+const _ROOT_STRUT = "\\rule[-0.7em]{0pt}{2.2em}"
 
 Base.show(io::IO, ::MIME"text/latex", A::AbstractVecOrMat{GiacExpr}) = print(io, "\$\$", giac_latex(A), "\$\$")
 
@@ -271,7 +278,6 @@ Solve `A x = b` for symbolic `A` (via Giac's inverse, entries simplified).
 """
 Base.:\(A::AbstractMatrix{GiacExpr}, b::AbstractVecOrMat) = Commands.simplify.(_giac_inv(A) * b)
 Base.:\(A::StridedMatrix{GiacExpr}, b::AbstractVecOrMat) = Commands.simplify.(_giac_inv(A) * b)
-
 # ---------------------------------------------------------------------------------------------
 # Spectra, rank, null space and the matrix exponential, computed by Giac
 # ---------------------------------------------------------------------------------------------
