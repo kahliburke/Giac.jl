@@ -36,6 +36,31 @@ function Base.show(io::IO, ::MIME"text/latex", d::Derivation)
     print(io, "\\end{array}\$\$")
 end
 
+"""
+    show(io, MIME"text/markdown", d::Derivation)
+
+The derivation as markdown: each note a paragraph, each run of steps an `aligned` display block.
+For renderers without KaTeX's layout commands (a PDF through Typst, say); it can break across
+pages where a single block can't.
+"""
+function Base.show(io::IO, ::MIME"text/markdown", d::Derivation)
+    run = Tuple{String, String}[]
+    flush() = isempty(run) ||
+        (print(io, "\$\$\\begin{aligned}", join(("$l &= $r" for (l, r) in run), " \\\\ "), "\\end{aligned}\$\$\n\n"); empty!(run))
+    for row in d.rows
+        if _is_note(row)
+            flush()
+            print(io, _note_text(last(row)), "\n\n")
+        else
+            push!(run, row)
+        end
+    end
+    flush()
+end
+
+# a note row's `\text{…}` back as markdown text (its `$…$` math stays math)
+_note_text(tex) = replace(chop(tex; head = 6, tail = 1), "\\&" => "&", "\\%" => "%", "\\#" => "#")
+
 _is_note(row) = isempty(first(row))                  # a text row has no left side
 _is_note_part(p) = startswith(p, "\\text{")
 

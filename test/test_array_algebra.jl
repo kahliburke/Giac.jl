@@ -232,6 +232,11 @@ end
     # notes are flush-left rows of an outer array; the steps between them stay aligned
     @test startswith(tex3, "\$\$\\begin{array}{l}\\text{by definition}") && count("&=", tex3) == 1
 
+    # markdown form: notes as paragraphs, steps as aligned display blocks
+    md = sprint(show, MIME("text/markdown"), d3)
+    @test startswith(md, "by definition\n\n\$\$\\begin{aligned}")
+    @test occursin("since \$S\$ is symmetric", md) && count("\\begin{aligned}", md) == 1
+
     # written left sides: transpose, dot, reserved letters
     @test Giac.written_latex(:(x' * P * x)) == "x^{\\mathsf{T}} P x"
     @test occursin("\\Delta", Giac.written_latex(:(Δ + 1)))
