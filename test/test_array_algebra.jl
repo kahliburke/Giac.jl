@@ -40,7 +40,7 @@
         E = eigen(M)
         @test all(iszero, Giac.Commands.simplify.(M * E.vectors - E.vectors * Diagonal(E.values)))
         @test eigvecs(M) == E.vectors
-        @test startswith(sprint(show, MIME("text/latex"), E), "\$\$\\lambda = \\begin{bmatrix}-1 & -2")
+        @test startswith(sprint(show, MIME("text/latex"), E), "\$\$\\lambda = \\left[\\hspace{-5pt}\\begin{array}{rr}-1 & -2")
         @test length(eigvals(GiacExpr[0 1; -k -3])) == 2
         @test string.(eigvals(GiacExpr[1 1; 0 1])) == ["1", "1"]
         @test_throws ArgumentError eigen(GiacExpr[1 1; 0 1])     # not diagonalizable
@@ -137,12 +137,20 @@ end
     @test Giac.giac_latex(r) == "\\begin{bmatrix}r_{1} \\\\ r_{2}\\end{bmatrix}"
     @test Giac.giac_latex(r') == "\\begin{bmatrix}r_{1} & r_{2}\\end{bmatrix}"
     @test Giac.giac_latex(r1) == "r_{1}"
+    # a column of plain numbers is right-aligned; a column with anything symbolic stays centred
+    @test Giac.giac_latex(GiacExpr[2, -1]) ==
+          "\\left[\\hspace{-5pt}\\begin{array}{r}2 \\\\ -1\\end{array}\\hspace{-5pt}\\right]"
+    @test occursin("\\begin{array}{r}", Giac.giac_latex(GiacExpr[1 // 2, -3]))
+    @test occursin("\\begin{array}{cr}", Giac.giac_latex([r1 1; -2 -3]))
+    @test startswith(Giac.giac_latex([r1, -1]), "\\begin{bmatrix}")
+    @test Giac._is_list(solve(k^2 ~ 4, k)) && !Giac._is_list(giac_eval("[1,2]"))
     strut = "\\rule[-1.4em]{0pt}{3.3em}"
-    @test Giac.giac_latex([1 / r1 0; 0 1]) == "\\begin{bmatrix}$(strut)\\dfrac{1}{r_{1}} & 0 \\\\ $(strut)0 & 1\\end{bmatrix}"
+    @test Giac.giac_latex([1 / r1 0; 0 1]) ==
+          "\\left[\\hspace{-5pt}\\begin{array}{cr}$(strut)\\dfrac{1}{r_{1}} & 0 \\\\ $(strut)0 & 1\\end{array}\\hspace{-5pt}\\right]"
     @test startswith(sprint(show, MIME("text/latex"), [r1 r2]), "\$\$\\begin{bmatrix}")
     # solve's lists are sets; points are column vectors
     @test Giac.giac_latex(solve([r1 * (1 - r1), r2] ~ 0, r)) ==
-          "\\left\\{\\begin{bmatrix}0 \\\\ 0\\end{bmatrix},\\; \\begin{bmatrix}1 \\\\ 0\\end{bmatrix}\\right\\}"
+          "\\left\\{" * Giac.giac_latex(GiacExpr[0, 0]) * ",\\; " * Giac.giac_latex(GiacExpr[1, 0]) * "\\right\\}"
     @test Giac.giac_latex(solve(k^2 ~ 4, k)) == "\\left\\{-2,\\; 2\\right\\}"
     # a lone expression is tidied too
     @giac_var τ

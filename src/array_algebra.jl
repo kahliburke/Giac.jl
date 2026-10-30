@@ -145,8 +145,12 @@ function _entry_latex(e)
     return tidy_latex(_giac_tex(g))
 end
 
-# Giac's `list[…]` (vector subtype `_LIST__VECT`), as `solve` returns its solutions
-_is_list(g::GiacExpr) = giac_type(g) == VECT && subtype(g) == 23
+# Giac's `list[…]` (vector subtype `_LIST__VECT`), as `solve` returns its solutions. Read from
+# the printed form: display runs this for every entry, and the type queries re-evaluate each one.
+_is_list(g::GiacExpr) = startswith(string(g), "list[")
+
+# A plain number as Giac prints one: an integer, a fraction, or a decimal, possibly negative.
+_is_plain_number(g) = occursin(r"^-?\d+(\.\d+)?(e-?\d+)?(/\d+)?$", string(g))
 
 "A list of solutions as a set; solutions that are points are column vectors."
 function _list_latex(g::GiacExpr)
@@ -239,7 +243,13 @@ function giac_latex(A::AbstractVecOrMat)
     tall && (entries = replace.(entries, "\\frac" => "\\dfrac"))
     pad = tall ? _ROW_STRUT : ""
     rows = [pad * join(entries[i, :], " & ") for i in axes(entries, 1)]
-    return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
+    # a column of plain numbers is right-aligned, so digits line up by place value and signs hang
+    # to the left; a column with anything symbolic stays centred
+    align = join(all(_is_plain_number, M[:, j]) ? "r" : "c" for j in axes(M, 2))
+    all(==('c'), align) && return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
+    # an `array` pads its outer edges by the column separation, which `bmatrix` drops
+    return "\\left[\\hspace{-5pt}\\begin{array}{$align}" * join(rows, " \\\\ ") *
+           "\\end{array}\\hspace{-5pt}\\right]"
 end
 
 const _ROW_STRUT = "\\rule[-1.4em]{0pt}{3.3em}"
