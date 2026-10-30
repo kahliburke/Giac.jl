@@ -13,6 +13,17 @@
         @test_throws DimensionMismatch [a11 a12] + I
     end
 
+    @testset "block matrices" begin
+        @giac_var b1 b2 d
+        Z = zeros(GiacExpr, 2, 2)
+        @test string.([A I; I A']) == ["a11" "a12" "1" "0"; "a21" "a22" "0" "1"; "1" "0" "a11" "a21"; "0" "1" "a12" "a22"]
+        @test string.([A Z; Z A])[1, 3] == "0"
+        @test size([A [b1, b2]; [b1 b2] d]) == (3, 3)
+        @test string(Giac.Commands.factor(det([A Z; Z A]))) == string(Giac.Commands.factor(det(A)^2))
+        # Julia's `true` is the integer 1; Giac's logical constant is giac_eval("true")
+        @test string(convert(GiacExpr, true)) == "1" && string(x1 + true) == "x1+1"
+    end
+
     @testset "det and inv hand off to Giac" begin
         @test string(det(A)) == "a11*a22-a12*a21"
         Ainv = inv(A)

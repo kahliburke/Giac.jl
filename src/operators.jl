@@ -492,6 +492,16 @@ function Base.convert(::Type{GiacExpr}, x::Number)
     end
 end
 
+"""
+    convert(::Type{GiacExpr}, x::Bool) -> GiacExpr
+
+`true` and `false` are the integers 1 and 0, as in Julia arithmetic (`Bool <: Integer`). This is
+what makes `I` (a `UniformScaling{Bool}`) give 1s and 0s in symbolic matrices, including
+concatenations like `[A I; I A']`. Giac's logical constants are `giac_eval("true")` and
+`giac_eval("false")`.
+"""
+Base.convert(::Type{GiacExpr}, x::Bool) = convert(GiacExpr, Int(x))
+
 # =============================================================================
 # Type-Specific Conversions (043-fix-rational-arithmetic)
 # These methods use C++ operators instead of string parsing for better

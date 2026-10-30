@@ -15,11 +15,6 @@ Julia's generic linear algebra.
 Base.Matrix(M::GiacMatrix) = GiacExpr[M[i, j] for i in 1:size(M, 1), j in 1:size(M, 2)]
 Base.Matrix{GiacExpr}(M::GiacMatrix) = Matrix(M)
 
-# `I` is `UniformScaling{Bool}`; a `Bool` converts to a Giac boolean, not to 0/1, so the scale
-# is made numeric before it is added.
-_numeric(λ::Bool) = Int(λ)
-_numeric(λ) = λ
-
 function _add_scaled_identity(A::AbstractMatrix{GiacExpr}, λ)
     n = LinearAlgebra.checksquare(A)
     B = Matrix{GiacExpr}(A)
@@ -29,10 +24,10 @@ function _add_scaled_identity(A::AbstractMatrix{GiacExpr}, λ)
     return B
 end
 
-Base.:+(A::AbstractMatrix{GiacExpr}, J::UniformScaling) = _add_scaled_identity(A, _numeric(J.λ))
+Base.:+(A::AbstractMatrix{GiacExpr}, J::UniformScaling) = _add_scaled_identity(A, J.λ)
 Base.:+(J::UniformScaling, A::AbstractMatrix{GiacExpr}) = A + J
-Base.:-(A::AbstractMatrix{GiacExpr}, J::UniformScaling) = _add_scaled_identity(A, -_numeric(J.λ))
-Base.:-(J::UniformScaling, A::AbstractMatrix{GiacExpr}) = _add_scaled_identity(-A, _numeric(J.λ))
+Base.:-(A::AbstractMatrix{GiacExpr}, J::UniformScaling) = _add_scaled_identity(A, -J.λ)
+Base.:-(J::UniformScaling, A::AbstractMatrix{GiacExpr}) = _add_scaled_identity(-A, J.λ)
 
 # Scalars times arrays. `GiacExpr` is not a `Number`, so Julia's own methods don't apply.
 Base.:*(x::GiacExpr, A::AbstractArray) = map(a -> x * a, A)
@@ -49,8 +44,8 @@ struct SymbolicScaling
     λ::GiacExpr
 end
 
-Base.:*(x::GiacExpr, J::UniformScaling) = SymbolicScaling(x * _numeric(J.λ))
-Base.:*(J::UniformScaling, x::GiacExpr) = SymbolicScaling(_numeric(J.λ) * x)
+Base.:*(x::GiacExpr, J::UniformScaling) = SymbolicScaling(x * J.λ)
+Base.:*(J::UniformScaling, x::GiacExpr) = SymbolicScaling(J.λ * x)
 Base.:-(S::SymbolicScaling) = SymbolicScaling(-S.λ)
 Base.:+(A::AbstractMatrix, S::SymbolicScaling) = _add_scaled_identity(Matrix{GiacExpr}(A), S.λ)
 Base.:+(S::SymbolicScaling, A::AbstractMatrix) = A + S
@@ -75,7 +70,7 @@ function Base.:~(A::AbstractArray{GiacExpr}, B::AbstractArray)
     return map(~, A, B)
 end
 Base.:~(A::AbstractMatrix{GiacExpr}, J::UniformScaling) =
-    A ~ _add_scaled_identity(fill(zero(GiacExpr), size(A)), _numeric(J.λ))
+    A ~ _add_scaled_identity(fill(zero(GiacExpr), size(A)), J.λ)
 # every entry equal to the same value: `f(x) ~ 0` for equilibria
 Base.:~(A::AbstractArray{GiacExpr}, b::Union{Number, GiacExpr}) = map(a -> a ~ b, A)
 
