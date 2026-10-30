@@ -138,6 +138,13 @@ end
     @test Giac.giac_latex(r') == "\\begin{bmatrix}r_{1} & r_{2}\\end{bmatrix}"
     @test Giac.giac_latex(r1) == "r_{1}"
     @test startswith(sprint(show, MIME("text/latex"), [r1 r2]), "\$\$\\begin{bmatrix}")
+    # solve's lists are sets; points are column vectors
+    @test Giac.giac_latex(solve([r1 * (1 - r1), r2] ~ 0, r)) ==
+          "\\left\\{\\begin{bmatrix}0 \\\\ 0\\end{bmatrix},\\; \\begin{bmatrix}1 \\\\ 0\\end{bmatrix}\\right\\}"
+    @test Giac.giac_latex(solve(k^2 ~ 4, k)) == "\\left\\{-2,\\; 2\\right\\}"
+    # a lone expression is tidied too
+    @giac_var τ
+    @test sprint(show, MIME("text/latex"), τ^2) == "\$\$\\tau^{2}\$\$"
 end
 
 @testset "express" begin

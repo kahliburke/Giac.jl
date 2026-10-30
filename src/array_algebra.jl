@@ -132,8 +132,28 @@ hessian(f, x::AbstractVector) = jacobian(∇(f, x), x)
 # Typesetting
 # ---------------------------------------------------------------------------------------------
 
+"Giac's own LaTeX for an expression, without delimiters (its plain form if Giac has none)."
+function _giac_tex(e::GiacExpr)
+    s = string(Commands.invoke_cmd(:latex, e))         # a quoted string
+    return length(s) > 2 ? strip(chop(s; head = 1, tail = 1)) : string(e)
+end
+
 "LaTeX for one expression, as Giac typesets it (without display delimiters), tidied."
-_entry_latex(e) = tidy_latex(strip(sprint(show, MIME("text/latex"), convert(GiacExpr, e)), ['$', '\n', ' ']))
+function _entry_latex(e)
+    g = convert(GiacExpr, e)
+    _is_list(g) && return _list_latex(g)
+    return tidy_latex(_giac_tex(g))
+end
+
+# Giac's `list[…]` (vector subtype `_LIST__VECT`), as `solve` returns its solutions
+_is_list(g::GiacExpr) = giac_type(g) == VECT && subtype(g) == 23
+
+"A list of solutions as a set; solutions that are points are column vectors."
+function _list_latex(g::GiacExpr)
+    items = collect(GiacExpr, g)
+    show_item(x) = giac_type(x) == VECT ? giac_latex(collect(GiacExpr, x)) : _entry_latex(x)
+    return "\\left\\{" * join(map(show_item, items), ",\\; ") * "\\right\\}"
+end
 
 const _GREEK_TEX = Dict(
     'α' => "\\alpha", 'β' => "\\beta", 'γ' => "\\gamma", 'δ' => "\\delta", 'ε' => "\\varepsilon",

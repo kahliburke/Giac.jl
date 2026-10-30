@@ -355,14 +355,7 @@ f = giac_eval("2/(1-x)")  # Renders as LaTeX fraction in Pluto
 ```
 """
 function Base.show(io::IO, ::MIME"text/latex", expr::GiacExpr)
-    latex_result = invoke_cmd(:latex, expr)
-    latex_str = string(latex_result)
-    if length(latex_str) > 2
-        print(io, "\$\$", latex_str[2:end-1], "\$\$")  # Remove surrounding quotes from GIAC's LaTeX output
-    else
-        # Fallback to default display if LaTeX conversion fails
-        print(io, string(expr))
-    end
+    print(io, "\$\$", giac_latex(expr), "\$\$")      # src/array_algebra.jl
 end
 
 """
