@@ -28,6 +28,13 @@ _to_giac_syntax(x) = x
 _to_giac_syntax(s::Symbol) = Symbol(replace(string(s), GIAC_RESERVED_LETTERS...))
 function _to_giac_syntax(ex::Expr)
     ex.head === Symbol("'") && return Expr(:call, :transpose, _to_giac_syntax(ex.args[1]))
+    # `C.f(x)` is written `f(x)`; a broadcast `f.(x)` is written `f(x)`
+    if ex.head === :call && ex.args[1] isa Expr && ex.args[1].head === :. && ex.args[1].args[2] isa QuoteNode
+        return _to_giac_syntax(Expr(:call, ex.args[1].args[2].value, ex.args[2:end]...))
+    end
+    if ex.head === :. && length(ex.args) == 2 && ex.args[2] isa Expr && ex.args[2].head === :tuple
+        return _to_giac_syntax(Expr(:call, ex.args[1], ex.args[2].args...))
+    end
     args = map(_to_giac_syntax, ex.args)
     if ex.head === :call && args[1] isa Symbol
         args[1] = get(_GIAC_NAMES, ex.args[1], args[1])

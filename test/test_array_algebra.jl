@@ -206,6 +206,9 @@ end
     # written left sides: transpose, dot, reserved letters
     @test Giac.written_latex(:(x' * P * x)) == "x^{\\mathsf{T}} P x"
     @test occursin("\\Delta", Giac.written_latex(:(Δ + 1)))
+    # module-qualified and broadcast calls are written as plain calls
+    @test Giac.written_latex(:(Giac.Commands.factor(x))) == Giac.written_latex(:(factor(x)))
+    @test Giac.written_latex(:(C.expand.(x))) == Giac.written_latex(:(expand(x)))
 end
 
 @testset "tidy_latex" begin
