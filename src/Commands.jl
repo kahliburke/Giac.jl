@@ -647,6 +647,45 @@ function _generate_command_functions()
 end
 
 # ============================================================================
+# desolve: an unknown declared as `y(t)` is passed by name
+# ============================================================================
+
+"""
+    desolve(eqs, t, y)
+    desolve(eqs, y)
+
+Solve the differential equation(s) `eqs` for the function `y` of `t` (GIAC's `desolve`). `eqs`
+may be one equation or a vector holding the equation and initial conditions:
+
+```julia
+@giac_var t y(t)
+desolve([diff(y, t, 2) + 3diff(y, t) + 2y ~ 0, y(0) ~ 1, Differential(t)(y)(0) ~ 0], t, y)
+# 2*exp(-t)-exp(-2*t)
+```
+
+`y` may be the function as declared, `y(t)`: GIAC needs its name, `y`, to apply initial
+conditions, and gets it. Declared that way, `y` also tells `desolve(eqs, y)` the variable `t`
+(GIAC's own default is `x`).
+"""
+desolve(args...) = invoke_cmd(:desolve, first(args), map(_unknown_by_name, Base.tail(args))...)
+
+function desolve(eqs, y::GiacExpr)
+    parsed = _function_call(y)
+    (parsed === nothing || length(parsed[2]) != 1) && return invoke_cmd(:desolve, eqs, y)
+    name, (t,) = parsed
+    return invoke_cmd(:desolve, eqs, String(t), String(name))
+end
+
+"`(name, args)` of a call of a declared function such as `y(t)`, else `nothing`."
+_function_call(x::GiacExpr) = parentmodule(@__MODULE__)._parse_function_args(string(x))
+
+_unknown_by_name(x) = x
+function _unknown_by_name(x::GiacExpr)
+    parsed = _function_call(x)
+    return parsed === nothing ? x : String(parsed[1])
+end
+
+# ============================================================================
 # Module Initialization
 # ============================================================================
 

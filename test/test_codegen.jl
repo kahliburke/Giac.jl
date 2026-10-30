@@ -84,3 +84,13 @@ end
     @test endswith(T(Giac.Commands.series(exp(t), t, 1, 2)), "+O\\left(\\left(t-1\\right)^{3}\\right)")
     @test !occursin("order", T(Giac.Commands.series(sin(x), x, 0, 4)))
 end
+
+@testset "desolve with a function declared as y(t)" begin
+    @giac_var t
+    @giac_var y(t)
+    eq = diff(y, t, 2) + 3diff(y, t) + 2y ~ 0
+    ics = [y(0) ~ 1, Differential(t)(y)(0) ~ 0]
+    @test string(Giac.Commands.desolve(eq, t, y)) == "c_0*exp(-t)+c_1*exp(-2*t)"
+    @test string(Giac.Commands.desolve([eq; ics], t, y)) == "2*exp(-t)-exp(-2*t)"
+    @test string(Giac.Commands.desolve([eq; ics], y)) == "2*exp(-t)-exp(-2*t)"     # t from y(t)
+end
