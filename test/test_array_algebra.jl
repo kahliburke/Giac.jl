@@ -38,14 +38,14 @@ end
 
 @testset "symbolic array declarations" begin
     @testset "giac_array" begin
-        @test string.(giac_array(:v, 3)) == ["v1", "v2", "v3"]
-        @test giac_array(:v, 3) isa Vector{GiacExpr}
-        @test string.(giac_array(:m, 2, 2)) == ["m11" "m12"; "m21" "m22"]
-        @test string.(giac_array(:s, 2, 2; symmetric = true)) == ["s11" "s12"; "s12" "s22"]
-        @test string.(giac_array(:w, 0:1)) == ["w0", "w1"]
-        @test string(giac_array(:big, 10)[10]) == "big_10"
-        @test_throws ArgumentError giac_array(:s, 2, 3; symmetric = true)
-        @test_throws ArgumentError giac_array(:s)
+        @test string.(Giac.giac_array(:v, 3)) == ["v1", "v2", "v3"]
+        @test Giac.giac_array(:v, 3) isa Vector{GiacExpr}
+        @test string.(Giac.giac_array(:m, 2, 2)) == ["m11" "m12"; "m21" "m22"]
+        @test string.(Giac.giac_array(:s, 2, 2; symmetric = true)) == ["s11" "s12"; "s12" "s22"]
+        @test string.(Giac.giac_array(:w, 0:1)) == ["w0", "w1"]
+        @test string(Giac.giac_array(:big, 10)[10]) == "big_10"
+        @test_throws ArgumentError Giac.giac_array(:s, 2, 3; symmetric = true)
+        @test_throws ArgumentError Giac.giac_array(:s)
     end
 
     @testset "@giac_var x[1:n]" begin
@@ -90,6 +90,24 @@ end
     @test_throws ArgumentError solve(P ~ P + I, P)             # reduces to 0 = 1
 end
 
+@testset "vector calculus" begin
+    @giac_var w[1:2] k
+    f = w1^2 * w2 + k * w2
+    @test string.(∇(f, w)) == ["2*w1*w2", "w1^2+k"]
+    @test string.(hessian(f, w)) == ["2*w2" "2*w1"; "2*w1" "0"]
+    @test string.(jacobian([w1 * w2, w1 + w2], w)) == ["w2" "w1"; "1" "1"]
+    @test size(jacobian([w1, w2, k * w1], w)) == (3, 2)
+end
+
+@testset "array typesetting" begin
+    @giac_var r[1:2] k
+    @test Giac.giac_latex([r1 r2; k 0]) == "\\begin{bmatrix}r_{1} & r_{2} \\\\ k & 0\\end{bmatrix}"
+    @test Giac.giac_latex(r) == "\\begin{bmatrix}r_{1} \\\\ r_{2}\\end{bmatrix}"
+    @test Giac.giac_latex(r') == "\\begin{bmatrix}r_{1} & r_{2}\\end{bmatrix}"
+    @test Giac.giac_latex(r1) == "r_{1}"
+    @test startswith(sprint(show, MIME("text/latex"), [r1 r2]), "\$\$\\begin{bmatrix}")
+end
+
 @testset "express" begin
     @giac_matrix A[2, 2]
     @giac_var τ Δ
@@ -112,6 +130,48 @@ end
     @test string(assigned_elsewhere) == "assigned_elsewhere"     # a variable, not the stored value
     @giac_several_vars assigned_elsewhere 2
     @test string(assigned_elsewhere1) == "assigned_elsewhere1"
-    @test string(giac_identifier("u(t)")) == "u(t)"
+    @test string(Giac.giac_identifier("u(t)")) == "u(t)"
     giac_eval("purge(assigned_elsewhere)")
+end
+
+@testset "@derivation" begin
+    @giac_var q[1:2] s
+    @giac_matrix S[2, 2] symmetric
+    d = @derivation Giac.Commands.expand begin
+        W = q' * S * q / 2
+        ∇(W, q)
+        diff(W, s) ~ s * W
+    end
+    @test d isa Giac.Derivation && length(d.rows) == 3
+    @test string(W) == string(q' * S * q / 2)              # bound, unsimplified
+    @test d.rows[1][1] == "W"
+    @test d.rows[2][1] == "\\nabla _{q}W"
+    @test occursin("\\mathrm{d}", d.rows[3][1])
+    @test d.rows[2][2] == Giac.giac_latex(Giac.Commands.expand.(S * q))   # ∇(qᵀSq/2) = Sq
+    tex = sprint(show, MIME("text/latex"), d)
+    @test startswith(tex, "\$\$\\begin{aligned}") && count("&=", tex) == 3
+
+    # rows record the value at the time of each step
+    d2 = @derivation begin
+        z = s
+        z = 2s
+    end
+    @test d2.rows[1][2] == "s" && d2.rows[2][2] == "2 s"
+
+    # written left sides: transpose, dot, reserved letters
+    @test Giac.written_latex(:(x' * P * x)) == "x^{\\mathsf{T}} P x"
+    @test occursin("\\Delta", Giac.written_latex(:(Δ + 1)))
+end
+
+@testset "tidy_latex" begin
+    T = Giac.tidy_latex
+    @test T("\\mathrm{P★}") == "P^{\\star}"
+    @test T("\\Delta \\mathrm{τ}^{2}") == "\\Delta \\tau^{2}"
+    @test T("\\mathrm{θ1}") == "\\theta_{1}"
+    @test T("\\frac1{b}") == "\\frac{1}{b}"
+    @test T("\\mathrm{det}\\left(P\\right)") == "\\det\\left(P\\right)"
+    @test T("\\mathrm{trace}(A)") == "\\operatorname{tr}(A)"
+    @test T("x_{1}+\\mathrm{Pstar}") == "x_{1}+\\mathrm{Pstar}"         # ASCII names untouched
+    @giac_var τ
+    @test Giac.giac_latex(τ^2) == "\\tau^{2}"
 end

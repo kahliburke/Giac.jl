@@ -101,6 +101,7 @@ include("Constants.jl")
 # Symbolic linear algebra on Julia arrays (needs Commands and the introspection helpers)
 include("array_algebra.jl")
 include("rewrite.jl")
+include("derivation.jl")
 
 # Types
 export GiacExpr, GiacContext, GiacMatrix, GiacError, HelpResult, GiacInput
@@ -114,10 +115,12 @@ export D, Differential, DerivativeExpr, DerivativePoint, DerivativeCondition
 export expand_derivatives
 
 # Core functions
-export giac_eval, giac_identifier, to_julia, list_commands, help_count
+export giac_eval, to_julia, list_commands, help_count
 
 # Macros (011-giac-symbol-macro, 012-giac-several-var)
-export @giac_var, @giac_several_vars, @giac_matrix, giac_array, express
+# array declarations, symbolic linear algebra and derivations (giac_identifier, giac_array,
+# giac_latex, written_latex, tidy_latex and Derivation are unexported: Giac.giac_array, …)
+export @giac_var, @giac_several_vars, @giac_matrix, express, ∇, jacobian, hessian, @derivation
 
 # Command invocation (009-commands-submodule)
 # invoke_cmd replaces giac_cmd - available from main module and Giac.Commands

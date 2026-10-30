@@ -104,8 +104,52 @@ hessian(f, x::AbstractVector) = jacobian(∇(f, x), x)
 # Typesetting
 # ---------------------------------------------------------------------------------------------
 
-"LaTeX for one expression, as Giac typesets it (without display delimiters)."
-_entry_latex(e) = strip(sprint(show, MIME("text/latex"), convert(GiacExpr, e)), ['$', '\n', ' '])
+"LaTeX for one expression, as Giac typesets it (without display delimiters), tidied."
+_entry_latex(e) = tidy_latex(strip(sprint(show, MIME("text/latex"), convert(GiacExpr, e)), ['$', '\n', ' ']))
+
+const _GREEK_TEX = Dict(
+    'α' => "\\alpha", 'β' => "\\beta", 'γ' => "\\gamma", 'δ' => "\\delta", 'ε' => "\\varepsilon",
+    'ζ' => "\\zeta", 'η' => "\\eta", 'θ' => "\\theta", 'ι' => "\\iota", 'κ' => "\\kappa",
+    'λ' => "\\lambda", 'μ' => "\\mu", 'ν' => "\\nu", 'ξ' => "\\xi", 'ρ' => "\\rho", 'σ' => "\\sigma",
+    'τ' => "\\tau", 'υ' => "\\upsilon", 'φ' => "\\varphi", 'χ' => "\\chi", 'ψ' => "\\psi",
+    'ω' => "\\omega", 'Γ' => "\\Gamma", 'Θ' => "\\Theta", 'Λ' => "\\Lambda", 'Ξ' => "\\Xi",
+    'Π' => "\\Pi", 'Υ' => "\\Upsilon", 'Φ' => "\\Phi", 'Ψ' => "\\Psi", 'Ω' => "\\Omega")
+
+const _MARK_TEX = Dict('★' => "^{\\star}", '′' => "'", '″' => "''", '̂' => "", '̃' => "")
+
+"""
+    tidy_latex(s) -> String
+
+Clean up Giac's LaTeX for KaTeX/MathJax: Unicode Greek letters become TeX commands (Giac emits
+`\\mathrm{τ}`), `★` and primes in names become superscripts, and a few spellings are normalised
+(`\\frac1{b}` → `\\frac{1}{b}`, `\\mathrm{det}` → `\\det`, `\\mathrm{trace}` → `\\operatorname{tr}`).
+"""
+function tidy_latex(s::AbstractString)
+    # \mathrm{…} around a name containing Unicode letters or marks: typeset the parts directly
+    s = replace(s, r"\\mathrm\{([^{}]*[^\x00-\x7F][^{}]*)\}" => m -> _tex_name(chop(m; head = 8, tail = 1)))
+    s = replace(s, r"[α-ωΓ-Ω★′″]" => m -> _tex_char(only(m)))
+    s = replace(s, r"\\frac(\d)\{" => s"\\frac{\1}{")
+    s = replace(s, "\\mathrm{det}" => "\\det", "\\mathrm{trace}" => "\\operatorname{tr}")
+    return s
+end
+
+_tex_char(c::Char) = haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] * " " :
+                     haskey(_MARK_TEX, c) ? _MARK_TEX[c] : string(c)
+
+function _tex_name(name::AbstractString)
+    # Greek letters → commands, marks → superscripts, digit runs → subscripts (as Giac does for
+    # `x1`), multi-letter ASCII runs → upright text
+    parts = String[]
+    for run in eachmatch(r"[A-Za-z]+|[0-9]+|.", name)
+        r = run.match
+        c = first(r)
+        push!(parts, haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] :
+                     haskey(_MARK_TEX, c) ? _MARK_TEX[c] :
+                     isdigit(c) ? "_{$r}" :
+                     length(r) > 1 ? "\\mathrm{$r}" : r)
+    end
+    return join(parts)
+end
 
 """
     giac_latex(x) -> String
