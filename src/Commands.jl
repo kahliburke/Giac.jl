@@ -502,6 +502,13 @@ for each command in `exportable_commands()`. The functions are exported from
 - Generates ~2000 functions in typically < 1 second
 - No impact on command execution performance
 """
+# `GiacMatrix` is an `AbstractMatrix`: functions that Julia's array code relies on (or that
+# return Julia values for any symbolic matrix, like `rank`) keep their generic meaning for it
+# rather than becoming GIAC commands.
+const _ARRAY_PROTOCOL = Set([:axes, :copy, :cat, :stack, :reverse, :repeat, :sort, :sortperm,
+                             :cumsum, :extrema, :zeros, :rank, :nullspace, :dot, :⋅, :cross, :×])
+_giac_matrix_method(cmd::Symbol) = cmd ∉ _ARRAY_PROTOCOL
+
 function _generate_command_functions()
     # Skip generation during precompilation of extensions to avoid
     # "Evaluation into closed module" errors. The functions will be
@@ -531,14 +538,12 @@ function _generate_command_functions()
             # Keep GiacExpr constraint to avoid conflicts with Base methods
             # e.g., Base.sin(Float64) should not be overridden by our method
             docstring = _build_docstring(cmd; is_base_extension=true)
-            @eval begin
-                @doc $docstring function Base.$(cmd)(first_arg::GiacExpr, rest...)::GiacExpr
-                    invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
-                end
-                # GiacMatrix support (058-commands-matrix-support)
-                function Base.$(cmd)(first_arg::GiacMatrix, rest...)::GiacExpr
-                    invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
-                end
+            @eval @doc $docstring function Base.$(cmd)(first_arg::GiacExpr, rest...)::GiacExpr
+                invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
+            end
+            # GiacMatrix support (058-commands-matrix-support)
+            _giac_matrix_method(cmd) && @eval function Base.$(cmd)(first_arg::GiacMatrix, rest...)::GiacExpr
+                invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
             end
             # Note: Don't export Base-extended functions - they're already accessible
             # via Base and exporting undefined local symbols causes Aqua warnings
@@ -596,27 +601,23 @@ function _generate_command_functions()
             if func isa Function
                 # Generate docstring for Base extension (026-julia-help-docstrings)
                 docstring = _build_docstring(cmd; is_base_extension=true)
-                @eval begin
-                    @doc $docstring function Base.$(cmd)(first_arg::GiacExpr, rest...)::GiacExpr
-                        invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
-                    end
-                    # GiacMatrix support (058-commands-matrix-support)
-                    function Base.$(cmd)(first_arg::GiacMatrix, rest...)::GiacExpr
-                        invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
-                    end
+                @eval @doc $docstring function Base.$(cmd)(first_arg::GiacExpr, rest...)::GiacExpr
+                    invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
+                end
+                # GiacMatrix support (058-commands-matrix-support)
+                _giac_matrix_method(cmd) && @eval function Base.$(cmd)(first_arg::GiacMatrix, rest...)::GiacExpr
+                    invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
                 end
                 conflict_count += 1
             end
         elseif isdefined(LinearAlgebra, cmd) && getfield(LinearAlgebra, cmd) isa Function
             # LinearAlgebra function extension (058-commands-matrix-support)
             docstring = _build_docstring(cmd; is_base_extension=true)
-            @eval begin
-                @doc $docstring function LinearAlgebra.$(cmd)(first_arg::GiacExpr, rest...)::GiacExpr
-                    invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
-                end
-                function LinearAlgebra.$(cmd)(first_arg::GiacMatrix, rest...)::GiacExpr
-                    invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
-                end
+            @eval @doc $docstring function LinearAlgebra.$(cmd)(first_arg::GiacExpr, rest...)::GiacExpr
+                invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
+            end
+            _giac_matrix_method(cmd) && @eval function LinearAlgebra.$(cmd)(first_arg::GiacMatrix, rest...)::GiacExpr
+                invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
             end
             conflict_count += 1
         else
