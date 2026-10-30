@@ -237,7 +237,7 @@ function giac_latex(A::AbstractVecOrMat)
     tall = any(e -> occursin("\\frac", e), entries)
     tall && (entries = replace.(entries, "\\frac" => "\\dfrac"))
     rows = [join(entries[i, :], " & ") for i in axes(entries, 1)]
-    return "\\begin{bmatrix}" * join(rows, tall ? " \\\\[8pt] " : " \\\\ ") * "\\end{bmatrix}"
+    return "\\begin{bmatrix}" * join(rows, tall ? " \\\\[0.9em] " : " \\\\ ") * "\\end{bmatrix}"
 end
 
 Base.show(io::IO, ::MIME"text/latex", A::AbstractVecOrMat{GiacExpr}) = print(io, "\$\$", giac_latex(A), "\$\$")

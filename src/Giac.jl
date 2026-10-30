@@ -372,27 +372,7 @@ M = GiacMatrix([1 2; 3 4])  # Renders as LaTeX matrix in Pluto
 ```
 """
 function Base.show(io::IO, ::MIME"text/latex", m::GiacMatrix)
-    # Build matrix string in GIAC format: [[a,b],[c,d]]
-    rows_str = String[]
-    for i in 1:m.rows
-        row_elements = String[]
-        for j in 1:m.cols
-            push!(row_elements, string(m[i, j]))
-        end
-        push!(rows_str, "[" * join(row_elements, ",") * "]")
-    end
-    matrix_str = "[" * join(rows_str, ",") * "]"
-
-    # Call latex command on the matrix string
-    matrix_expr = giac_eval(matrix_str)
-    latex_result = invoke_cmd(:latex, matrix_expr)
-    latex_str = string(latex_result)
-    if length(latex_str) > 2
-        print(io, "\$\$", latex_str[2:end-1], "\$\$")  # Remove surrounding quotes from GIAC's LaTeX output
-    else
-        # Fallback to default display if LaTeX conversion fails
-        print(io, string(m))
-    end
+    print(io, "\$\$", giac_latex(m), "\$\$")      # the same as any matrix of GiacExpr
 end
 
 end # module Giac
