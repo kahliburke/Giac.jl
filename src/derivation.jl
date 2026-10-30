@@ -17,7 +17,7 @@ function Base.show(io::IO, ::MIME"text/latex", d::Derivation)
     # indented. Every block's left column is as wide as the widest left side, so the `=` signs
     # line up across blocks.
     widest = "\\hphantom{\\begin{matrix}" * join((l for (l, _) in d.rows if !isempty(l)), " \\\\ ") * "\\end{matrix}}"
-    parts, gaps, run = String[], String[], Tuple{String, String}[]
+    parts, run = String[], Tuple{String, String}[]
     flush() = isempty(run) || (push!(parts, "\\quad " * _aligned(run, widest)); empty!(run))
     for row in d.rows
         if _is_note(row)
@@ -30,7 +30,7 @@ function Base.show(io::IO, ::MIME"text/latex", d::Derivation)
     flush()
     print(io, "\$\$\\begin{array}{l}")
     for (k, p) in enumerate(parts)
-        k > 1 && print(io, _is_note_part(p) ? " \\\\[20pt] " : " \\\\[4pt] ")
+        k > 1 && print(io, _is_note_part(p) ? _NOTE_SPACER : _is_note_part(parts[k - 1]) ? " \\\\[8pt] " : " \\\\ ")
         print(io, p)
     end
     print(io, "\\end{array}\$\$")
@@ -39,10 +39,16 @@ end
 _is_note(row) = isempty(first(row))                  # a text row has no left side
 _is_note_part(p) = startswith(p, "\\text{")
 
+# Vertical space comes from empty rows. KaTeX treats `\\[gap]` as a minimum depth for the row
+# above, not as added space, so after a tall matrix it adds nothing; an empty row always adds
+# its height. (Below a note, a one-line text row, `\\[8pt]` does add its full amount.)
+const _STEP_SPACER = " \\\\ \\\\ "
+const _NOTE_SPACER = " \\\\ \\rule{0pt}{1.4em} \\\\ "
+
 "An aligned block of steps; `pad` widens every left side to a common width (see `show`)."
 function _aligned(rows, pad)
     lines = (isempty(pad) ? "$l &= $r" : "$pad\\mathllap{$l} &= $r" for (l, r) in rows)
-    return "\\begin{aligned}" * join(lines, " \\\\[14pt] ") * "\\end{aligned}"
+    return "\\begin{aligned}" * join(lines, _STEP_SPACER) * "\\end{aligned}"
 end
 
 "A note as a text row: `&`, `%` and `#` are escaped; `\$…\$` inside it is math."
