@@ -197,7 +197,8 @@ arrays of expressions. `lhs ~ rhs` is for left sides that are not assignable, su
 as written. A string is shown as text; write it as `raw"…"` to include `\$…\$` math.
 
 An implication `cond => result` states that the condition (an equation, its left side shown as
-written and then as computed) gives the result, an equation such as `k ~ n*π/a`. The result is
+written and then as computed) gives the result, an equation such as `k ~ n*π/a`, or a name alone
+(`φ(0) ~ 0 => A`) for the condition solved for that name. The result is
 substituted into every later value and into the names bound so far, until the derivation ends.
 Written as `name := cond => result`, the result is bound to `name`, a rule to apply with
 `substitute`, and nothing is substituted. Conditions follow the result after `where` or just a
@@ -369,6 +370,13 @@ function _implication_row(left::String, cond, result, conditions::Vector)
     return (left, head * " \\quad\\Rightarrow\\quad " * giac_latex(result) * tail)
 end
 
+# `cond => x`: the condition solved for `x`, which must have one solution
+function _solve_for(cond, x)
+    r = isolate(cond, x)
+    r isa AbstractVector || return r
+    throw(ArgumentError("$cond has several solutions for $x ($(join(string.(r), ", "))); state the one that holds"))
+end
+
 # The rule a result gives: an equation, applied by substitution
 function _rule(r)
     r isa GiacExpr && _is_equation(r) && return r
@@ -431,8 +439,10 @@ function _derivation(simplifier, block)
         result, conditions = _conditions(result)
         left = _is_tilde(cond) ? cond.args[2] : cond
         r = gensym(:result)
+        # a name alone as the result: the condition solved for it
+        solved = result isa Symbol ? :(_solve_for(_apply_rules($(esc(cond)), $rules), $(esc(result)))) : esc(result)
         code = Any[:(_declare_conditions!($(_conditions_code(conditions)))),
-                   :($r = $(esc(result))),
+                   :($r = $solved),
                    :(push!($rows, _implication_row(written_latex($(QuoteNode(left)), $(_values_code(left))),
                                                    _apply_rules($(esc(cond)), $rules), $r,
                                                    $(_conditions_latex_code(conditions)))))]

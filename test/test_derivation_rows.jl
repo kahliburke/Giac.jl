@@ -59,6 +59,16 @@
         @test endswith(rows(d)[1], "k = a n, \\quad n \\in \\mathbb{Z}, n \\ne 0")
     end
 
+    @testset "solving the condition for a name" begin
+        @giac_var b::positive
+        d = @derivation begin
+            a * b^2 / 2 ~ 1 => b
+            b^2 ~ b^2
+        end
+        @test endswith(rows(d)[1], "\\quad\\Rightarrow\\quad b = \\frac{\\sqrt{2}}{\\sqrt{a}}")
+        @test rows(d)[2] == "b^{2} = \\frac{2}{a}"                  # applied from here on
+    end
+
     @testset "conditions in brackets, and tags" begin
         imp = Giac._implication(Giac._rejoin_conditions(:(k ~ 0 => k ~ n where [n::integer, n::nonzero])))
         @test Giac._conditions(imp[2])[2] == Any[:(n::integer), :(n::nonzero)]
