@@ -154,6 +154,25 @@ end
     @test_throws DimensionMismatch taylor(q1, q => (1, 2, 3), 1)
 end
 
+@testset "collect_terms" begin
+    @giac_var q[1:2] a b
+    S = string
+    c = coefficients(a * q1^2 + b * q1 * q2 + 2a * q1^2 + 3, q)
+    @test S(c[q1^2]) == "3*a"
+    @test S(c[q1 * q2]) == "b"
+    @test S(c[one(GiacExpr)]) == "3"
+    @test length(c) == 3
+    # graded order: degree, then powers of the earlier variables
+    @test S(collect_terms((q1 + q2 + a)^2, q)) == "q1^2+2*q1*q2+q2^2+2*a*q1+2*a*q2+a^2"
+    @test S(collect_terms(a * q1 * q2 + b * q1 * q2 + q2^2 + q1^2, q)) == "q1^2+(a+b)*q1*q2+q2^2"
+    # a factor that depends on the variables without being a power is part of the monomial
+    @test S(collect_terms(a * sin(q1) * q2 + b * sin(q1) * q2, q)) == "(a+b)*q2*sin(q1)"
+    @test S(collect_terms(-a * q1 - q1 + 2, q)) == "(-a-1)*q1+2"
+    @test S(collect_terms(a * q1 - a * q1, q)) == "0"
+    @test S.(collect_terms([a * q1 + b * q1, q2], q)) == ["(a+b)*q1", "q2"]
+    @test S(collect_terms((q1 + a)^2, q1)) == "q1^2+2*a*q1+a^2"
+end
+
 @testset "array typesetting" begin
     @giac_var r[1:2] k
     @test Giac.giac_latex([r1 r2; k 0]) == "\\begin{bmatrix}r_{1} & r_{2} \\\\ k & 0\\end{bmatrix}"
