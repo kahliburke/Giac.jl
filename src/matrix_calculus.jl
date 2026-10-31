@@ -6,7 +6,7 @@
 # survives differentiation (a symmetric matrix has a symmetric differential)
 function _dsym(s::MatrixSymbol)
     name = Symbol("d", s.name)
-    _TEX_NAMES[string(name)] = "\\mathrm{d}" * _tex_name(string(s.name))
+    _record_tex_name!(string(name), "\\mathrm{d}" * _tex_name(string(s.name)))
     props = filter(p -> p in (:symmetric, :skew, :diagonal), s.properties)
     _symmetric(s) && !(:symmetric in props) && !(:diagonal in props) && push!(props, :symmetric)
     return MatrixSymbol(name, s.rows, s.cols, props)

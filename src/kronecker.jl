@@ -34,7 +34,7 @@ function Base.vec(X::MatExpr)
     s = _matrix_symbol(X)
     s.cols == 1 && return X
     name = Symbol("vec", s.name)
-    _TEX_NAMES[string(name)] = "\\operatorname{vec} " * _tex_name(string(s.name))
+    _record_tex_name!(string(name), "\\operatorname{vec} " * _tex_name(string(s.name)))
     return MatExpr(MatrixSymbol(name, _dim_mul(s.rows, s.cols), 1, Symbol[]))
 end
 
@@ -77,7 +77,7 @@ function vech(P::MatExpr)
     s = _matrix_symbol(P)
     _symmetric(s) || throw(ArgumentError("vech takes a symmetric matrix; declare $(s.name) with ::symmetric"))
     name = Symbol("vech", s.name)
-    _TEX_NAMES[string(name)] = "\\operatorname{vech} " * _tex_name(string(s.name))
+    _record_tex_name!(string(name), "\\operatorname{vech} " * _tex_name(string(s.name)))
     return MatExpr(MatrixSymbol(name, _vech_dim(s.rows), 1, Symbol[]))
 end
 

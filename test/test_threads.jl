@@ -18,6 +18,17 @@
         @test all(==(180), fetch.([Threads.@spawn(work(k)) for k in 1:8]))
     end
 
+    @testset "display names declared from several threads" begin
+        tasks = [Threads.@spawn begin
+                     for j in 1:200
+                         Giac._set_tex_name!("thr_$(k)_$(j)", "x_{$k,$j}")
+                         Giac._tex_name("thr_$(k)_$(j)")
+                     end
+                 end for k in 1:8]
+        foreach(fetch, tasks)
+        @test all(Giac._tex_name("thr_$(k)_$(j)") == "x_{$k,$j}" for k in 1:8, j in 1:200)
+    end
+
     @testset "freed objects are queued, then freed under the lock" begin
         for _ in 1:2000
             Giac.Commands.expand((x + 1)^3)

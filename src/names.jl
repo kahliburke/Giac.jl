@@ -30,6 +30,10 @@ const _PRIMES = Dict('′' => 1, '″' => 2, '‴' => 3, '\'' => 1)
 
 # Display names set with `@giac_var name => "tex"`, by Giac name
 const _TEX_NAMES = Dict{String, String}()
+const _TEX_NAMES_LOCK = ReentrantLock()      # notebook cells declare names concurrently
+
+_record_tex_name!(name::AbstractString, tex::AbstractString) =
+    lock(() -> (_TEX_NAMES[String(name)] = String(tex)), _TEX_NAMES_LOCK)
 
 """
     _tex_name(name) -> String
@@ -49,7 +53,7 @@ A display name set with `@giac_var name => "tex"` takes precedence, as does the 
 declaration records for an entry with a negative index (`c_m1` is c₋₁).
 """
 function _tex_name(name::AbstractString)
-    custom = get(_TEX_NAMES, name, nothing)
+    custom = lock(() -> get(_TEX_NAMES, name, nothing), _TEX_NAMES_LOCK)
     custom === nothing || return custom
     differential = match(_DIFFERENTIAL, Base.Unicode.normalize(name, :NFD))
     differential === nothing || return "\\mathrm{d}" * _tex_name(Base.Unicode.normalize(differential[1], :NFC))
@@ -156,7 +160,7 @@ end
 
 # A display name for `@giac_var name => "tex"`; `L"…"` strings keep their math without the `$`
 function _set_tex_name!(name::AbstractString, tex)
-    _TEX_NAMES[replace(name, GIAC_RESERVED_LETTERS...)] = strip(string(tex), '$')
+    _record_tex_name!(replace(name, GIAC_RESERVED_LETTERS...), strip(string(tex), '$'))
     return nothing
 end
 

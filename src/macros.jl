@@ -148,8 +148,8 @@ function _format_indices(base::Symbol, indices::Tuple, needs_sep::Bool)
     name = needs_sep ? Symbol(base, "_", join(formatted, "_")) : Symbol(base, join(formatted))
     # the name says `m1`; it is written with the index, -1
     if any(<(0), indices)
-        _TEX_NAMES[replace(string(name), GIAC_RESERVED_LETTERS...)] =
-            _tex_name(string(base)) * "_{" * join(string.(indices), ",") * "}"
+        _record_tex_name!(replace(string(name), GIAC_RESERVED_LETTERS...),
+                          _tex_name(string(base)) * "_{" * join(string.(indices), ",") * "}")
     end
     return name
 end
