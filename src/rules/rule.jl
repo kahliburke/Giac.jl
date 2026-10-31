@@ -65,7 +65,8 @@ function _apply_ac(r::Rule, p::Term, e::GiacExpr)
         v = _match_ac(p.head, p.args, 1, arguments(negated), Bindings(), (b, rest) -> _replace(r, b, rest), false)
         v === nothing || return -v
     end
-    # and up to a common factor
+    # and up to a common factor, if the pattern's terms can be found at all
+    _heads_present(p.args, args) || return nothing
     return _match_scaled(p.args, args, (b, k, others) -> begin
         v = _rhs(r, b)
         v === nothing ? nothing : _combine("+", vcat(k * convert(GiacExpr, v), others))
@@ -260,3 +261,24 @@ _code_string(ex) = ex isa Expr && ex.head === :if && length(ex.args) == 3 ?
 Base.show(io::IO, ::MIME"text/latex", r::Rule) = print(io, "\$\$", _rule_latex(r), "\$\$")
 Base.show(io::IO, ::MIME"text/latex", rs::AbstractVector{Rule}) =
     print(io, "\$\$\\begin{aligned}", join(("&" * _rule_latex(r) for r in rs), " \\\\ "), "\\end{aligned}\$\$")
+
+# Whether every compound term of a sum pattern can find its head among the subject's terms, their
+# negations or their factors. Matching up to sign or a common factor finds a pattern term there,
+# so without it no match is possible.
+function _heads_present(ps, terms)
+    needed = [q.head for q in ps if q isa Term]
+    isempty(needed) && return true
+    found = Set{String}()
+    for t in terms
+        _collect_heads!(found, t)
+    end
+    return all(h -> h in found, needed)
+end
+
+function _collect_heads!(found, t::GiacExpr)
+    iscall(t) || return found
+    h = _head(t)
+    push!(found, h)
+    (h == "-" || h == "*") && foreach(a -> _collect_heads!(found, a), arguments(t))
+    return found
+end
