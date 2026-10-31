@@ -16,6 +16,15 @@
         @test L(SE) == "i \\hbar \\frac{\\partial \\psi}{\\partial t} = -\\frac{\\hbar^{2}}{2 m} \\frac{\\partial^{2} \\psi}{\\partial x^{2}} + V\\left(x\\right) \\psi\\left(x, t\\right)"
     end
 
+    @testset "bra-ket notation" begin
+        @giac_var n x̂ j::integer
+        @test L(braket(j, n)) == "\\langle j \\vert n \\rangle"
+        @test L(braket(n, x̂, n)) == "\\langle n \\vert \\hat{x} \\vert n \\rangle"
+        @test L(bra(n)) == "\\langle n \\vert" && L(ket(n)) == "\\vert n \\rangle"
+        @test L(braket(1, 2)) == "\\langle 1 \\vert 2 \\rangle"
+        @test Giac.written_latex(:(braket(n, x̂, n))) == "\\langle n \\vert \\hat{x} \\vert n \\rangle"
+    end
+
     @testset "initial conditions" begin
         @giac_var q(t) q̇ v₀
         @test L(q̇(0)) == "q'\\left(0\\right)"

@@ -150,6 +150,8 @@ struct _PDerivOf <: _PNode; arg::_PNode; wrt::Vector{String}; end
 struct _PDerivAt <: _PNode; f::String; args::Vector{_PNode}; idx::Vector{Int}; end
 # an integral of `f` in `var`, between `limits` if there are two
 struct _PIntegral <: _PNode; f::_PNode; var::_PNode; limits::Vector{_PNode}; end
+# Dirac's notation: a bra-ket ⟨m|n⟩ or ⟨m|A|n⟩, a bra ⟨m|, a ket |n⟩
+struct _PBraKet <: _PNode; kind::String; args::Vector{_PNode}; end
 # `f` evaluated: at `lower` (x = a), or between `lower` and `upper`
 struct _PBar <: _PNode; f::_PNode; lower::_PNode; upper::Union{Nothing, _PNode}; end
 
@@ -236,6 +238,9 @@ function _pnode(e::GiacExpr)
             all(!isnothing, names) && return _PDeriv(string(g), _PNode[_pnode(x) for x in args], names)
             return _PDerivAt(string(g), _PNode[_pnode(x) for x in args], idx)
         end
+    end
+    if h == "of" && is_identifier(a[1]) && string(a[1]) in ("braket", "bra", "ket")
+        return _PBraKet(string(a[1]), _PNode[_pnode(x) for x in a[2:end]])    # ⟨m|n⟩, ⟨m|, |n⟩
     end
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
@@ -736,6 +741,13 @@ function _tex(n::_PIntegral, c::_Ctx)
     bounds = isempty(n.limits) ? "" : "_{" * _tex(n.limits[1], c) * "}^{" * _tex(n.limits[2], c) * "}"
     f = n.f isa _PSum ? "\\left(" * _tex(n.f, c) * "\\right)" : _tex(n.f, c)
     return "\\int" * bounds * " " * f * " \\, \\mathrm{d}" * _tex(n.var, c)
+end
+
+function _tex(n::_PBraKet, c::_Ctx)
+    inside = join((_tex(a, c) for a in n.args), " \\vert ")
+    n.kind == "bra" && return "\\langle " * inside * " \\vert"
+    n.kind == "ket" && return "\\vert " * inside * " \\rangle"
+    return "\\langle " * inside * " \\rangle"
 end
 
 function _tex(n::_PBar, c::_Ctx)

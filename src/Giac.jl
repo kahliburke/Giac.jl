@@ -82,6 +82,7 @@ include("build_function.jl")
 include("differential.jl")
 include("coordinate_diff.jl")
 include("held_forms.jl")
+include("braket.jl")
 
 # GenTypes module - Scoped enum for GIAC types (041-scoped-type-enum)
 include("gen_types.jl")
@@ -139,7 +140,7 @@ export giac_eval, to_julia, list_commands, help_count
 # giac_latex, written_latex, tidy_latex and Derivation are unexported: Giac.giac_array, …)
 export @giac_var, @giac_several_vars, @giac_matrix, express, ∇, jacobian, hessian, @derivation, assuming
 export lhs, rhs, isolate, @giac_function, taylor, collect_terms, periodic, inverse_of
-export @matsym, MatExpr, quadratic_form, differential, partial, integral, integrand, evaluated, by_parts, derivative, vectorize, vech, typeset, typeset!, in_form
+export @matsym, MatExpr, quadratic_form, differential, partial, integral, integrand, evaluated, by_parts, braket, bra, ket, derivative, vectorize, vech, typeset, typeset!, in_form
 
 # Command invocation (009-commands-submodule)
 # invoke_cmd replaces giac_cmd - available from main module and Giac.Commands
