@@ -27,7 +27,11 @@ Base.:-(a::GiacExpr, b::GiacExpr) = _arith(-, _sub, a, b)
 
 Negate an expression.
 """
-Base.:-(a::GiacExpr) = _is_equation(a) ? -(lhs(a)) ~ -(rhs(a)) : GiacExpr(_neg(_node(a)))
+Base.:-(a::GiacExpr) = _is_equation(a) ? -(lhs(a)) ~ -(rhs(a)) : GiacExpr(_negated(_node(a)))
+
+# a negated sum is the sum of the negated terms, as GIAC writes -(a + b)
+_negated(n::AddNode) = _add((_scale(m, _nmul(-1, c)) for (m, c) in n.terms)...)
+_negated(n::Node) = _neg(n)
 
 """
     *(a::GiacExpr, b::GiacExpr)

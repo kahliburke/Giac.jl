@@ -12,6 +12,10 @@
         @test S(a * x + b * x) == "a*x+b*x"                          # only numeric coefficients merge
         @test S(1.5x + x) == "2.5*x"
         @test S(x + 1 // 2) == "x+1/2"
+        # a number times a sum, in a sum, is distributed so like terms merge
+        @test S(x + y - (x + y) / 2) == "x/2+y/2" && S(a - (b - x)) == "a-b+x"
+        @test S(2 * (x + y)) == "2*(x+y)"                            # alone, kept
+        @test S(-(x - y)) == "-x+y"                                  # a negated sum, as GIAC writes it
     end
 
     @testset "products and powers" begin

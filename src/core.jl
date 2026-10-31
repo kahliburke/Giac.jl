@@ -164,15 +164,23 @@ function _add(xs::Node...)
     # like terms found by a scan while the sum is small, through an index beyond that
     n = sum(x -> x isa AddNode ? length(x.terms) : 1, xs)
     index = n > 12 ? Dict{Node, Int}() : nothing
+    function merge!(m, c)
+        if m isa AddNode
+            # a number times a sum is distributed, so its terms merge with the others
+            foreach(((m2, c2),) -> merge!(m2, _nmul(c, c2)), m.terms)
+            return
+        end
+        i = index === nothing ? something(findfirst(t -> isequal(first(t), m), terms), 0) : get(index, m, 0)
+        if i == 0
+            push!(terms, m => c)
+            index === nothing || (index[m] = length(terms))
+        else
+            terms[i] = m => _nadd(last(terms[i]), c)
+        end
+    end
     for x in xs
         for (m, c) in (x isa AddNode ? x.terms : (_split_coef(x),))
-            i = index === nothing ? something(findfirst(t -> isequal(first(t), m), terms), 0) : get(index, m, 0)
-            if i == 0
-                push!(terms, m => c)
-                index === nothing || (index[m] = length(terms))
-            else
-                terms[i] = m => _nadd(last(terms[i]), c)
-            end
+            merge!(m, c)
         end
     end
     kept = filter(t -> !iszero(last(t)), terms)
