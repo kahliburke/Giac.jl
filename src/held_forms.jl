@@ -41,7 +41,59 @@ evaluated(f, x::GiacExpr, a, b) =
 _is_integral(n::Node) = n isa CallNode && n.f == "integrate" && length(n.args) in (2, 4)
 _is_evaluation(n::Node) = n isa CallNode && ((n.f == "subst" && length(n.args) == 2 && n.args[2] isa CallNode && n.args[2].f == "=") ||
                                              (n.f == "preval" && length(n.args) == 4))
-_is_held(n::Node) = _is_integral(n) || _is_evaluation(n)
+_is_held(n::Node) = _is_integral(n) || _is_evaluation(n) || _is_held_call(n)
+
+# Commands held as written: a node with one of these heads is kept from GIAC's evaluation and
+# written in its notation (lim, Σ, ℒ, …). A command held with `hold_cmd` joins them.
+const _HELD_HEADS = Set(["limit", "sum", "product", "laplace", "ilaplace", "invlaplace", "ztrans", "invztrans",
+                         "ztransform", "invztransform", "sum_riemann"])
+const _HELD_HEADS_LOCK = ReentrantLock()
+
+# a held call other than an integral or an evaluation; `diff` of an expression is held, while the
+# derivatives GIAC returns as values are not
+function _is_held_call(n::Node)
+    n isa CallNode || return false
+    n.f == "diff" && return !_is_derivative_value(n)
+    # an integral or an evaluation has its own written form; other shapes of these are held calls
+    n.f in ("integrate", "subst", "preval") && return !(_is_integral(n) || _is_evaluation(n))
+    return lock(() -> n.f in _HELD_HEADS, _HELD_HEADS_LOCK)
+end
+
+# a derivative GIAC leaves as it is: of an unknown function, `diff(q(t), t)`, of such a derivative,
+# or of a function in one of its arguments, the `diff(F, 0)` of `∂F/∂x`
+_is_derivative_value(n::CallNode) =
+    length(n.args) == 2 && (n.args[2] isa NumNode ||
+                            (n.args[1] isa CallNode && (n.args[1].f == "of" || n.args[1].f == "diff" && _is_derivative_value(n.args[1]))))
+
+# `hold_cmd(cmd, args...)`: the command as a held node, its arguments as given
+function _hold(cmd::Symbol, args::Tuple)
+    nodes = Node[_held_arg(a) for a in args]
+    cmd === :integrate && length(nodes) in (2, 4) && return GiacExpr(_held_integral(nodes[1], nodes[2:end]))
+    cmd === :diff || lock(() -> push!(_HELD_HEADS, string(cmd)), _HELD_HEADS_LOCK)
+    return GiacExpr(CallNode(string(cmd), nodes))
+end
+
+_held_arg(a::GiacExpr) = _node(a)
+_held_arg(a::Symbol) = _node(giac_identifier(string(a)))
+_held_arg(a::AbstractString) = _node(giac_eval(a))
+_held_arg(a::AbstractVector) = _node(giac_eval(_arg_to_giac_string(a)))        # a list
+_held_arg(a::GiacMatrix) = _node(GiacExpr(_make_gen_ptr(_get_gen(a.ptr))))     # a handle of its own
+_held_arg(a) = _node(convert(GiacExpr, a))
+
+# `release(e)` (Commands.jl): the held forms in `e` evaluated, from the inside out
+# A held form alone gives GIAC's result as GIAC returns it (ifactor(120) stays 2^3*3*5); inside
+# an expression each one's result joins the tree.
+function _release_expr(e::GiacExpr)
+    n = _node(e)
+    return _is_held(n) ? _release_call(n) : GiacExpr(_release(n))
+end
+
+_release(n::Node) = _replace_nodes(m -> _is_held(m) ? _node(_release_call(m)) : nothing, n)
+
+function _release_call(m::CallNode)
+    args = GiacExpr[GiacExpr(_release(a)) for a in m.args]
+    return m.f == "integrate" ? Commands.integrate(args...) : invoke_cmd(Symbol(m.f), args...)
+end
 
 """
     integrand(I)
@@ -113,8 +165,11 @@ function _held_with(f, m::CallNode)
     elseif m.f == "subst"
         x, a = m.args[2].args
         return CallNode("subst", Node[g(m.args[1]), CallNode("=", Node[x, g(a)])])
+    elseif m.f == "preval"
+        return CallNode("preval", Node[g(m.args[1]), g(m.args[2]), g(m.args[3]), m.args[4]])
     end
-    return CallNode("preval", Node[g(m.args[1]), g(m.args[2]), g(m.args[3]), m.args[4]])
+    # another held command: what it acts on, the first argument
+    return isempty(m.args) ? m : CallNode(m.f, Node[g(m.args[1]); m.args[2:end]])
 end
 
 # `f` applied to `expr` with its held forms kept from GIAC, which would evaluate them: each is a

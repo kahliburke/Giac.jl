@@ -378,10 +378,8 @@ eq = x + y ~ giac_eval("10")   # Creates equation x+y=10
 - [`solve`](@ref): Solve equations
 """
 function Base.:~(a::GiacExpr, b::GiacExpr)::GiacExpr
-    na, nb = _node(a), _node(b)
-    # a list or other GIAC object is left to GIAC's `equal`
-    (na isa GenNode || nb isa GenNode) && return invoke_cmd(:equal, a, b)
-    return GiacExpr(CallNode("=", Node[na, nb]))
+    # an equation is a node of its own, so neither side is evaluated (a held command stays held)
+    return GiacExpr(CallNode("=", Node[_node(a), _node(b)]))
 end
 
 """

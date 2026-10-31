@@ -154,9 +154,9 @@ end
 end
 
 # ============================================================================
-# 3. HeldCmd LaTeX edge cases (src/held_cmd.jl)
+# 3. Held command LaTeX edge cases (src/held_cmd.jl)
 # ============================================================================
-@testset "HeldCmd LaTeX Coverage" begin
+@testset "Held command LaTeX Coverage" begin
     @giac_var x t s n k
 
     @testset "Directional limits" begin
@@ -207,58 +207,18 @@ end
         @test occursin("\\sum", latex1)
     end
 
-    @testset "HeldEquation with Number" begin
-        eq = HeldEquation(giac_eval("x^2"), 0)
-        latex_str = sprint(show, MIME("text/latex"), eq)
-        @test occursin("=", latex_str)
-        @test occursin("0", latex_str)
-    end
-
-    @testset "HeldEquation with HeldCmd on left" begin
+    @testset "equations with held commands" begin
         held = hold_cmd(:integrate, giac_eval("x^2"), x)
-        eq = HeldEquation(held, giac_eval("x^3/3"))
-        latex_str = sprint(show, MIME("text/latex"), eq)
-        @test occursin("\\int", latex_str)
-        @test occursin("=", latex_str)
-    end
-
-    @testset "HeldEquation with HeldCmd on both sides" begin
-        lhs = hold_cmd(:diff, giac_eval("x^3/3"), x)
-        rhs = hold_cmd(:integrate, giac_eval("x"), x)
-        eq = HeldEquation(lhs, rhs)
-        latex_str = sprint(show, MIME("text/latex"), eq)
-        @test occursin("\\frac{d}{dx}", latex_str)
-        @test occursin("=", latex_str)
-    end
-
-    @testset "HeldEquation plain text" begin
-        held = hold_cmd(:factor, giac_eval("x^2-1"))
-        eq = HeldEquation(held, giac_eval("(x-1)*(x+1)"))
-        txt = sprint(show, eq)
-        @test occursin("=", txt)
-        @test occursin("factor", txt)
-
-        txt_plain = sprint(show, MIME("text/plain"), eq)
-        @test occursin("=", txt_plain)
-    end
-
-    @testset "Tilde operator creates HeldEquation" begin
-        held = hold_cmd(:factor, giac_eval("x^2-1"))
-        eq1 = held ~ giac_eval("(x-1)*(x+1)")
-        @test eq1 isa HeldEquation
-
-        eq2 = giac_eval("x^2") ~ held
-        @test eq2 isa HeldEquation
-
-        held2 = hold_cmd(:diff, x, x)
-        eq3 = held ~ held2
-        @test eq3 isa HeldEquation
-
-        eq4 = held ~ 42
-        @test eq4 isa HeldEquation
-
-        eq5 = 42 ~ held
-        @test eq5 isa HeldEquation
+        tex(e) = sprint(show, MIME("text/latex"), e)
+        @test occursin("=", tex(giac_eval("x^2") ~ 0))
+        @test occursin("\\int", tex(held ~ giac_eval("x^3/3"))) && occursin("=", tex(held ~ giac_eval("x^3/3")))
+        both = hold_cmd(:diff, giac_eval("x^3/3"), x) ~ hold_cmd(:integrate, giac_eval("x"), x)
+        @test occursin("\\frac{\\mathrm{d}}{\\mathrm{d} x}", tex(both)) && occursin("\\int", tex(both))
+        f = hold_cmd(:factor, giac_eval("x^2-1"))
+        @test occursin("factor", string(f ~ giac_eval("(x-1)*(x+1)"))) && occursin("=", sprint(show, MIME("text/plain"), f ~ 0))
+        for eq in (f ~ giac_eval("(x-1)*(x+1)"), giac_eval("x^2") ~ f, f ~ hold_cmd(:diff, x, x), f ~ 42, 42 ~ f)
+            @test eq isa GiacExpr && Giac._is_equation(eq)
+        end
     end
 
     @testset "LaTeX: ilaplace alias" begin
@@ -268,14 +228,14 @@ end
     end
 
     @testset "LaTeX: ztransform alias" begin
-        # Use HeldCmd constructor directly to test LaTeX rendering without command validation
-        h = HeldCmd(:ztransform, (giac_eval("n"), n, giac_eval("z")))
+        # held without the check that the command exists, to test its written form
+        h = Giac._hold(:ztransform, (giac_eval("n"), n, giac_eval("z")))
         latex = sprint(show, MIME("text/latex"), h)
         @test occursin("\\mathcal{Z}", latex)
     end
 
     @testset "LaTeX: invztransform alias" begin
-        h = HeldCmd(:invztransform, (giac_eval("1/z"), giac_eval("z"), n))
+        h = Giac._hold(:invztransform, (giac_eval("1/z"), giac_eval("z"), n))
         latex = sprint(show, MIME("text/latex"), h)
         @test occursin("\\mathcal{Z}^{-1}", latex)
     end
@@ -314,10 +274,10 @@ end
         @test occursin("\\frac{d}{d?}", latex)
     end
 
-    @testset "HeldCmd text/plain show" begin
+    @testset "held command text/plain show" begin
         h = hold_cmd(:factor, giac_eval("x^2-1"))
         txt = sprint(show, MIME("text/plain"), h)
-        @test occursin("HeldCmd:", txt)
+        @test occursin("GiacExpr:", txt)
         @test occursin("factor", txt)
     end
 
@@ -325,21 +285,19 @@ end
         # Symbol arg
         h = hold_cmd(:diff, giac_eval("x^2"), :x)
         latex = sprint(show, MIME("text/latex"), h)
-        @test occursin("dx", latex)
+        @test occursin("\\mathrm{d} x", latex)
 
-        # String arg in generic command
-        h_str = HeldCmd(:foo, ("hello",))
-        latex_str = sprint(show, MIME("text/latex"), h_str)
-        @test occursin("\\text{hello}", latex_str)
+        # a string argument is read as GIAC input
+        latex_str = sprint(show, MIME("text/latex"), hold_cmd(:factor, "x^2-1"))
+        @test occursin("\\mathrm{factor}", latex_str) && occursin("x^{2}", latex_str)
 
-        # Vector arg in generic command
-        h_vec = HeldCmd(:bar, ([1, 2, 3],))
-        latex_vec = sprint(show, MIME("text/latex"), h_vec)
-        @test occursin("[1, 2, 3]", latex_vec)
+        # a vector argument is a list
+        latex_vec = sprint(show, MIME("text/latex"), hold_cmd(:sum, [1, 2, 3]))
+        @test occursin("1", latex_vec) && occursin("3", latex_vec)
     end
 
     @testset "Generic fallback with no args" begin
-        h = HeldCmd(:foo, ())
+        h = Giac._hold(:foo, ())
         latex = sprint(show, MIME("text/latex"), h)
         @test occursin("\\mathrm{foo}", latex)
         @test occursin("()", latex)

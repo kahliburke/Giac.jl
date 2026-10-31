@@ -59,7 +59,6 @@ using ..Giac: GiacExpr, GiacMatrix, GiacInput, GiacError, giac_eval, with_giac_l
               VALID_COMMANDS, JULIA_CONFLICTS, CONFLICT_CATEGORIES, exportable_commands,
               suggest_commands, _format_suggestions, _warn_conflict,
               _arg_to_giac_string, _build_command_string, help, HelpResult,
-              HeldCmd,
               _fastpath_disabled, _has_direct_gen, _invoke_cmd_direct,
               RENDER_COMMANDS, _hold_render_arg,
               _INSIDE_HELD, _any_node, _is_held, _node, _around_held
@@ -207,85 +206,44 @@ export invoke_cmd
 # ============================================================================
 
 """
-    hold_cmd(cmd::Symbol, args...) -> HeldCmd
+    hold_cmd(cmd, args...) -> GiacExpr
 
-Create a held (unevaluated) representation of a GIAC command.
+The command `cmd` applied to `args`, held: written in its notation (∫ f dx, d/dx, ℒ{f}(s),
+lim, Σ, Π, or `cmd(args)`) and not evaluated. It is an expression like any other, so it takes
+part in arithmetic, equations (`h ~ release(h)`) and [`substitute`](@ref); [`release`](@ref)
+evaluates it. A held integral is the same as [`integral`](@ref)'s.
 
-Like `invoke_cmd`, but does NOT execute the command. Instead, returns a
-`HeldCmd` object that can be displayed with LaTeX rendering in notebooks
-and executed later via `release`.
-
-# Arguments
-- `cmd::Symbol`: GIAC command name (e.g., `:integrate`, `:diff`, `:factor`)
-- `args...`: Command arguments (GiacExpr, String, Number, Symbol, AbstractVector)
-
-# Returns
-- `HeldCmd`: An unevaluated command object with rich display
-
-# Throws
-- `GiacError(:eval)`: If command name is not a valid GIAC command
-
-# Examples
 ```julia
-using Giac
 using Giac.Commands: hold_cmd, release
-
 @giac_var x
-h = hold_cmd(:integrate, x^2, x)  # No execution — returns HeldCmd
-display(h)                          # Renders ∫ x² dx in notebooks
-result = release(h)                 # Now executes: returns x³/3
+h = hold_cmd(:integrate, x^2, x)    # ∫ x² dx, held
+h ~ release(h)                      # ∫ x² dx = x³/3
 ```
 
-# See also
-- [`invoke_cmd`](@ref): Execute a command immediately
-- [`release`](@ref): Execute a HeldCmd
-- [`HeldCmd`](@ref): The held command type
+Throws a `GiacError` for a name that is not a GIAC command.
 """
-function hold_cmd(cmd::Symbol, args...)::HeldCmd
+function hold_cmd(cmd::Symbol, args...)::GiacExpr
     # Validate command exists (same validation as invoke_cmd)
     if !isempty(VALID_COMMANDS) && cmd ∉ VALID_COMMANDS
         suggestions = suggest_commands(cmd)
         suggestion_text = _format_suggestions(suggestions)
         throw(GiacError("Unknown command: $cmd.$suggestion_text", :eval))
     end
-
-    return HeldCmd(cmd, args)
+    return parentmodule(@__MODULE__)._hold(cmd, args)
 end
 
 # String variant for convenience
-hold_cmd(cmd::String, args...)::HeldCmd = hold_cmd(Symbol(cmd), args...)
+hold_cmd(cmd::String, args...)::GiacExpr = hold_cmd(Symbol(cmd), args...)
 
 """
-    release(held::HeldCmd) -> GiacExpr
+    release(e)
 
-Execute a held command and return the result.
-
-Takes a `HeldCmd` created by `hold_cmd` and executes it via `invoke_cmd`,
-returning the computed `GiacExpr` result.
-
-# Arguments
-- `held::HeldCmd`: A held command to execute
-
-# Returns
-- `GiacExpr`: Result of executing the held command
-
-# Examples
-```julia
-using Giac
-using Giac.Commands: hold_cmd, release
-
-@giac_var x
-h = hold_cmd(:integrate, x^2, x)
-result = release(h)  # Returns x³/3
-```
-
-# See also
-- [`hold_cmd`](@ref): Create a HeldCmd
-- [`invoke_cmd`](@ref): Direct command execution
+`e` with its held forms evaluated, from the inside out: the commands of [`hold_cmd`](@ref), the
+integrals of [`integral`](@ref) and the evaluations of [`evaluated`](@ref). Anything else is
+returned as it is.
 """
-function release(held::HeldCmd)::GiacExpr
-    return invoke_cmd(held.cmd, held.args...)
-end
+release(e::GiacExpr) = parentmodule(@__MODULE__)._release_expr(e)
+release(x) = x
 
 export hold_cmd, release
 

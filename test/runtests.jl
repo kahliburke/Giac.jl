@@ -175,7 +175,7 @@ using LinearAlgebra
 
     # ============================================================================
     # Held Command Display Tests (055-held-cmd-display)
-    # Verifies HeldCmd type, hold_cmd, release, LaTeX and plain text display
+    # hold_cmd and release, held commands in expressions, their notation
     # ============================================================================
     include("test_held_cmd.jl")
 

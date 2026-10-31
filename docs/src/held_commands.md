@@ -1,26 +1,24 @@
 # Held Commands
 
-Held commands let you build and display mathematical expressions **without evaluating them**. This is useful for:
-- Showing what computation will be performed before running it
-- Educational presentations with proper mathematical notation
-- Step-by-step mathematical exploration in notebooks
-
-## Basic Usage
+A held command is a command left unevaluated: an expression like any other, written in the
+command's notation (∫, d/dx, lim, Σ, ℒ, …). It can be part of sums and products, stand on either
+side of an equation, and be substituted into; `release` evaluates it.
 
 ```julia
 using Giac
 using Giac.Commands: hold_cmd, release
 
-@giac_var x t s n z
+@giac_var x t s n z a
 
-# Hold a command (no execution occurs)
-h = hold_cmd(:integrate, x^2, x)
-# In notebooks: renders as ∫ x² dx
-
-# Execute when ready
-result = release(h)
-# Returns: x³/3
+h = hold_cmd(:integrate, x^2, x)     # ∫ x² dx
+release(h)                           # x³/3
+h ~ release(h)                       # ∫ x² dx = x³/3
+2 * hold_cmd(:limit, sin(x)/x, x, 0) + 1
+substitute(hold_cmd(:sum, a*n, n, 1, 3), a => 2)   # Σ 2n, released: 12
 ```
+
+A held integral is the same expression [`integral`](@ref) builds, so [`by_parts`](@ref) and
+[`integrand`](@ref) work on it too.
 
 ## Specialized LaTeX Rendering
 
@@ -110,52 +108,31 @@ hold_cmd(:factor, x^2 - 1)     # Renders as: factor(x² - 1)
 hold_cmd(:simplify, sin(x)^2)  # Renders as: simplify(sin²(x))
 ```
 
-## Hold-Display-Release Workflow
+## Release
+
+`release` evaluates every held command in an expression, from the inside out. A held command on
+its own gives GIAC's result as GIAC returns it, so `release(hold_cmd(:ifactor, 120))` is `2^3*3*5`.
 
 ```julia
-# Step 1: Build the expression
-h = hold_cmd(:integrate, exp(-t) * sin(t), t)
-
-# Step 2: Display it (automatic in notebooks)
-display(h)  # Shows: ∫ e⁻ᵗ sin(t) dt
-
-# Step 3: Execute when ready
-result = release(h)  # Computes the integral
-display(result)       # Shows the evaluated result
+release(hold_cmd(:integrate, x^2, x) + x)   # x³/3 + x
 ```
 
-## Equation Display with `~`
+## Equations with `~`
 
-Held commands support the `~` (tilde) equation operator, enabling side-by-side display
-of unevaluated and evaluated forms:
+`~` writes an equation between any two expressions, held or not, without evaluating either side:
 
 ```julia
-using Giac
-using Giac.Commands: hold_cmd, release, eigenvals
+using Giac.Commands: eigenvals
 
 M = GiacMatrix([[1, 2], [3, 4]])
-
-# Show "eigenvals([[1,2],[3,4]]) = [computed result]"
-h = hold_cmd(:eigenvals, M)
-eq = h ~ eigenvals(M)
-
-# Also works with the held command on the right
-eq = eigenvals(M) ~ h
-
-# Between two held commands
-eq = hold_cmd(:factor, x^2 - 1) ~ hold_cmd(:expand, (x-1)*(x+1))
-
-# With numbers
-eq = hold_cmd(:det, M) ~ -2
+hold_cmd(:eigenvals, M) ~ eigenvals(M)
+hold_cmd(:factor, x^2 - 1) ~ hold_cmd(:expand, (x-1)*(x+1))
+hold_cmd(:det, M) ~ -2
 ```
-
-All type combinations are supported: `HeldCmd ~ GiacExpr`, `GiacExpr ~ HeldCmd`,
-`HeldCmd ~ HeldCmd`, `HeldCmd ~ Number`, and `Number ~ HeldCmd`.
 
 ## API Reference
 
 ```@docs
-HeldCmd
 Giac.Commands.hold_cmd
 Giac.Commands.release
 ```

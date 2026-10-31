@@ -236,6 +236,7 @@ function _pnode(e::GiacExpr)
     h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
     h == "subst" && length(a) == 2 && iscall(a[2]) && symb_funcname(a[2]) == "=" && return _PBar(_pnode(a[1]), _pnode(a[2]), nothing)
     h == "preval" && length(a) in (3, 4) && return _PBar(_pnode(a[1]), _pnode(a[2]), _pnode(a[3]))
+    _is_held_call(_node(e)) && return _PHeld(Symbol(h), Tuple(a))       # lim, Σ, ℒ, … (held_cmd.jl)
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
     return _PRaw(tidy_latex(_giac_tex(e)))
 end
@@ -715,3 +716,13 @@ function _leibniz(d::AbstractString, name::AbstractString, wrt::Vector{String})
     den = join((d * " " * _tex_name(v) * (count(==(v), wrt) > 1 ? "^{$(count(==(v), wrt))}" : "") for v in unique(wrt)), " ")
     return "\\frac{" * num * "}{" * den * "}"
 end
+
+# ---------------------------------------------------------------------------------------------
+# Held commands: lim, Σ, Π, ℒ, 𝒵 and the generic `name(args)`, written by held_cmd.jl
+# ---------------------------------------------------------------------------------------------
+
+struct _PHeld <: _PNode
+    cmd::Symbol
+    args::Tuple
+end
+_tex(n::_PHeld, c::_Ctx) = sprint(_print_held_latex, n.cmd, n.args)

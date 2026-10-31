@@ -410,78 +410,46 @@ end
 end
 
 # ============================================================================
-# HeldCmd Equation Tilde Operator (059-heldcmd-equation-tilde)
+# Equations with held commands (059-heldcmd-equation-tilde)
 # ============================================================================
-@testset "HeldCmd Equation Tilde Operator (059-heldcmd-equation-tilde)" begin
+@testset "Equations with held commands (059-heldcmd-equation-tilde)" begin
 
     using Giac.Commands: hold_cmd, release
-    using Giac: HeldEquation
 
     M = GiacMatrix([[1, 2], [3, 4]])
+    isequation(e) = e isa GiacExpr && Giac._is_equation(e)
+    tex(e) = sprint(show, MIME("text/latex"), e)
 
-    @testset "HeldCmd ~ GiacExpr" begin
-        # SC-001: hold_cmd(:eigenvals, M) ~ eigenvals(M) produces valid equation
+    @testset "held ~ value" begin
         h = hold_cmd(:eigenvals, M)
-        result = Giac.Commands.eigenvals(M)
-        eq = h ~ result
-        @test eq isa HeldEquation
-        eq_str = string(eq)
-        @test occursin("=", eq_str)
-        # LaTeX should preserve unevaluated form
-        latex_io = IOBuffer()
-        show(latex_io, MIME("text/latex"), eq)
-        latex_str = String(take!(latex_io))
-        @test occursin("eigenvals", latex_str)
-        @test occursin("=", latex_str)
+        eq = h ~ Giac.Commands.eigenvals(M)
+        @test isequation(eq) && occursin("=", string(eq))
+        @test occursin("eigenvals", tex(eq)) && occursin("=", tex(eq))      # the held side stays held
     end
 
-    @testset "GiacExpr ~ HeldCmd" begin
-        h = hold_cmd(:eigenvals, M)
-        result = Giac.Commands.eigenvals(M)
-        eq = result ~ h
-        @test eq isa HeldEquation
-        eq_str = string(eq)
-        @test occursin("=", eq_str)
-        # LaTeX should preserve unevaluated form on the right
-        latex_io = IOBuffer()
-        show(latex_io, MIME("text/latex"), eq)
-        latex_str = String(take!(latex_io))
-        @test occursin("eigenvals", latex_str)
+    @testset "value ~ held" begin
+        eq = Giac.Commands.eigenvals(M) ~ hold_cmd(:eigenvals, M)
+        @test isequation(eq) && occursin("eigenvals", tex(eq))
     end
 
-    @testset "HeldCmd ~ HeldCmd" begin
+    @testset "held ~ held" begin
         @giac_var x
-        h1 = hold_cmd(:factor, x^2 - 1)
-        h2 = hold_cmd(:expand, (x - 1) * (x + 1))
-        eq = h1 ~ h2
-        @test eq isa HeldEquation
-        eq_str = string(eq)
-        @test occursin("=", eq_str)
+        eq = hold_cmd(:factor, x^2 - 1) ~ hold_cmd(:expand, (x - 1) * (x + 1))
+        @test isequation(eq) && occursin("=", string(eq))
     end
 
-    @testset "HeldCmd ~ Number" begin
+    @testset "held ~ number, number ~ held" begin
         h = hold_cmd(:det, M)
-        eq = h ~ -2
-        @test eq isa HeldEquation
-        eq_str = string(eq)
-        @test occursin("=", eq_str)
-        @test occursin("-2", eq_str)
-    end
-
-    @testset "Number ~ HeldCmd" begin
-        h = hold_cmd(:det, M)
-        eq = -2 ~ h
-        @test eq isa HeldEquation
-        eq_str = string(eq)
-        @test occursin("=", eq_str)
-        @test occursin("-2", eq_str)
+        @test isequation(h ~ -2) && occursin("-2", string(h ~ -2))
+        @test isequation(-2 ~ h) && occursin("-2", string(-2 ~ h))
+        @test string(release(h ~ -2)) == "-2=-2"
     end
 end
 
 # ============================================================================
-# HeldCmd Specialized LaTeX: Limit, Sum, Product, Sum_Riemann (060-heldcmd-latex-limit-sum)
+# Held command LaTeX: Limit, Sum, Product, Sum_Riemann (060-heldcmd-latex-limit-sum)
 # ============================================================================
-@testset "HeldCmd Limit LaTeX (060 - US1)" begin
+@testset "Held limit LaTeX (060 - US1)" begin
 
     using Giac.Commands: hold_cmd
 
@@ -524,7 +492,7 @@ end
         @test occursin("\\infty", latex_str)
     end
 
-    @testset "Limit in HeldEquation" begin
+    @testset "Limit in an equation" begin
         h = hold_cmd(:limit, sin(x)/x, x, 0)
         eq = h ~ giac_eval("1")
         latex_io = IOBuffer()
@@ -535,7 +503,7 @@ end
     end
 end
 
-@testset "HeldCmd Sum/Product LaTeX (060 - US2)" begin
+@testset "Held sum/product LaTeX (060 - US2)" begin
 
     using Giac.Commands: hold_cmd
 
@@ -587,7 +555,7 @@ end
         @test occursin("k=1", latex_str)
     end
 
-    @testset "Product in HeldEquation" begin
+    @testset "Product in an equation" begin
         h = hold_cmd(:product, k, k, 1, n)
         eq = h ~ invoke_cmd(:product, k, k, 1, n)
         latex_io = IOBuffer()
@@ -598,7 +566,7 @@ end
     end
 end
 
-@testset "HeldCmd Sum Riemann LaTeX (060 - US3)" begin
+@testset "Held Riemann sum LaTeX (060 - US3)" begin
 
     using Giac.Commands: hold_cmd
 
@@ -615,7 +583,7 @@ end
         @test !occursin("\\mathrm{sum\\_riemann}", latex_str)
     end
 
-    @testset "Riemann sum in HeldEquation" begin
+    @testset "Riemann sum in an equation" begin
         h = hold_cmd(:sum_riemann, 1 / (n + k), [n, k])
         result = Giac.Commands.sum_riemann(1 / (n + k), [n, k])
         eq = h ~ result
