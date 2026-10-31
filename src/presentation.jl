@@ -1,0 +1,469 @@
+# Typesetting expressions as a textbook writes them. Giac stores an expression in an order of its
+# own; how it is written is decided here, from conventions: a polynomial in descending powers of
+# its variable (ascending for a series), a difference leading with its positive term, a product
+# from numbers through parameters and variables to functions, negative powers as fractions.
+# The conventions are defaults that can be changed for everything (`typeset!`), for a block of code
+# (`typeset(…) do … end`) or for one expression (`typeset(e; by = x)`).
+
+"""
+    TypesetStyle
+
+How expressions are written; see [`typeset!`](@ref) for the options.
+"""
+Base.@kwdef struct TypesetStyle
+    by::Vector{String} = String[]
+    order::Symbol = :auto
+    lead::Symbol = :auto
+    fractions::Symbol = :stacked
+    exp::Symbol = :e
+    roots::Symbol = :radical
+    products::Symbol = :conventional
+    trig_powers::Symbol = :superscript
+    variable_letters::String = "xyztsuqθφ"
+end
+
+const _TYPESET_OPTIONS = Dict(
+    :order => (:auto, :descending, :ascending, :as_is),
+    :lead => (:auto, :positive, :as_is),
+    :fractions => (:stacked, :front, :inline),
+    :exp => (:e, :exp),
+    :roots => (:radical, :power),
+    :products => (:conventional, :as_is),
+    :trig_powers => (:superscript, :parenthesized))
+
+const _TYPESET = Ref(TypesetStyle())
+
+_names(v::Union{GiacExpr, Symbol, AbstractString}) = [v isa GiacExpr && iscall(v) && symb_funcname(v) == "of" ?
+                                                       string(first(arguments(v))) : string(v)]
+_names(vs::Union{Tuple, AbstractVector}) = reduce(vcat, map(_names, collect(vs)); init = String[])
+
+function _with(style::TypesetStyle; kwargs...)
+    fields = Dict{Symbol, Any}(f => getfield(style, f) for f in fieldnames(TypesetStyle))
+    for (k, v) in kwargs
+        if k === :by
+            fields[:by] = _names(v)
+        elseif k === :variable_letters
+            fields[k] = string(v)
+        elseif haskey(_TYPESET_OPTIONS, k)
+            v in _TYPESET_OPTIONS[k] || throw(ArgumentError("typeset: $k is one of $(join(_TYPESET_OPTIONS[k], ", ")), got $v"))
+            fields[k] = v
+        else
+            throw(ArgumentError("typeset: unknown option `$k`; the options are by, $(join(keys(_TYPESET_OPTIONS), ", "))"))
+        end
+    end
+    return TypesetStyle(; fields...)
+end
+
+"""
+    typeset!(; options...)
+    typeset!(; reset = true)
+
+Set how expressions are written from now on (the options given change; the rest stay):
+
+- `by = x` or `by = (x, t)`: the variables, in order of priority. Sums are written in descending
+  powers of them and products put them after the parameters. Without it, a symbol counts as a
+  variable where the expression shows it as one (different powers in the terms of a sum, a square,
+  the argument of a function `y(t)`), or where its letter is one used for variables.
+- `variable_letters = "xyztsuqθφ"`: the letters that mark a variable by convention (`x₁`, `ẋ` and
+  `θ₂` count by their first letter); `""` for none.
+- `order = :auto | :descending | :ascending | :as_is`: the order of the terms of a sum. `:auto` is
+  descending, and ascending for a series (a sum with a remainder `O(…)`).
+- `lead = :auto | :positive | :as_is`: `:auto` writes a difference of two terms with the positive one
+  first (`1 - x^2`); `:positive` leads every sum with a positive term.
+- `fractions = :stacked | :front | :inline`: `:front` writes a numeric fraction in front (`½mv²`);
+  `:inline` writes `a/b`. Fractions in exponents are always inline (`e^{-t/τ}`).
+- `exp = :e | :exp`, `roots = :radical | :power`, `trig_powers = :superscript | :parenthesized`.
+- `products = :conventional | :as_is`: a product as numbers, constants, parameters (Latin letters
+  before Greek, each in the order they were declared, so `@giac_var m g h` writes `mgh`), variables,
+  exponentials, other functions, sums.
+"""
+function typeset!(; reset::Bool = false, kwargs...)
+    reset && (_TYPESET[] = TypesetStyle())
+    _TYPESET[] = _with(_TYPESET[]; kwargs...)
+    return _TYPESET[]
+end
+
+"""
+    typeset(e; options...)
+    typeset(; options...)
+    typeset(f::Function; options...)
+
+`e` to be written with the options of [`typeset!`](@ref) changed for it alone (an expression, an
+array, a symbolic matrix). Without an expression, a function that does that, for a derivation:
+`@derivation typeset(by = s) begin … end`. With a function first (`typeset(by = x) do … end`), the
+options hold while it runs.
+"""
+typeset(e; kwargs...) = Typeset(e, _with(_TYPESET[]; kwargs...))
+typeset(; kwargs...) = (s = _with(_TYPESET[]; kwargs...); e -> Typeset(e, s))
+function typeset(f::Function; kwargs...)
+    old = _TYPESET[]
+    _TYPESET[] = _with(old; kwargs...)
+    try
+        return f()
+    finally
+        _TYPESET[] = old
+    end
+end
+
+"A value with the style it is written in; see [`typeset`](@ref)."
+struct Typeset
+    value::Any
+    style::TypesetStyle
+end
+function _in_style(f, style::TypesetStyle)
+    old = _TYPESET[]
+    _TYPESET[] = style
+    try
+        return f()
+    finally
+        _TYPESET[] = old
+    end
+end
+giac_latex(t::Typeset) = _in_style(() -> giac_latex(t.value), t.style)
+_entry_latex(t::Typeset) = _in_style(() -> _entry_latex(t.value), t.style)
+Base.show(io::IO, ::MIME"text/latex", t::Typeset) = print(io, "\$\$", giac_latex(t), "\$\$")
+Base.show(io::IO, t::Typeset) = show(io, t.value)
+Base.string(t::Typeset) = string(t.value)
+
+# ---------------------------------------------------------------------------------------------
+# An expression as a tree to write
+# ---------------------------------------------------------------------------------------------
+
+abstract type _PNode end
+struct _PNum <: _PNode; v::Real; end
+struct _PAtom <: _PNode; tex::String; name::String; constant::Bool; end
+struct _PSum <: _PNode; terms::Vector{_PNode}; end
+struct _PProd <: _PNode; factors::Vector{_PNode}; end
+struct _PPow <: _PNode; base::_PNode; exp::_PNode; end
+struct _PCall <: _PNode; f::String; args::Vector{_PNode}; user::Bool; end
+struct _PEq <: _PNode; lhs::_PNode; rhs::_PNode; end
+struct _POrder <: _PNode; arg::_PNode; end
+struct _PRaw <: _PNode; tex::String; end
+
+const _CALL_TEX = Dict(
+    "sin" => "\\sin", "cos" => "\\cos", "tan" => "\\tan", "cot" => "\\cot", "sec" => "\\sec", "csc" => "\\csc",
+    "sinh" => "\\sinh", "cosh" => "\\cosh", "tanh" => "\\tanh", "coth" => "\\coth",
+    "asin" => "\\arcsin", "acos" => "\\arccos", "atan" => "\\arctan",
+    "asinh" => "\\operatorname{arsinh}", "acosh" => "\\operatorname{arcosh}", "atanh" => "\\operatorname{artanh}",
+    "ln" => "\\ln", "log10" => "\\log_{10}", "exp" => "\\exp", "sign" => "\\operatorname{sgn}",
+    "re" => "\\operatorname{Re}", "im" => "\\operatorname{Im}", "arg" => "\\arg",
+    "trace" => "\\operatorname{tr}", "det" => "\\det")
+const _TRIG = ("sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth")
+
+function _pnode(e::GiacExpr)
+    if !iscall(e)
+        t = giac_type(e)
+        (t == INT || t == ZINT || t == FRAC || t == DOUBLE || t == REAL) && return _PNum(to_julia(e))
+        s = string(e)
+        s == "pi" && return _PAtom("\\pi", s, true)
+        s == "infinity" && return _PAtom("\\infty", s, true)
+        if t == IDNT
+            haskey(_ATOMS, s) && return _PAtom("{" * _ATOMS[s][4] * "}", s, false)
+            # letters Giac's parser reserves are spelled out in names (Δ is Delta)
+            spelled = findfirst(p -> last(p) == s, GIAC_RESERVED_LETTERS)
+            spelled === nothing || return _PAtom(_tex_name(first(GIAC_RESERVED_LETTERS[spelled])), s, false)
+            return _PAtom(_tex_name(s), s, false)
+        end
+        return _PRaw(tidy_latex(_giac_tex(e)))
+    end
+    h = symb_funcname(e)
+    a = arguments(e)
+    h == "+" && return _PSum(_PNode[_pnode(x) for x in a])
+    h == "*" && return _PProd(_PNode[_pnode(x) for x in a])
+    if h == "-" || h == "inv"
+        x = _pnode(only(a))
+        # a number stored as -(6) or inv(6), as division by a number is, is that number
+        x isa _PNum && return _PNum(h == "-" ? -x.v : x.v isa Integer ? 1 // x.v : inv(x.v))
+        return h == "-" ? _PProd(_PNode[_PNum(-1), x]) : _PPow(x, _PNum(-1))
+    end
+    if h == "^"
+        b, x = _pnode(a[1]), _pnode(a[2])
+        # Giac writes x^-2 as (1/x)^2
+        b isa _PPow && b.exp isa _PNum && b.exp.v == -1 && x isa _PNum && return _PPow(b.base, _PNum(-x.v))
+        return _PPow(b, x)
+    end
+    h == "=" && return _PEq(_pnode(a[1]), _pnode(a[2]))
+    h == "exp" && string(only(a)) == "1" && return _PAtom("e", "e", true)
+    h == "order_size" && return _POrder(_pnode(only(a)))
+    h == "abs" && return _PCall("abs", _PNode[_pnode(only(a))], false)
+    h == "conj" && return _PCall("conj", _PNode[_pnode(only(a))], false)
+    h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
+    haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
+    return _PRaw(tidy_latex(_giac_tex(e)))
+end
+
+# ---------------------------------------------------------------------------------------------
+# Products: sign, numeric coefficient, and the factors above and below the line
+# ---------------------------------------------------------------------------------------------
+
+_flat_factors(n::_PNode) = n isa _PProd ? reduce(vcat, map(_flat_factors, n.factors); init = _PNode[]) : _PNode[n]
+
+function _split(n::_PNode)
+    coef = 1 // 1
+    float = false
+    num, den = _PNode[], _PNode[]
+    order = nothing
+    factors = _flat_factors(n)
+    # a product with powers of numbers is a factorization (2^3·3^2·5): its numbers stay factors
+    factorization = any(f -> f isa _PPow && f.base isa _PNum && f.exp isa _PNum && f.exp.v > 0, factors)
+    for f in factors
+        if f isa _PNum && factorization
+            push!(num, f)
+        elseif f isa _PNum
+            f.v isa AbstractFloat && (float = true)
+            coef *= f.v isa Integer ? f.v // 1 : f.v
+        elseif f isa _POrder
+            order = f
+        elseif f isa _PPow && f.exp isa _PNum && f.exp.v < 0
+            k = -f.exp.v
+            push!(den, isone(k) ? f.base : _PPow(f.base, _PNum(k)))
+        else
+            push!(num, f)
+        end
+    end
+    sign = coef < 0 ? -1 : 1
+    coef = abs(coef)
+    return (; sign, coef, float, num, den, order)
+end
+
+# ---------------------------------------------------------------------------------------------
+# Variables and orders
+# ---------------------------------------------------------------------------------------------
+
+# a factor as `(symbol name, power)` if it is a symbol to an integer power
+function _symbol_power(f::_PNode)
+    f isa _PAtom && !f.constant && return (f.name, 1)
+    if f isa _PPow && f.base isa _PAtom && !f.base.constant && f.exp isa _PNum && f.exp.v isa Integer
+        return (f.base.name, Int(f.exp.v))
+    end
+    return nothing
+end
+
+function _term_degrees(t::_PNode)
+    d = Dict{String, Int}()
+    for f in _split(t).num
+        sp = _symbol_power(f)
+        sp === nothing || (d[sp[1]] = get(d, sp[1], 0) + sp[2])
+    end
+    return d
+end
+
+# The variables of an expression, in priority order: those asked for, the arguments of function
+# variables (t in y(t)), and symbols that show as variables (different powers across a sum's terms,
+# or a power of 2 or more), the last in the order they were declared.
+function _variables(root::_PNode, style::TypesetStyle)
+    found = Set{String}()
+    function walk(n)
+        if n isa _PSum
+            degrees = map(_term_degrees, n.terms)
+            for s in union(keys.(degrees)...)
+                ds = [get(d, s, 0) for d in degrees]
+                (count(>(0), ds) >= 2 && length(unique(filter(>(0), ds))) > 1) && push!(found, s)
+            end
+            foreach(walk, n.terms)
+        elseif n isa _PProd
+            foreach(walk, n.factors)
+        elseif n isa _PPow
+            sp = _symbol_power(n)
+            sp !== nothing && sp[2] >= 2 && push!(found, sp[1])
+            walk(n.base); walk(n.exp)
+        elseif n isa _PCall
+            n.user && foreach(a -> a isa _PAtom && !a.constant && push!(found, a.name), n.args)
+            foreach(walk, n.args)
+        elseif n isa _PEq
+            walk(n.lhs); walk(n.rhs)
+        elseif n isa _POrder
+            walk(n.arg)
+        end
+    end
+    walk(root)
+    # variables named in the style are the variables; others are found only without them
+    isempty(style.by) || return copy(style.by)
+    letter(name) = findfirst(==(first(name)), collect(style.variable_letters))
+    function by_letter(n)
+        n isa _PAtom && !n.constant && letter(n.name) !== nothing && push!(found, n.name)
+        for f in (n isa _PSum ? n.terms : n isa _PProd ? n.factors : n isa _PPow ? [n.base, n.exp] :
+                  n isa _PCall ? n.args : n isa _PEq ? [n.lhs, n.rhs] : n isa _POrder ? [n.arg] : _PNode[])
+            by_letter(f)
+        end
+    end
+    by_letter(root)
+    # variables by letter first, in the order of the letters, then the others as declared
+    return sort!(collect(found); by = s -> (something(letter(s), length(style.variable_letters) + 1), _declared_order(s), s))
+end
+
+_declared_order(name::AbstractString) = lock(() -> get(_DECLARATION_ORDER, name, typemax(Int)), _DECLARED_LOCK)
+
+# The place of a factor in a product: numbers, constants, parameters (as declared), variables (by
+# priority), exponentials, other functions, sums.
+function _factor_rank(f::_PNode, vars)
+    b = f isa _PPow ? f.base : f
+    if b isa _PAtom
+        b.constant && return (1, 0, 0, b.name)
+        i = findfirst(==(b.name), vars)
+        greek = first(b.name) in 'α':'ω' || first(b.name) in 'Α':'Ω'
+        i === nothing ? (return (2, Int(greek), _declared_order(b.name), b.name)) : (return (3, 0, i, b.name))
+    end
+    (b isa _PCall && b.f == "exp" || f isa _PPow && b isa _PAtom && b.name == "e") && return (4, 0, 0, "")
+    b isa _PCall && return (5, 0, 0, b.f)
+    return (6, 0, 0, "")
+end
+
+# A term's powers of the variables, in priority order.
+_powers(t::_PNode, vars) = (d = _term_degrees(t); [get(d, v, 0) for v in vars])
+
+function _order_terms(terms::Vector{_PNode}, style::TypesetStyle, vars)
+    order = style.order
+    series = any(t -> _split(t).order !== nothing, terms)
+    order === :auto && (order = series ? :ascending : :descending)
+    if order !== :as_is
+        if isempty(vars) || all(t -> all(iszero, _powers(t, vars)), terms)
+            # nothing to order by: as given, with numbers last
+            terms = vcat(filter(t -> !(t isa _PNum), terms), filter(t -> t isa _PNum, terms))
+        else
+            terms = sort(terms; by = t -> _powers(t, vars), rev = order === :descending, alg = Base.Sort.DEFAULT_STABLE)
+        end
+        # a series' remainder O(…) comes last
+        terms = vcat(filter(t -> _split(t).order === nothing, terms), filter(t -> _split(t).order !== nothing, terms))
+    end
+    negative(t) = _split(t).sign < 0
+    lead = style.lead
+    if negative(terms[1]) && lead !== :as_is && (lead === :positive || length(terms) == 2)
+        i = findfirst(!negative, terms)
+        i === nothing || (terms = vcat(terms[i:i], terms[1:(i - 1)], terms[(i + 1):end]))
+    end
+    return terms
+end
+
+# ---------------------------------------------------------------------------------------------
+# Writing
+# ---------------------------------------------------------------------------------------------
+
+struct _Ctx
+    style::TypesetStyle
+    vars::Vector{String}
+    exponent::Bool
+end
+_in_exponent(c::_Ctx) = _Ctx(c.style, c.vars, true)
+
+"LaTeX for one expression, written in the current style; Giac's own LaTeX where this has no rule."
+function _present_latex(e::GiacExpr)
+    style = _TYPESET[]
+    root = _pnode(e)
+    return _tex(root, _Ctx(style, _variables(root, style), false))
+end
+
+function _number_tex(v::Real)
+    v isa Integer && return string(v)
+    v isa Rational && return isone(denominator(v)) ? string(numerator(v)) : "\\frac{$(numerator(v))}{$(denominator(v))}"
+    s = string(v)
+    m = match(r"^([0-9.]+)e(-?\d+)$", s)
+    return m === nothing ? s : m[1] * " \\times 10^{" * m[2] * "}"
+end
+
+# in an exponent, a fraction is written inline: x^{1/2}
+_tex(n::_PNum, c::_Ctx) = (t = c.exponent && n.v isa Rational && !isone(denominator(n.v)) ?
+                           "$(abs(numerator(n.v)))/$(denominator(n.v))" : _number_tex(abs(n.v)); n.v < 0 ? "-" * t : t)
+_tex(n::_PAtom, c::_Ctx) = n.tex
+_tex(n::_PRaw, c::_Ctx) = n.tex
+_tex(n::_PEq, c::_Ctx) = _tex(n.lhs, c) * " = " * _tex(n.rhs, c)
+_tex(n::_POrder, c::_Ctx) = "O\\left(" * _tex(n.arg, c) * "\\right)"
+_tex(n::_PProd, c::_Ctx) = ((s, t) = _product_tex(n, c); s < 0 ? "-" * t : t)
+_tex(n::_PPow, c::_Ctx) = n.exp isa _PNum && n.exp.v < 0 ? _tex(_PProd(_PNode[n]), c) : _power_tex(n, c)
+
+function _tex(n::_PSum, c::_Ctx)
+    terms = _order_terms(reduce(vcat, (t isa _PSum ? t.terms : _PNode[t] for t in n.terms); init = _PNode[]), c.style, c.vars)
+    out = ""
+    for (i, t) in enumerate(terms)
+        s, body = _product_tex(t, c)
+        out *= i == 1 ? (s < 0 ? "-" * body : body) : (s < 0 ? " - " * body : " + " * body)
+    end
+    return out
+end
+
+# a product (or any term) as its sign and its written form without the sign
+function _product_tex(n::_PNode, c::_Ctx)
+    p = _split(n)
+    if p.order !== nothing
+        inner = _unsigned_product(p, c)
+        return (p.sign, "O\\left(" * inner * "\\right)")
+    end
+    return (p.sign, _unsigned_product(p, c))
+end
+
+function _sorted(fs, c::_Ctx)
+    c.style.products === :as_is && return fs
+    return sort(fs; by = f -> _factor_rank(f, c.vars), alg = Base.Sort.DEFAULT_STABLE)
+end
+
+function _unsigned_product(p, c::_Ctx)
+    num, den = _sorted(p.num, c), _sorted(p.den, c)
+    coef = p.coef
+    q = coef isa Rational ? denominator(coef) : 1
+    pn = coef isa Rational ? numerator(coef) : coef
+    numtex = _factors_tex(pn, num, c)
+    (isempty(den) && isone(q)) && return numtex
+    dentex = _factors_tex(q, den, c)
+    if c.exponent || c.style.fractions === :inline
+        wrap(t, fs, k) = (length(fs) + (isone(k) ? 0 : 1) > 1) ? "\\left(" * t * "\\right)" : t
+        return wrap(numtex, num, pn) * "/" * wrap(dentex, den, q)
+    end
+    if c.style.fractions === :front && isempty(den) && !isempty(num)
+        return "\\frac{$(pn)}{$(q)} " * _factors_tex(1, num, c)
+    end
+    # a fraction's line already groups each side: no parentheses around a lone sum
+    bare(t, fs, k) = isone(k) && length(fs) == 1 && fs[1] isa _PSum ? _tex(fs[1], c) : t
+    return "\\frac{" * bare(numtex, num, pn) * "}{" * bare(dentex, den, q) * "}"
+end
+
+# a numeric coefficient and factors, side by side
+function _factors_tex(k, fs, c::_Ctx)
+    parts = String[]
+    (isempty(fs) || !isone(k)) && push!(parts, _number_tex(k))
+    for f in fs
+        t = f isa _PSum || f isa _PEq ? "\\left(" * _tex(f, c) * "\\right)" : _tex(f, c)
+        # a number next to a number, or before a fraction, is written with a dot
+        !isempty(parts) && occursin(r"\d\}?$", parts[end]) && occursin(r"^(\d|\\frac)", t) && (t = "\\cdot " * t)
+        push!(parts, t)
+    end
+    return join(parts, " ")
+end
+
+# a base that needs parentheses under a power
+_needs_parens(b::_PNode) = b isa _PSum || b isa _PEq || (b isa _PProd) || (b isa _PPow) ||
+                           (b isa _PNum && (b.v < 0 || !(b.v isa Integer))) || (b isa _PCall && !b.user && b.f != "abs")
+
+function _power_tex(n::_PPow, c::_Ctx)
+    b, e = n.base, n.exp
+    if e isa _PNum && c.style.roots === :radical && e.v isa Rational
+        e.v == 1 // 2 && return "\\sqrt{" * _tex(b, c) * "}"
+        e.v == 1 // 3 && return "\\sqrt[3]{" * _tex(b, c) * "}"
+    end
+    etex = _tex(e, _in_exponent(c))
+    b isa _PAtom && b.name == "e" && return "e^{" * etex * "}"
+    if b isa _PCall && b.f in _TRIG && e isa _PNum && e.v isa Integer && e.v > 0 && c.style.trig_powers === :superscript
+        return _CALL_TEX[b.f] * "^{" * etex * "}" * _call_argument(b, c)
+    end
+    btex = _tex(b, c)
+    return (_needs_parens(b) ? "\\left(" * btex * "\\right)" : (occursin(r"[_^]", btex) ? "{" * btex * "}" : btex)) * "^{" * etex * "}"
+end
+
+# a function's argument: bare after a named function when it is a symbol or a power of one
+function _call_argument(n::_PCall, c::_Ctx)
+    a = only(n.args)
+    simple = a isa _PAtom || a isa _PNum && a.v isa Integer && a.v >= 0 || _symbol_power(a) !== nothing
+    return simple ? " " * _tex(a, c) : "\\left(" * _tex(a, c) * "\\right)"
+end
+
+function _tex(n::_PCall, c::_Ctx)
+    if n.user
+        return _tex_name(n.f) * "\\left(" * join((_tex(a, c) for a in n.args), ", ") * "\\right)"
+    end
+    n.f == "abs" && return "\\left|" * _tex(only(n.args), c) * "\\right|"
+    n.f == "conj" && return "\\overline{" * _tex(only(n.args), c) * "}"
+    if n.f == "exp" && c.style.exp === :e
+        return "e^{" * _tex(only(n.args), _in_exponent(c)) * "}"
+    end
+    length(n.args) == 1 && return _CALL_TEX[n.f] * _call_argument(n, c)
+    return _CALL_TEX[n.f] * "\\left(" * join((_tex(a, c) for a in n.args), ", ") * "\\right)"
+end

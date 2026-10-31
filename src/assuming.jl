@@ -15,9 +15,15 @@ Give the variable `v` (or every entry of an array) exactly the assumption `tag`,
 had: `:positive`, `:negative`, `:nonnegative`, `:nonpositive`, `:real`, `:integer`, an open
 interval `(a, b)`, or `nothing` for none. Used by `@giac_var`.
 """
+# When each name was last declared: products are written with parameters in this order.
+const _DECLARATION_ORDER = Dict{String, Int}()
+_note_declared(name::AbstractString) = lock(() -> (_DECLARATION_ORDER[name] = length(_DECLARATION_ORDER) + 1 +
+                                                   maximum(values(_DECLARATION_ORDER); init = 0)), _DECLARED_LOCK)
+
 function _declare!(v::GiacExpr, tag)
     _forget!(v)
     name = string(v)
+    _note_declared(name)
     lock(() -> (tag === nothing ? delete!(_DECLARED, name) : (_DECLARED[name] = tag)), _DECLARED_LOCK)
     tag === nothing || _assume_tag!(v, tag)
     return v

@@ -363,22 +363,27 @@ function _matexpr_latex(A::MatExpr)
     isempty(A.terms) && return "0"
     out = ""
     for (i, (w, c)) in enumerate(A.terms)
-        word = isempty(w) ? "I" : join(map(_factor_latex, w), " ")
-        cs = string(c)
-        ctex = giac_latex(c)
-        negative = startswith(cs, "-")
-        if cs == "1"
-            term = word
-        elseif cs == "-1"
-            term = "-" * word
-        else
-            sum_like = occursin(r"[+-]", cs[2:end])
-            term = sum_like ? "\\left(" * ctex * "\\right) " * word : ctex * " " * word
-            negative = negative && !sum_like
-        end
-        out *= i == 1 ? term : (startswith(term, "-") ? " " * term : " + " * term)
+        sign, term = _term_latex(w, c)
+        out *= i == 1 ? (sign < 0 ? "-" * term : term) : (sign < 0 ? " - " * term : " + " * term)
     end
     return out
+end
+
+# A term as its sign and its written form, in the current style (see presentation.jl): a fraction
+# in its coefficient is written over the whole term, A⁻¹uvᵀA⁻¹ over 1 + vᵀA⁻¹u.
+function _term_latex(w::Word, c::GiacExpr)
+    word = isempty(w) ? "I" : join(map(_factor_latex, w), " ")
+    style = _TYPESET[]
+    root = _pnode(c)
+    ctx = _Ctx(style, _variables(root, style), false)
+    p = _split(root)
+    q = p.coef isa Rational ? denominator(p.coef) : 1
+    pn = p.coef isa Rational ? numerator(p.coef) : p.coef
+    above = isone(pn) && isempty(p.num) ? word : _factors_tex(pn, _sorted(p.num, ctx), ctx) * " " * word
+    (isempty(p.den) && isone(q)) && return (p.sign, above)
+    den = _sorted(p.den, ctx)
+    below = isone(q) && length(den) == 1 && den[1] isa _PSum ? _tex(den[1], ctx) : _factors_tex(q, den, ctx)
+    return (p.sign, "\\frac{" * above * "}{" * below * "}")
 end
 
 giac_latex(A::MatExpr) = _matexpr_latex(A)

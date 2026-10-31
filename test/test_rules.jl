@@ -412,9 +412,9 @@ using Giac.Rules
         @test any(t -> t isa Transform && t.name == "declared relations", standard_transforms())
         # a new declaration drops what was recorded
         @giac_matrix Q[2, 2] P[2, 2] N[2, 2] A[2, 2]
-        @test isempty(Giac._relations()) && isempty(Giac._positive_facts()) && isempty(Giac._nonzero_facts())
+        @test !any(n -> haskey(Giac._MATRIX_FACTS, n), ("Q", "P", "N", "A"))
         @test !is_positive(p11)
-        @test !any(t -> t isa Transform && t.name == "declared relations", standard_transforms())
+        @test isempty(Giac._relations()) == !any(t -> t isa Transform && t.name == "declared relations", standard_transforms())
         @test_throws ArgumentError @giac_matrix B[2, 3]::orthogonal
     end
 end

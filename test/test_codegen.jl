@@ -80,8 +80,8 @@ end
 @testset "series remainder typeset as O" begin
     @giac_var t x
     T(e) = Giac._entry_latex(e)
-    @test endswith(T(Giac.Commands.series(exp(t), t, 0, 3)), "+O\\left(t^{4}\\right)")
-    @test endswith(T(Giac.Commands.series(exp(t), t, 1, 2)), "+O\\left(\\left(t-1\\right)^{3}\\right)")
+    @test endswith(T(Giac.Commands.series(exp(t), t, 0, 3)), " + O\\left(t^{4}\\right)")
+    @test endswith(T(Giac.Commands.series(exp(t), t, 1, 2)), " + O\\left(\\left(t - 1\\right)^{3}\\right)")
     @test !occursin("order", T(Giac.Commands.series(sin(x), x, 0, 4)))
 end
 

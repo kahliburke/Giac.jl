@@ -324,7 +324,7 @@ end
     @test T("A₀") == "A_{0}" && T("\\mathrm{A₁₂}") == "A_{12}"
     @test T("x̄") == "\\bar{x}" && T("θ̇") == "\\dot{\\theta}" && T("\\mathrm{q̇1}") == "\\dot{q}_{1}"
     @giac_var A₀ x̄
-    @test Giac.giac_latex(A₀ + x̄) == "A_{0}+\\bar{x}"
+    @test Giac.giac_latex(A₀ + x̄) == "\\bar{x} + A_{0}"          # x̄ is a variable: its term first
     @giac_var τ
     @test Giac.giac_latex(τ^2) == "\\tau^{2}"
 end

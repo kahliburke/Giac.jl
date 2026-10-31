@@ -187,11 +187,18 @@ function _giac_tex(e::GiacExpr)
     return length(s) > 2 ? strip(chop(s; head = 1, tail = 1)) : string(e)
 end
 
-"LaTeX for one expression, as Giac typesets it (without display delimiters), tidied."
+"""
+LaTeX for one expression (without display delimiters), written as a textbook would (see
+[`typeset!`](@ref)); Giac's own LaTeX, tidied, if that fails.
+"""
 function _entry_latex(e)
     g = convert(GiacExpr, e)
     _is_list(g) && return _list_latex(g)
-    return tidy_latex(_giac_tex(g))
+    return try
+        _present_latex(g)
+    catch
+        tidy_latex(_giac_tex(g))
+    end
 end
 
 # Giac's `list[…]` (vector subtype `_LIST__VECT`), as `solve` returns its solutions. Read from
@@ -213,7 +220,8 @@ const _GREEK_TEX = Dict(
     'ζ' => "\\zeta", 'η' => "\\eta", 'θ' => "\\theta", 'ι' => "\\iota", 'κ' => "\\kappa",
     'λ' => "\\lambda", 'μ' => "\\mu", 'ν' => "\\nu", 'ξ' => "\\xi", 'ρ' => "\\rho", 'σ' => "\\sigma",
     'τ' => "\\tau", 'υ' => "\\upsilon", 'φ' => "\\varphi", 'χ' => "\\chi", 'ψ' => "\\psi",
-    'ω' => "\\omega", 'Γ' => "\\Gamma", 'Θ' => "\\Theta", 'Λ' => "\\Lambda", 'Ξ' => "\\Xi",
+    'ω' => "\\omega", 'Γ' => "\\Gamma", 'Δ' => "\\Delta", 'Θ' => "\\Theta", 'Λ' => "\\Lambda", 'Ξ' => "\\Xi",
+    'Σ' => "\\Sigma", '∂' => "\\partial",
     'Π' => "\\Pi", 'Υ' => "\\Upsilon", 'Φ' => "\\Phi", 'Ψ' => "\\Psi", 'Ω' => "\\Omega")
 
 const _MARK_TEX = Dict('★' => "^{\\star}", '′' => "'", '″' => "''")
