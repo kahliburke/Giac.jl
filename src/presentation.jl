@@ -470,8 +470,9 @@ function _order_terms(terms::Vector{_PNode}, style::TypesetStyle, vars)
     end
     negative(t) = _split(t).sign < 0
     lead = style.lead
-    # a highest derivative stays first, whatever its sign: -ħ²/2m ψ″ + Vψ
-    led_by_derivative = order !== :as_is && length(terms) > 1 && _derivative_order(terms[1]) > _derivative_order(terms[2])
+    # a second or higher derivative stays first, whatever its sign: -ħ²/2m ψ″ + Vψ
+    led_by_derivative = order !== :as_is && length(terms) > 1 && _derivative_order(terms[1]) >= 2 &&
+                        _derivative_order(terms[1]) > _derivative_order(terms[2])
     if negative(terms[1]) && lead !== :as_is && (lead === :positive || length(terms) == 2 && !led_by_derivative)
         i = findfirst(!negative, terms)
         i === nothing || (terms = vcat(terms[i:i], terms[1:(i - 1)], terms[(i + 1):end]))
@@ -544,8 +545,9 @@ function _unsigned_product(p, c::_Ctx)
     num, den = _sorted(p.num, c), _sorted(p.den, c)
     # derivatives written as fractions, and differentials, stand after a fraction, not in it:
     # ħ²/2m ∂²ψ/∂x², p/m dp
-    if !isempty(den) || !(p.coef isa Integer)
-        derivative(f) = f isa Union{_PDeriv, _PDerivOf} && startswith(_tex(f, c), "\\frac")
+    if !isempty(den) || (p.coef isa Rational && !isone(denominator(p.coef)))
+        # (a derivative with only a number below stays in front of the rest: ½ dM/dq q̇²)
+        derivative(f) = !isempty(den) && f isa Union{_PDeriv, _PDerivOf} && startswith(_tex(f, c), "\\frac")
         differential(f) = f isa _PAtom && _is_differential(f.name)
         d = vcat(findall(derivative, num), findall(differential, num))
         if !isempty(d) && length(d) < length(num) + (isone(p.coef) ? 0 : 1)

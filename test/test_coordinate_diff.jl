@@ -75,7 +75,7 @@
         end
         @test d.rows[1][2] == "\\int_{0}^{h} \\left(\\frac{\\partial F}{\\partial q} \\eta + \\frac{\\partial F}{\\partial \\dot{q}} \\dot{\\eta}\\right) \\, \\mathrm{d}t"
         @test L(diff(substitute(F(q, q̇, t), q => q + ε * η), ε)) ==
-              "\\partial_{1} F\\left(q + \\varepsilon \\eta, \\dot{q} + \\varepsilon \\dot{\\eta}, t\\right) \\eta + \\partial_{2} F\\left(q + \\varepsilon \\eta, \\dot{q} + \\varepsilon \\dot{\\eta}, t\\right) \\dot{\\eta}"
+              "\\frac{\\partial F}{\\partial x}\\left(q + \\varepsilon \\eta, \\dot{q} + \\varepsilon \\dot{\\eta}, t\\right) \\eta + \\frac{\\partial F}{\\partial v}\\left(q + \\varepsilon \\eta, \\dot{q} + \\varepsilon \\dot{\\eta}, t\\right) \\dot{\\eta}"
     end
 
     @testset "a function of several arguments rebuilt from its tree" begin

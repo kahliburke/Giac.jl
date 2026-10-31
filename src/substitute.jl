@@ -57,9 +57,40 @@ function substitute(expr::GiacExpr, dict::AbstractDict{<:GiacExpr})::GiacExpr
     # Collect parallel vectors of GiacExpr keys and untyped values, then
     # delegate to the direct-binding shim. Substitution is applied
     # simultaneously by giac_subst, so e.g. Dict(x => y, y => x) swaps.
+    expr = _substitute_functions(expr, dict)
     vars = collect(GiacExpr, keys(dict))
     vals = collect(values(dict))
     return _take_derivatives(_giac_subst_vec_tier1(expr, vars, vals))
+end
+
+# A function of several variables substituted for, `ψ(x, t) => φ(x) T(t)`, is replaced in the tree
+# along with its derivatives: GIAC holds ∂ψ/∂t as diff(ψ,1)(x, t), which has no ψ(x, t) in it for
+# subst to find, so each derivative is taken of the value instead.
+function _substitute_functions(expr::GiacExpr, dict)
+    functions = Dict{String, Tuple{Vector{Node}, Any}}()
+    for (k, v) in dict
+        n = _node(k)
+        _is_function_of_variables(n) && length(n.args) > 2 && (functions[n.args[1].name] = (n.args[2:end], v))
+    end
+    isempty(functions) && return expr
+    derivative(m) = m isa CallNode && m.f == "of" && m.args[1] isa CallNode && m.args[1].f == "diff"
+    _any_node(derivative, _node(expr)) || return expr
+    return GiacExpr(_replace_nodes(_node(expr)) do m
+        derivative(m) || return nothing
+        g, idx = m.args[1], Int[]
+        while g isa CallNode && g.f == "diff"
+            all(a -> a isa NumNode && a.v isa Integer, g.args[2:end]) || return nothing
+            prepend!(idx, [a.v for a in g.args[2:end]])
+            g = g.args[1]
+        end
+        args = m.args[2:end]
+        (g isa SymNode && haskey(functions, g.name)) || return nothing
+        fargs, v = functions[g.name]
+        (isequal(fargs, args) && all(i -> 0 <= i < length(args), idx)) || return nothing
+        d = convert(GiacExpr, v)
+        foreach(i -> d = diff(d, GiacExpr(args[i + 1])), idx)
+        return _node(d)
+    end)
 end
 
 # The derivatives a substitution put an expression into, `diff(q(t) + ε*η(t), t)` from
