@@ -32,13 +32,15 @@ function Base.showerror(io::IO, e::GiacError)
     print(io, "GiacError(", e.category, "): ", e.msg)
 end
 
+"A node of an expression tree; see core.jl."
+abstract type Node end
+
 """
     GiacExpr
 
-Represents a symbolic mathematical expression from GIAC.
-
-Wraps a pointer to a C++ giac::gen object. Memory is managed automatically
-via Julia's garbage collector and finalizers.
+A symbolic expression. It is held as a Julia tree (see core.jl), where arithmetic is done, as a
+GIAC object, which GIAC's commands work on, or as both: each form is made from the other the
+first time it is needed. Memory is managed by Julia's garbage collector.
 
 # Example
 ```julia
@@ -47,17 +49,22 @@ println(expr)  # x^2+1
 ```
 """
 mutable struct GiacExpr
-    ptr::Ptr{Cvoid}
+    ptr::Ptr{Cvoid}                  # the GIAC object's handle, C_NULL until it is made
+    node::Union{Nothing, Node}       # the tree, nothing until it is made
+    native::Bool                     # built in Julia: written from the tree
 
     function GiacExpr(ptr::Ptr{Cvoid})
-        obj = new(ptr)
+        obj = new(ptr, nothing, false)
         if ptr != C_NULL
             finalizer(_finalize_giacexpr, obj)
         end
         return obj
     end
+    GiacExpr(n::Node, ::Val{:native}) = new(C_NULL, n, true)
 end
 GiacExpr(x::GiacExpr) = x
+# an expression from a tree; an opaque GIAC object stays the expression it came from
+GiacExpr(n::Node) = n isa GenNode ? n.expr : GiacExpr(n, Val(:native))
 
 """
     _finalize_giacexpr(expr::GiacExpr)
@@ -65,19 +72,53 @@ GiacExpr(x::GiacExpr) = x
 Cleanup function for GiacExpr. Called by the garbage collector.
 """
 function _finalize_giacexpr(expr::GiacExpr)
-    if expr.ptr != C_NULL
-        _giac_free_expr(expr.ptr)
-        expr.ptr = C_NULL
+    p = getfield(expr, :ptr)
+    if p != C_NULL
+        _giac_free_expr(p)
+        setfield!(expr, :ptr, C_NULL)
     end
     nothing
 end
 
-# String conversion for GiacExpr
-function Base.string(expr::GiacExpr)::String
-    if expr.ptr == C_NULL
-        return "<null GiacExpr>"
+# The GIAC object of an expression, made from its tree the first time it is needed
+function _handle(e::GiacExpr)
+    p = getfield(e, :ptr)
+    p != C_NULL && return p
+    n = getfield(e, :node)
+    n === nothing && return p
+    return with_giac_lock() do
+        p = getfield(e, :ptr)
+        p != C_NULL && return p
+        p = _giac_eval_string(_str(n), getfield(DEFAULT_CONTEXT[], :ptr))
+        setfield!(e, :ptr, p)
+        finalizer(_finalize_giacexpr, e)
+        p
     end
-    return _giac_expr_to_string(expr.ptr)
+end
+
+# The tree of an expression, made from its GIAC object the first time it is needed
+function _node(e::GiacExpr)
+    n = getfield(e, :node)
+    n === nothing || return n
+    p = getfield(e, :ptr)
+    n = with_giac_lock() do
+        gen = _get_gen(p)
+        gen === nothing ? nothing : _node_from_gen(gen)
+    end
+    # an object the tree does not model is this expression itself
+    n = n === nothing || n isa GenNode ? GenNode(e, _giac_expr_to_string(p)) : n
+    setfield!(e, :node, n)
+    return n
+end
+
+# String conversion for GiacExpr: an expression built in Julia is written from its tree, one
+# from GIAC as GIAC writes it
+function Base.string(expr::GiacExpr)::String
+    n = getfield(expr, :node)
+    getfield(expr, :native) && n !== nothing && return _str(n)
+    p = getfield(expr, :ptr)
+    p == C_NULL && return n === nothing ? "<null GiacExpr>" : _str(n)
+    return _giac_expr_to_string(p)
 end
 
 # a trace or determinant of symbolic matrices shows as such (see matrix_symbols.jl)
@@ -165,7 +206,7 @@ result = expr.expand().simplify().factor()
 function Base.getproperty(expr::GiacExpr, name::Symbol)
     # Handle struct field access
     if name === :ptr
-        return getfield(expr, :ptr)
+        return _handle(expr)
     end
 
     # Return a closure that invokes giac_cmd with this expression as first argument

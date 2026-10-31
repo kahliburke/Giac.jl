@@ -4,7 +4,7 @@ using BlockArrays
 
 @testset "symbolic scalars in broadcasting and 5-argument mul!" begin
     @giac_var t
-    @test string.(t .* [1, 2]) == ["t", "t*2"]
+    @test string.(t .* [1, 2]) == ["t", "2*t"]
     C = Matrix{GiacExpr}(undef, 2, 2)
     A = GiacExpr[1 2; 3 4]
     mul!(C, A, A, one(GiacExpr), zero(GiacExpr))

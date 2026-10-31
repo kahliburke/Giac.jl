@@ -24,7 +24,7 @@
         @test S(eq^2) == S((2x + 3)^2 ~ y^2)
         @test S(eq + (a ~ b)) == S(2x + 3 + a ~ y + b)
         @test S(1 / eq) == S(1 / (2x + 3) ~ 1 / y)
-        @test S(Giac.Commands.simplify((eq - 3) / 2)) == S(x ~ (y - 3) / 2)
+        @test isequal(Giac.Commands.simplify((eq - 3) / 2), x ~ (y - 3) / 2)
         # ordinary arithmetic is unchanged
         @test S(x + 1) == "x+1"
     end

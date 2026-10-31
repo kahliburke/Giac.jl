@@ -32,6 +32,7 @@ using LinearAlgebra
     include("test_in_form.jl")
     include("test_names.jl")
     include("test_threads.jl")
+    include("test_core.jl")
     include("test_matrix_iteration.jl")
     include("test_memory.jl")
 

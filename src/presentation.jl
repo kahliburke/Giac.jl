@@ -360,12 +360,12 @@ function _order_terms(terms::Vector{_PNode}, style::TypesetStyle, vars)
     series = any(t -> _split(t).order !== nothing, terms)
     order === :auto && (order = series ? :ascending : :descending)
     if order !== :as_is
-        key(t) = vcat(_derivative_order(t), _powers(t, vars))
-        if all(t -> all(iszero, key(t)), terms)
+        keys = [vcat(_derivative_order(t), _powers(t, vars)) for t in terms]      # each computed once
+        if all(k -> all(iszero, k), keys)
             # nothing to order by: as given, with numbers last
             terms = vcat(filter(t -> !(t isa _PNum), terms), filter(t -> t isa _PNum, terms))
         else
-            terms = sort(terms; by = key, rev = order === :descending, alg = Base.Sort.DEFAULT_STABLE)
+            terms = terms[sortperm(keys; rev = order === :descending, alg = Base.Sort.DEFAULT_STABLE)]
         end
         # a series' remainder O(…) comes last
         terms = vcat(filter(t -> _split(t).order === nothing, terms), filter(t -> _split(t).order !== nothing, terms))

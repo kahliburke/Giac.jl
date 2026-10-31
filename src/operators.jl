@@ -5,100 +5,56 @@
 # Arithmetic Operators
 # =============================================================================
 
+# Arithmetic is done on the expression trees (core.jl). With an equation, the operation applies to
+# both sides: `(a ~ b) - c` is `a - c ~ b - c`, `(a ~ b) + (c ~ d)` is `a + c ~ b + d`.
+
 """
     +(a::GiacExpr, b::GiacExpr)
 
-Add two GIAC expressions.
+Add two expressions. Like terms are collected; nothing is expanded.
 """
-function Base.:+(a::GiacExpr, b::GiacExpr)::GiacExpr
-    r = with_giac_lock() do
-        ptr = _giac_add(a.ptr, b.ptr)
-        if ptr == C_NULL
-            throw(GiacError("Addition failed", :eval))
-        end
-        return GiacExpr(ptr)
-    end
-    return _arith_result(+, a, b, r)
-end
+Base.:+(a::GiacExpr, b::GiacExpr) = _arith(+, _add, a, b)
 
 """
     -(a::GiacExpr, b::GiacExpr)
 
-Subtract two GIAC expressions.
+Subtract two expressions.
 """
-function Base.:-(a::GiacExpr, b::GiacExpr)::GiacExpr
-    r = with_giac_lock() do
-        ptr = _giac_sub(a.ptr, b.ptr)
-        if ptr == C_NULL
-            throw(GiacError("Subtraction failed", :eval))
-        end
-        return GiacExpr(ptr)
-    end
-    return _arith_result(-, a, b, r)
-end
+Base.:-(a::GiacExpr, b::GiacExpr) = _arith(-, _sub, a, b)
 
 """
     -(a::GiacExpr)
 
-Negate a GIAC expression.
+Negate an expression.
 """
-function Base.:-(a::GiacExpr)::GiacExpr
-    r = with_giac_lock() do
-        ptr = _giac_neg(a.ptr)
-        if ptr == C_NULL
-            throw(GiacError("Negation failed", :eval))
-        end
-        return GiacExpr(ptr)
-    end
-    return _arith_result(-, a, r)
-end
+Base.:-(a::GiacExpr) = _is_equation(a) ? -(lhs(a)) ~ -(rhs(a)) : GiacExpr(_neg(_node(a)))
 
 """
     *(a::GiacExpr, b::GiacExpr)
 
-Multiply two GIAC expressions.
+Multiply two expressions. Equal bases are combined (`x * x` is `x^2`); nothing is expanded.
 """
-function Base.:*(a::GiacExpr, b::GiacExpr)::GiacExpr
-    r = with_giac_lock() do
-        ptr = _giac_mul(a.ptr, b.ptr)
-        if ptr == C_NULL
-            throw(GiacError("Multiplication failed", :eval))
-        end
-        return GiacExpr(ptr)
-    end
-    return _arith_result(*, a, b, r)
-end
+Base.:*(a::GiacExpr, b::GiacExpr) = _arith(*, _mul, a, b)
 
 """
     /(a::GiacExpr, b::GiacExpr)
 
-Divide two GIAC expressions.
+Divide two expressions.
 """
-function Base.:/(a::GiacExpr, b::GiacExpr)::GiacExpr
-    r = with_giac_lock() do
-        ptr = _giac_div(a.ptr, b.ptr)
-        if ptr == C_NULL
-            throw(GiacError("Division failed", :eval))
-        end
-        return GiacExpr(ptr)
-    end
-    return _arith_result(/, a, b, r)
-end
+Base.:/(a::GiacExpr, b::GiacExpr) = _arith(/, _div, a, b)
 
 """
     ^(a::GiacExpr, b::GiacExpr)
 
-Raise a GIAC expression to a power.
+Raise an expression to a power.
 """
-function Base.:^(a::GiacExpr, b::GiacExpr)::GiacExpr
-    r = with_giac_lock() do
-        ptr = _giac_pow(a.ptr, b.ptr)
-        if ptr == C_NULL
-            throw(GiacError("Exponentiation failed", :eval))
-        end
-        return GiacExpr(ptr)
+Base.:^(a::GiacExpr, b::GiacExpr) = _arith(^, _pow, a, b)
+
+function _arith(op, f, a::GiacExpr, b::GiacExpr)
+    if _is_equation(a) || _is_equation(b)
+        return op(_side(lhs, a), _side(lhs, b)) ~ op(_side(rhs, a), _side(rhs, b))
     end
-    return _arith_result(^, a, b, r)
+    return GiacExpr(f(_node(a), _node(b)))
 end
 
 """
@@ -146,6 +102,7 @@ Check if two GIAC expressions are equal.
 Note: This performs symbolic equality check, not numerical.
 """
 function Base.:(==)(a::GiacExpr, b::GiacExpr)::Bool
+    isequal(a, b) && return true
     with_giac_lock() do
         return _giac_equal(a.ptr, b.ptr)
     end
@@ -157,21 +114,19 @@ Base.:(==)(a::Number, b::GiacExpr) = convert(GiacExpr, a) == b
 """
     isequal(a::GiacExpr, b::GiacExpr)
 
-Structural equality: the same expression as Giac stores it. This is what `Dict`, `Set` and
-`unique` use, and it agrees with `hash`. `==` is mathematical equality instead (`x + 1 == 1 + x`
-and `sin(x)^2 + cos(x)^2 == 1` are both `true`), decided by simplifying the difference.
+Structural equality: the same tree, with the terms of a sum and the factors of a product in any
+order (`x + y` and `y + x`). This is what `Dict`, `Set` and `unique` use, and it agrees with
+`hash`. `==` is mathematical equality instead (`sin(x)^2 + cos(x)^2 == 1` is `true`), decided by
+simplifying the difference.
 """
-Base.isequal(a::GiacExpr, b::GiacExpr) = string(a) == string(b)
+Base.isequal(a::GiacExpr, b::GiacExpr) = a === b || isequal(_node(a), _node(b))
 
 """
     hash(expr::GiacExpr, h::UInt)
 
-Hash a GIAC expression for use in dictionaries and sets.
+Hash an expression for use in dictionaries and sets, consistently with `isequal`.
 """
-function Base.hash(expr::GiacExpr, h::UInt)::UInt
-    # Use string representation for hashing
-    return hash(string(expr), h)
-end
+Base.hash(expr::GiacExpr, h::UInt) = hash(_node(expr), h)
 
 # =============================================================================
 # Symbolic Comparison Operators (064-symbolic-comparison-operators)
@@ -416,7 +371,12 @@ eq = x + y ~ giac_eval("10")   # Creates equation x+y=10
 - [`==`](@ref): Boolean equality check (returns `Bool`)
 - [`solve`](@ref): Solve equations
 """
-Base.:~(a::GiacExpr, b::GiacExpr)::GiacExpr = invoke_cmd(:equal, a, b)
+function Base.:~(a::GiacExpr, b::GiacExpr)::GiacExpr
+    na, nb = _node(a), _node(b)
+    # a list or other GIAC object is left to GIAC's `equal`
+    (na isa GenNode || nb isa GenNode) && return invoke_cmd(:equal, a, b)
+    return GiacExpr(CallNode("=", Node[na, nb]))
+end
 
 """
     ~(a::GiacExpr, b::Number) -> GiacExpr
@@ -490,6 +450,9 @@ See also: Type-specific methods for [`Rational`](@ref), [`Complex`](@ref),
 function Base.convert(::Type{GiacExpr}, x::Number)
     if x isa AbstractFloat && isinf(x)
         return giac_eval(x > 0 ? "inf" : "-inf")
+    elseif x isa Union{Integer, Float64, Float32, Float16} ||
+           (x isa Complex && real(x) isa Union{Integer, Rational, Float64} && isfinite(x))
+        return GiacExpr(NumNode(x))
     else
         return giac_eval(string(x))
     end
@@ -514,44 +477,18 @@ Base.convert(::Type{GiacExpr}, x::Bool) = convert(GiacExpr, Int(x))
 """
     convert(::Type{GiacExpr}, x::Rational) -> GiacExpr
 
-Convert a Julia Rational number to a GIAC expression using the division operator.
-
-Uses the C++ `_giac_div` function (tier 1/2) instead of string parsing,
-which correctly handles the conversion from Julia's `//` syntax to GIAC's `/`.
-
-# Examples
-```julia
-convert(GiacExpr, 1//2)     # Returns GiacExpr representing 1/2
-convert(GiacExpr, -3//4)    # Returns GiacExpr representing -3/4
-convert(GiacExpr, 22//7)    # Returns GiacExpr representing 22/7
-```
+The exact rational `x` (`1//2` is 1/2).
 """
-function Base.convert(::Type{GiacExpr}, x::Rational)
-    num = convert(GiacExpr, numerator(x))
-    den = convert(GiacExpr, denominator(x))
-    return num / den
-end
+Base.convert(::Type{GiacExpr}, x::Rational) = GiacExpr(NumNode(x))
 
 """
     convert(::Type{GiacExpr}, x::Complex) -> GiacExpr
 
-Convert a Julia Complex number to a GIAC expression using arithmetic operators.
-
-Uses C++ `_giac_add` and `_giac_mul` functions (tier 1/2) to construct
-`real + imag * i` where `i` is GIAC's imaginary unit.
-
-# Examples
-```julia
-convert(GiacExpr, 1 + 2im)    # Returns GiacExpr representing 1+2*i
-convert(GiacExpr, 3.5 + 0im)  # Returns GiacExpr representing 3.5
-convert(GiacExpr, 2im)        # Returns GiacExpr representing 2*i
-```
+The complex number `x`, exact for integer and rational parts (`1 + 2im` is 1+2*i).
 """
 function Base.convert(::Type{GiacExpr}, x::Complex)
-    re = convert(GiacExpr, real(x))
-    im_part = convert(GiacExpr, imag(x))
-    i_unit = giac_eval("i")
-    return re + im_part * i_unit
+    real(x) isa Union{Integer, Rational, Float64} && isfinite(x) && return GiacExpr(NumNode(x))
+    return convert(GiacExpr, real(x)) + convert(GiacExpr, imag(x)) * GiacExpr(NumNode(im))
 end
 
 """
@@ -564,9 +501,7 @@ Convert Julia's π constant to GIAC's `pi` constant.
 convert(GiacExpr, π)    # Returns GiacExpr representing pi
 ```
 """
-function Base.convert(::Type{GiacExpr}, ::Irrational{:π})
-    return giac_eval("pi")
-end
+Base.convert(::Type{GiacExpr}, ::Irrational{:π}) = GiacExpr(SymNode("pi"))
 
 """
     convert(::Type{GiacExpr}, ::Irrational{:ℯ}) -> GiacExpr

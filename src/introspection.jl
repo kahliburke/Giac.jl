@@ -46,6 +46,8 @@ giac_type(g) == VECT  # true
 See also: `Giac.GenTypes` module for type enum values
 """
 function giac_type(g::GiacExpr)::T
+    # an expression from GIAC has the type GIAC gives it (its tree may be simpler: -8^(1/3) is -2)
+    getfield(g, :native) && return _node_type(getfield(g, :node))
     if g.ptr == C_NULL
         throw(GiacError("Cannot get type of null expression", :type))
     end
@@ -505,6 +507,10 @@ symb_funcname(giac_eval("sin(x)"))  # "sin"
 ```
 """
 function symb_funcname(g::GiacExpr)::String
+    n = _node(g)
+    v = n isa GenNode ? nothing : _view(n)
+    v === nothing || return v[1]
+    getfield(g, :native) && throw(GiacError("Gen is not symbolic", :type))
     if g.ptr == C_NULL
         throw(GiacError("Cannot get function name of null expression", :type))
     end
@@ -582,6 +588,10 @@ end
 # anything else as the one argument. Nothing is printed and parsed again, which would also
 # evaluate each argument again.
 function arguments(g::GiacExpr)::Vector{GiacExpr}
+    n = _node(g)
+    v = n isa GenNode ? nothing : _view(n)
+    v === nothing || return GiacExpr[GiacExpr(a) for a in v[2]]
+    getfield(g, :native) && throw(ArgumentError("expression is not a function call"))
     iscall(g) || throw(ArgumentError("expression is not a function call"))
     GiacCxxBindings._have_library || return collect(GiacExpr, symb_argument(g))
     return with_giac_lock() do

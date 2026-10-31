@@ -64,6 +64,8 @@ julia> to_julia(giac_eval("\\"hello\\""))
 [`is_constant`](@ref), [`unwrap_const`](@ref)
 """
 function to_julia(g::GiacExpr)
+    n = getfield(g, :node)
+    n isa NumNode && return n.v
     if g.ptr == C_NULL
         throw(GiacError("Cannot convert null expression", :type))
     end
