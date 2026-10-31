@@ -658,6 +658,7 @@ taking off one derivative term at a time: `∫ V u′ uᵖ dt = V uᵖ⁺¹/(p+1
 """
 integrate(args...) = invoke_cmd(:integrate, args...)
 integrate(f::GiacExpr, x::GiacExpr) = parentmodule(@__MODULE__)._integrate(f, x)
+export integrate      # written here, so the generated commands' export skips it
 
 # desolve: an unknown declared as `y(t)` is passed by name
 # ============================================================================

@@ -383,7 +383,8 @@ Uses Tier 1 C++ wrapper for high performance.
 function Base.sqrt(expr::GiacExpr)::GiacExpr
     # what the core takes apart (√(4m²) = 2m for m ≥ 0, √8 = 2√2) it gives; the rest is GIAC's
     n = _node(expr)
-    r = n isa GenNode ? nothing : _pow(n, _HALF)
+    # numbers and floating-point values are GIAC's to take the root of
+    r = n isa GenNode || n isa NumNode || _has_float(n) ? nothing : _pow(n, _HALF)
     plain = r === nothing || (r isa MulNode && isone(r.coef) && length(r.factors) == 1 && isequal(first(r.factors[1]), n))
     plain && return _tier1_or_fallback(_giac_sqrt_tier1, :sqrt, expr)
     r isa MulNode || return GiacExpr(r)

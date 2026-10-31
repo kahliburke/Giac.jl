@@ -278,6 +278,13 @@ function _nonnegative_power(b::MulNode, e::NumNode)
     return _mul(parts...)
 end
 
+# whether a tree has a floating-point number in it
+_has_float(n::Node) = false
+_has_float(n::NumNode) = n.v isa AbstractFloat || (n.v isa Complex && real(n.v) isa AbstractFloat)
+_has_float(n::AddNode) = any(((m, c),) -> c isa AbstractFloat || _has_float(m), n.terms)
+_has_float(n::MulNode) = n.coef isa AbstractFloat || any(((b, e),) -> _has_float(b) || _has_float(e), n.factors)
+_has_float(n::CallNode) = any(_has_float, n.args)
+
 # Whether a node is known not to be negative: a number ≥ 0, a name declared positive or
 # nonnegative (or in an interval above 0), pi, and sums, products and powers of such
 _known_nonnegative(n::Node) = false
