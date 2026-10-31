@@ -31,3 +31,20 @@ function _exact_literals(ex::Expr)
 end
 
 _exact_call(x) = Expr(:call, GlobalRef(Base, :convert), GlobalRef(@__MODULE__, :GiacExpr), x)
+
+"""
+    @exact expr
+
+`expr` with its numbers kept exact: `@exact 2π * x` is 2πx with Giac's π rather than 6.283…·x,
+and `@exact sqrt(2) / 2` is √2/2. A function cannot do this, as `2π` is a float before any
+function sees it. See [`_exact_literals`](@ref Giac._exact_literals) for what is rewritten; a
+block works too.
+
+```julia
+@giac_var x a::positive
+φ = @exact sqrt(2 / a) * sin(2π * x / a)     # √(2/a) sin(2πx/a)
+```
+"""
+macro exact(ex)
+    return esc(_exact_literals(ex))
+end

@@ -49,5 +49,9 @@
         @test string(Base.invokelatest(eval(:(x -> $ex)), x)) == string(sin(2 * convert(GiacExpr, π) * x) + sqrt(convert(GiacExpr, 2)) * x^(1 // 2) +
                                           convert(GiacExpr, 2)^(1 // 3) * convert(GiacExpr, ℯ))
         @test Giac._exact_literals(:(f(1.5, 2 * 3))) == :(f(1.5, 2 * 3))           # floats and integers as written
+        @giac_var a::positive
+        @test string(@exact sqrt(2 / a) * sin(2π * x / a)) == string(sqrt(2 // 1 / a) * sin(2 * convert(GiacExpr, π) * x / a))
+        @test !occursin(".", string(@exact 2π * x + sqrt(2)))
+        @giac_var a
     end
 end
