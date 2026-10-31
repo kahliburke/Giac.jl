@@ -38,22 +38,70 @@ function Base.vec(X::MatExpr)
     return MatExpr(MatrixSymbol(name, _dim_mul(s.rows, s.cols), 1, Symbol[]))
 end
 
+# a constant structured matrix as an expression
+_const_expr(kind, a, b) = (c = ConstMatrix(kind, a, b); _matexpr(_rows(c), _cols(c), [Factor[Factor(c, false, 1)] => one(GiacExpr)]))
+
 """
-    vectorize(E, X) -> (K, R)
+    commutation(m, n)
+
+The commutation matrix `K(m,n)`, the `mn × mn` permutation with `vec(Xᵀ) = K(m,n) vec X` for an
+`m × n` matrix `X`. As expressions are built, `K(m,n)ᵀ = K(m,n)⁻¹ = K(n,m)`, `K(1,n) = I`,
+`K(n,n)D(n) = D(n)`, and a `K` moves past a Kronecker product: `K(p,m)(A⊗B) = (B⊗A)K(q,n)` for
+`A` `m × n` and `B` `p × q`. Sizes are numbers or names.
+"""
+commutation(m, n) = _const_expr(:commutation, _as_dim(m), _as_dim(n))
+
+"""
+    duplication(n)
+
+The duplication matrix `D(n)`, `n² × n(n+1)/2`, with `vec P = D(n) vech P` for a symmetric `n × n`
+matrix `P`; [`duplication_plus`](@ref) is its left inverse.
+"""
+duplication(n) = _const_expr(:duplication, _as_dim(n), _as_dim(n))
+
+"""
+    duplication_plus(n)
+
+`D(n)⁺ = (DᵀD)⁻¹Dᵀ`, the left inverse of the duplication matrix: `vech P = D⁺ vec P` for a
+symmetric `P`, and `D⁺D = I`.
+"""
+duplication_plus(n) = _const_expr(:duplication_plus, _as_dim(n), _as_dim(n))
+
+"""
+    vech(P::MatExpr)
+
+The entries of the symmetric matrix symbol `P` on and below the diagonal, column by column, as one
+column of size `n(n+1)/2`, written `vech P`: `vec P = D vech P`.
+"""
+function vech(P::MatExpr)
+    s = _matrix_symbol(P)
+    _symmetric(s) || throw(ArgumentError("vech takes a symmetric matrix; declare $(s.name) with ::symmetric"))
+    name = Symbol("vech", s.name)
+    _TEX_NAMES[string(name)] = "\\operatorname{vech} " * _tex_name(string(s.name))
+    return MatExpr(MatrixSymbol(name, _vech_dim(s.rows), 1, Symbol[]))
+end
+
+"""
+    vectorize(E, X) -> (K = …, R = …)
+    vectorize(E, P; unknowns = :vech) -> (K = …, R = …)
 
 An expression `E` linear in the matrix symbol `X`, as the linear system its entries make:
-`vec E = K vec X + vec R`, with `K` from `vec(UXV) = (Vᵀ ⊗ U) vec X` and `R` the terms without `X`.
+`vec E = K vec X + vec R`, with `K` from `vec(UXV) = (Vᵀ ⊗ U) vec X` and `vec(UXᵀV) = (Vᵀ ⊗ U)
+K(m,n) vec X` (a [`commutation`](@ref) matrix), and `R` the terms without `X`. The result is a
+named tuple: `vectorize(E, X).K`, or `K, R = vectorize(E, X)`.
 
 ```julia
 @matsym A[n, n] P[n, n]::symmetric
-K, R = vectorize(A'*P + P*A, P)       # K = I⊗Aᵀ + Aᵀ⊗I, R = 0
+K, R = vectorize(A'*P + P*A, P)       # K = Aᵀ⊗I + I⊗Aᵀ, R = 0
 substitute(K, A => [0 1; -2 -3])      # the 4×4 matrix, to solve K vec P = -vec Q
 ```
 
-`X` must appear at most once in each term, and not transposed (unless it is symmetric or skew,
-so that its transpose is itself or its negative).
+For a symmetric unknown `P` and symmetric `E` (a Lyapunov or Riccati-like equation),
+`unknowns = :vech` counts each entry once: `vech E = K vech P + vech R` with
+`K = D⁺ K₀ D`, square of size `n(n+1)/2`. `X` must appear at most once in each term.
 """
-function vectorize(E::MatExpr, X::MatExpr)
+function vectorize(E::MatExpr, X::MatExpr; unknowns::Symbol = :vec)
+    unknowns in (:vec, :vech) || throw(ArgumentError("unknowns is :vec or :vech, got :$unknowns"))
     s = _matrix_symbol(X)
     K = zero_matrix(_dim_mul(E.rows, E.cols), _dim_mul(s.rows, s.cols))
     R = zero_matrix(E.rows, E.cols)
@@ -66,10 +114,15 @@ function vectorize(E::MatExpr, X::MatExpr)
         (length(at) == 1 && w[only(at)].power == 1) ||
             throw(ArgumentError("$(_plain(E, true)) is not linear in $(s.name)"))
         i = only(at)
-        w[i].transposed && throw(ArgumentError("vectorize: $(s.name)ᵀ appears in $(_plain(E, true)); only $(s.name) itself is handled"))
-        U = _word_expr(w[1:(i - 1)], s.rows)
-        V = _word_expr(w[(i + 1):end], s.cols)
-        K = K + c * kron(transpose(V), U)
+        U = _word_expr(w[1:(i - 1)], w[i].transposed ? s.cols : s.rows)
+        V = _word_expr(w[(i + 1):end], w[i].transposed ? s.rows : s.cols)
+        # vec(U Xᵀ V) = (Vᵀ ⊗ U) vec(Xᵀ) = (Vᵀ ⊗ U) K(m,n) vec X
+        term = kron(transpose(V), U)
+        w[i].transposed && (term = term * commutation(s.rows, s.cols))
+        K = K + c * term
     end
-    return K, R
+    unknowns === :vec && return (K = K, R = R)
+    _symmetric(s) || throw(ArgumentError("unknowns = :vech needs a symmetric $(s.name)"))
+    (E.rows == E.cols && E == transpose(E)) || throw(ArgumentError("unknowns = :vech needs a symmetric expression"))
+    return (K = duplication_plus(E.rows) * K * duplication(s.rows), R = R)
 end

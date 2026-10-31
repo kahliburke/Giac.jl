@@ -27,12 +27,12 @@
     @testset "vectorizing linear matrix equations" begin
         K, R = vectorize(A' * P + P * A, P)
         @test T(K) == "kron(A', I) + kron(I, A')" && iszero(R)
-        @test T(first(vectorize(E * X + X * F, X))) == "kron(F', I) + kron(I, E)"
+        @test T(vectorize(E * X + X * F, X).K) == "kron(F', I) + kron(I, E)"
         K2, R2 = vectorize(A * X * B + C * C * X, X)
         @test T(K2) == "kron(B', A) + kron(I, C^2)" && iszero(R2)
-        @test T(last(vectorize(A * P + C, P))) == "C"
+        @test T(vectorize(A * P + C, P).R) == "C"
         @test_throws ArgumentError vectorize(P * A * P, P)
-        @test_throws ArgumentError vectorize(A * E' * A, E)                  # a transpose of a general E
+        @test T(vectorize(A * E' * C, E).K) == "kron(C', A)*K(n, n)"        # a transpose, through K
         @test Giac.giac_latex(K) == "A^{\\top} \\otimes I + I \\otimes A^{\\top}"
     end
 
@@ -45,5 +45,34 @@
         @test string.(P₂) == ["5/4" "1/4"; "1/4" "1/4"]
         @test P₂ * A₂ + A₂' * P₂ == -GiacExpr[1 0; 0 1]
         @test string(substitute(tr(kron(A, B)), A => A₂, B => GiacExpr[1 2; 3 4])) == "-15"
+        # with vech unknowns: three for n = 2
+        L₂ = substitute(vectorize(A' * P + P * A, P; unknowns = :vech).K, A => A₂)
+        @test size(L₂) == (3, 3)
+        @test string.(Giac.Commands.simplify.(L₂ \ (-GiacExpr[1, 0, 1]))) == ["5/4", "1/4", "1/4"]
+        @test_throws ArgumentError vectorize(A * P, P; unknowns = :vech)          # not symmetric
+    end
+
+    @testset "commutation and duplication matrices" begin
+        K(a, b) = Giac.commutation(a, b)
+        D, Dp = Giac.duplication(:n), Giac.duplication_plus(:n)
+        @matsym G[m, n] H[p, q]
+        @test T(K(:m, :n)') == "K(n, m)" && T(inv(K(:m, :n))) == "K(n, m)"
+        @test T(K(:m, :n) * K(:n, :m)) == "I" && T(K(1, :n)) == "I" && T(K(:n, :n)^2) == "I"
+        @test T(K(:p, :m) * kron(G, H)) == "kron(H, G)*K(q, n)"           # K moves past ⊗
+        @test T(K(:p, :m) * kron(G, H) * K(:n, :q)) == "kron(H, G)"
+        @test T(Dp * D) == "I" && T(K(:n, :n) * D) == "D(n)" && T(Dp * K(:n, :n)) == "Dplus(n)"
+        @test T(tr(K(:n, :n))) == "n" && T(det(K(2, 3))) == "-1"
+        @test size(D) == (Symbol("n*n"), Symbol("(n+1)/2*n")) && size(vech(P)) == (Symbol("(n+1)/2*n"), 1)
+        @test_throws ArgumentError vech(A)
+        @test Giac.giac_latex(Dp * kron(A, C) * D) == "D_{n}^{+} \\left(A \\otimes C\\right) D_{n}"
+        # the explicit matrices
+        @matsym G3[m, n] P3[n, n]::symmetric
+        X₂, P₂ = GiacExpr[1 2 3; 4 5 6], GiacExpr[1 2; 2 3]
+        @test substitute(K(:m, :n), G3 => X₂) * vec(X₂) == vec(permutedims(X₂))
+        D₂, Dp₂ = substitute(D, P3 => P₂), substitute(Dp, P3 => P₂)
+        @test D₂ * GiacExpr[1, 2, 3] == vec(P₂) && Dp₂ * vec(P₂) == GiacExpr[1, 2, 3]
+        C₂, F₂, E₂ = GiacExpr[1 2; 3 4], GiacExpr[0 1; 1 1], GiacExpr[5 6; 7 8]
+        Kt = substitute(vectorize(C * E' * A, E).K, C => C₂, A => F₂, E => E₂)
+        @test Kt * vec(E₂) == vec(C₂ * permutedims(E₂) * F₂)
     end
 end

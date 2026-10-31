@@ -69,9 +69,37 @@ struct Kron
     B::MatExpr
 end
 
-# Sizes multiply under ⊗: a product of names is the name `m*n` (factors sorted)
+"""
+    ConstMatrix
+
+A constant matrix of a given structure, one factor of a product:
+- `:commutation`, `K(a, b)`: the `ab × ab` permutation with `vec(Xᵀ) = K vec X` for `X` `a × b`;
+- `:duplication`, `D(n)`: the `n² × n(n+1)/2` matrix with `vec P = D vech P` for a symmetric `P`;
+- `:duplication_plus`, `D⁺(n)`: its left inverse `(DᵀD)⁻¹Dᵀ`, with `vech P = D⁺ vec P`.
+"""
+struct ConstMatrix
+    kind::Symbol
+    a::Dim
+    b::Dim
+end
+
+# Sizes multiply under ⊗, and a duplication matrix has n(n+1)/2 columns: a size is a number, a
+# name, or an integer expression in names (`m*n`, `(n+1)/2*n`), its factors kept sorted
+function _dim_factors(d::Symbol)
+    s, out, depth, start = string(d), String[], 0, 1
+    for (i, c) in pairs(s)
+        c == '(' ? (depth += 1) : c == ')' ? (depth -= 1) : nothing
+        if c == '*' && depth == 0
+            push!(out, s[start:prevind(s, i)])
+            start = nextind(s, i)
+        end
+    end
+    push!(out, s[start:end])
+    return out
+end
 _dim_factors(d::Int) = d == 1 ? String[] : [string(d)]
-_dim_factors(d::Symbol) = split(string(d), "*")
+_vech_dim(n::Int) = n * (n + 1) ÷ 2
+_vech_dim(n::Symbol) = _dim_mul(n, Symbol("(" * string(n) * "+1)/2"))
 function _dim_mul(a::Dim, b::Dim)
     a isa Int && b isa Int && return a * b
     fs = sort!(vcat(_dim_factors(a), _dim_factors(b)))
@@ -87,6 +115,7 @@ end
 
 _base_key(b::MatrixSymbol) = string(b.name)
 _base_key(b::Kron) = "kron(" * _plain(b.A) * "," * _plain(b.B) * ")"
+_base_key(b::ConstMatrix) = string(b.kind, "(", b.a, ",", b.b, ")")
 _base_key(b::MatExpr) = "(" * _plain(b) * ")"
 _factor_key(f::Factor) = _base_key(f.base) * (f.transposed ? "'" : "") * (f.power == 1 ? "" : "^" * string(f.power))
 _word_key(w::Word) = join(map(_factor_key, w), "*")
@@ -103,6 +132,8 @@ _cols(f::Factor) = f.transposed ? _rows(f.base) : _cols(f.base)
 _rows(b::MatrixSymbol) = b.rows; _cols(b::MatrixSymbol) = b.cols
 _rows(b::MatExpr) = b.rows; _cols(b::MatExpr) = b.cols
 _rows(b::Kron) = _dim_mul(b.A.rows, b.B.rows); _cols(b::Kron) = _dim_mul(b.A.cols, b.B.cols)
+_rows(b::ConstMatrix) = b.kind === :commutation ? _dim_mul(b.a, b.b) : b.kind === :duplication ? _dim_mul(b.a, b.a) : _vech_dim(b.a)
+_cols(b::ConstMatrix) = b.kind === :commutation ? _dim_mul(b.a, b.b) : b.kind === :duplication ? _vech_dim(b.a) : _dim_mul(b.a, b.a)
 
 # ---------------------------------------------------------------------------------------------
 # Canonical words
@@ -113,6 +144,15 @@ _rows(b::Kron) = _dim_mul(b.A.rows, b.B.rows); _cols(b::Kron) = _dim_mul(b.A.col
 # sum under an inverse has the transpose taken inside.
 function _canonical(f::Factor)
     b = f.base
+    if b isa ConstMatrix && b.kind === :commutation
+        (b.a == 1 || b.b == 1) && return (1, Factor(b, false, 0))           # the identity
+        flip = f.transposed ⊻ (f.power < 0)
+        p = abs(f.power)
+        b.a == b.b && (p %= 2)
+        (p > 1) && throw(DimensionMismatch("a power of the non-square-blocked $(_base_key(b))"))
+        return (1, Factor(flip ? ConstMatrix(:commutation, b.b, b.a) : b, false, p))
+    end
+    b isa ConstMatrix && return (1, f)
     if b isa Kron
         (f.transposed || f.power != 1) || return (1, f)
         A, B = f.transposed ? (transpose(b.A), transpose(b.B)) : (b.A, b.B)
@@ -140,11 +180,17 @@ together.
 function _normalize(w::Word)
     sign = 1
     out = Factor[]
-    for f in w
+    for (i, f) in pairs(w)
         s, f = _canonical(f)
         sign *= s
         f.power == 0 && continue
-        if !isempty(out) && out[end].base isa Kron && f.base isa Kron && _kron_fits(out[end].base, f.base)
+        r = isempty(out) ? nothing : _const_rule(out[end], f)
+        if r !== nothing
+            # a rule for a constant factor: what replaces the pair, normalized with the rest
+            pop!(out)
+            s2, rest = _normalize(vcat(out, r, w[(i + 1):end]))
+            return sign * s2, rest
+        elseif !isempty(out) && out[end].base isa Kron && f.base isa Kron && _kron_fits(out[end].base, f.base)
             # (A⊗B)(C⊗D) = AC⊗BD
             a, b = pop!(out).base, f.base
             s, k = _kron_factor(a.A * b.A, a.B * b.B)
@@ -175,6 +221,32 @@ function _kron_factor(A::MatExpr, B::MatExpr)
 end
 
 _kron_fits(a::Kron, b::Kron) = _same_dim(a.A.cols, b.A.rows) && _same_dim(a.B.cols, b.B.rows)
+
+_is_const(f::Factor, kind) = f.base isa ConstMatrix && f.base.kind === kind && f.power == 1
+
+# The factors that replace a pair `f g` with a commutation or duplication matrix in it, or nothing:
+# K(a,b)K(b,a) = I, D⁺D = I, K(n,n)D = D, D⁺K(n,n) = D⁺, DᵀK(n,n) = Dᵀ, and K moves to the right
+# of a Kronecker product: K(p,m)(A⊗B) = (B⊗A)K(q,n) for A m×n, B p×q.
+function _const_rule(f::Factor, g::Factor)
+    if _is_const(f, :commutation)
+        k = f.base
+        if _is_const(g, :commutation) && g.base.a == k.b && g.base.b == k.a
+            return Factor[]
+        elseif _is_const(g, :duplication) && !g.transposed && k.a == k.b == g.base.a
+            return Factor[g]
+        elseif g.base isa Kron && g.power == 1 && !g.transposed &&
+               _same_dim(g.base.B.rows, k.a) && _same_dim(g.base.A.rows, k.b)
+            A, B = g.base.A, g.base.B
+            return Factor[Factor(Kron(B, A), false, 1), Factor(ConstMatrix(:commutation, B.cols, A.cols), false, 1)]
+        end
+    elseif _is_const(f, :duplication_plus) && !f.transposed
+        _is_const(g, :duplication) && !g.transposed && g.base.a == f.base.a && return Factor[]
+        _is_const(g, :commutation) && g.base.a == g.base.b == f.base.a && return Factor[f]
+    elseif _is_const(f, :duplication) && f.transposed
+        _is_const(g, :commutation) && g.base.a == g.base.b == f.base.a && return Factor[f]
+    end
+    return nothing
+end
 
 # the transpose of a word: reversed, each factor transposed
 function _transpose_word(w::Word)
@@ -372,7 +444,18 @@ Base.hash(A::MatExpr, h::UInt) = hash(_plain(A), hash(size(A), h))
 
 # Plain text for an expression. With `readable`, traces and determinants in coefficients are written
 # as such; without, as Giac's names for them, which is the form used as a key.
+const _CONST_PLAIN = Dict(:commutation => "K", :duplication => "D", :duplication_plus => "Dplus")
+function _const_plain(b::ConstMatrix)
+    args = b.kind === :commutation ? "$(b.a), $(b.b)" : string(b.a)
+    return _CONST_PLAIN[b.kind] * "(" * args * ")"
+end
+function _const_latex(b::ConstMatrix)
+    b.kind === :commutation && return "K_{" * _dim_latex(b.a) * "," * _dim_latex(b.b) * "}"
+    return "D_{" * _dim_latex(b.a) * "}" * (b.kind === :duplication_plus ? "^{+}" : "")
+end
+
 function _plain_factor(f::Factor, readable::Bool = false)
+    f.base isa ConstMatrix && return _const_plain(f.base) * (f.transposed ? "'" : "")
     f.base isa Kron && return "kron(" * _plain(f.base.A, readable) * ", " * _plain(f.base.B, readable) * ")"
     b = f.base isa MatrixSymbol ? string(f.base.name) : "(" * _plain(f.base, readable) * ")"
     orthogonal = f.base isa MatrixSymbol && _has(f.base, :orthogonal)
@@ -404,6 +487,10 @@ _symbol_latex(s::MatrixSymbol) = _entry_latex(giac_identifier(string(s.name)))
 _dim_latex(d::Dim) = d isa Int ? string(d) : _entry_latex(giac_identifier(string(d)))
 
 function _factor_latex(f::Factor)
+    if f.base isa ConstMatrix
+        t = _const_latex(f.base)
+        return f.transposed ? (endswith(t, "^{+}") ? t[1:(end - 1)] * "\\top}" : t * "^{\\top}") : t
+    end
     f.base isa Kron && return "\\left(" * _matexpr_latex(f.base.A) * " \\otimes " * _matexpr_latex(f.base.B) * "\\right)"
     if f.base isa MatExpr
         b = "\\left(" * _matexpr_latex(f.base) * "\\right)"
@@ -526,6 +613,7 @@ function _trace_word(w::Word, n::Dim)
     sign == 0 && return zero(GiacExpr)
     v = isempty(cw) ? _dim_expr(n) :
         length(cw) == 1 && cw[1].base isa Kron ? tr(cw[1].base.A) * tr(cw[1].base.B) :     # tr(A⊗B) = tr A tr B
+        length(cw) == 1 && _is_const(cw[1], :commutation) ? _dim_expr(cw[1].base.a) :    # tr K(n,n) = n
         _trace_atom(cw)
     return sign == 1 ? v : -v
 end
@@ -584,6 +672,8 @@ function _det_factor(f::Factor)
     b = f.base
     # det(A⊗B) = det(A)ᵐ det(B)ⁿ for A n×n, B m×m
     b isa Kron && return det(b.A)^_dim_expr(b.B.rows) * det(b.B)^_dim_expr(b.A.rows)
+    # a commutation matrix permutes: det K(m,n) = (-1)^(m(m-1)n(n-1)/4)
+    b isa ConstMatrix && return _commutation_sign(b.a, b.b)^f.power
     b isa MatExpr && return _det_atom(b)^f.power
     _has(b, :orthogonal) && return isodd(f.power) ? _det_atom(b) : one(GiacExpr)
     _has(b, :skew) && b.rows isa Int && isodd(b.rows) && return zero(GiacExpr)
@@ -717,9 +807,56 @@ function _matrix_values(pairs)
 end
 
 _dim_value(d::Int, dims) = d
-_dim_value(d::Symbol, dims) = occursin('*', string(d)) ? prod(_dim_factor_value(f, dims) for f in split(string(d), "*")) :
-                              haskey(dims, d) ? dims[d] : throw(ArgumentError("no size given for $d"))
-_dim_factor_value(f, dims) = occursin(r"^\d+$", f) ? parse(Int, f) : _dim_value(Symbol(f), dims)
+function _dim_value(d::Symbol, dims)
+    v = _dim_eval(Meta.parse(string(d)), dims)
+    isinteger(v) || throw(ArgumentError("the size $d is not an integer"))
+    return Int(v)
+end
+
+# a size expression with the sizes of names given, in exact arithmetic
+_dim_eval(x::Integer, dims) = Rational{Int}(x)
+_dim_eval(x::Symbol, dims) = haskey(dims, x) ? Rational{Int}(dims[x]) : throw(ArgumentError("no size given for $x"))
+function _dim_eval(x::Expr, dims)
+    (x.head === :call && x.args[1] in (:+, :-, :*, :/)) || throw(ArgumentError("a size is an integer expression, got $x"))
+    v = map(a -> _dim_eval(a, dims), x.args[2:end])
+    op = x.args[1] === :/ ? (//) : getfield(Base, x.args[1])
+    return op(v...)
+end
+
+function _commutation_sign(m::Dim, n::Dim)
+    (m isa Int && n isa Int) || return _det_atom(_matexpr(_dim_mul(m, n), _dim_mul(m, n), [Factor[Factor(ConstMatrix(:commutation, m, n), false, 1)] => one(GiacExpr)]))
+    return convert(GiacExpr, isodd(m * (m - 1) * n * (n - 1) ÷ 4) ? -1 : 1)
+end
+
+# the entries of a commutation or duplication matrix, for numbers given for its sizes
+function _const_value(b::ConstMatrix, dims)
+    o, z = one(GiacExpr), zero(GiacExpr)
+    if b.kind === :commutation
+        m, n = _dim_value(b.a, dims), _dim_value(b.b, dims)
+        K = fill(z, m * n, m * n)
+        for i in 1:m, j in 1:n
+            K[j + (i - 1) * n, i + (j - 1) * m] = o        # vec(Xᵀ)[(i,j)ᵀ] = vec(X)[(i,j)]
+        end
+        return K
+    end
+    n = _dim_value(b.a, dims)
+    plus = b.kind === :duplication_plus
+    half = convert(GiacExpr, 1 // 2)
+    M = plus ? fill(z, n * (n + 1) ÷ 2, n * n) : fill(z, n * n, n * (n + 1) ÷ 2)
+    k = 0
+    for j in 1:n, i in j:n                               # vech: the lower triangle, by columns
+        k += 1
+        p, q = i + (j - 1) * n, j + (i - 1) * n          # the places of (i,j) and (j,i) in vec
+        if plus
+            # D⁺ = (DᵀD)⁻¹Dᵀ: a diagonal entry read once, an off-diagonal one averaged
+            i == j ? (M[k, p] = o) : (M[k, p] = half; M[k, q] = half)
+        else
+            M[p, k] = o
+            M[q, k] = o
+        end
+    end
+    return M
+end
 
 function _evaluate(M::MatExpr, values, dims)
     m, n = _dim_value(M.rows, dims), _dim_value(M.cols, dims)
@@ -736,6 +873,10 @@ end
 _word_matrix(w::Word, values, dims) = reduce(*, (_factor_value(f, values, dims) for f in w))
 
 function _factor_value(f::Factor, values, dims)
+    if f.base isa ConstMatrix
+        M = _const_value(f.base, dims)
+        return f.transposed ? permutedims(M) : M
+    end
     f.base isa Kron && return kron(_evaluate(f.base.A, values, dims), _evaluate(f.base.B, values, dims))
     B = f.base isa MatExpr ? _evaluate(f.base, values, dims) :
         haskey(values, f.base.name) ? values[f.base.name] :
@@ -895,5 +1036,6 @@ map_coefficients(f, A::MatExpr) = _matexpr(A.rows, A.cols, [w => convert(GiacExp
 # the matrix symbols in an atom's payload: a symbol, a word, or an expression
 _symbols_in(s::MatrixSymbol) = [s]
 _symbols_in(k::Kron) = unique(s -> s.name, vcat(_symbols_in(k.A), _symbols_in(k.B)))
+_symbols_in(::ConstMatrix) = MatrixSymbol[]
 _symbols_in(w::Word) = unique(s -> s.name, reduce(vcat, (_symbols_in(f.base) for f in w); init = MatrixSymbol[]))
 _symbols_in(M::MatExpr) = unique(s -> s.name, reduce(vcat, (_symbols_in(w) for (w, _) in M.terms); init = MatrixSymbol[]))

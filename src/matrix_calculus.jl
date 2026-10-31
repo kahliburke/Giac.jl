@@ -60,6 +60,7 @@ end
 
 function _dfactor(f::Factor, vary)
     B = f.base
+    B isa ConstMatrix && return nothing                 # a constant
     if B isa Kron
         # d(A⊗B) = dA⊗B + A⊗dB (a Kronecker factor is untransposed, to the first power)
         dA, dB = _differential(B.A, vary), _differential(B.B, vary)
