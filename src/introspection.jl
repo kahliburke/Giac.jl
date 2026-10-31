@@ -578,22 +578,47 @@ function operation(g::GiacExpr)
     throw(ArgumentError("Cannot locate function `$fn` in Giac.Commands, Giac, Base, or LinearAlgebra"))
 end
 
+# The arguments are read from the stored value: a sequence (several arguments) entry by entry,
+# anything else as the one argument. Nothing is printed and parsed again, which would also
+# evaluate each argument again.
 function arguments(g::GiacExpr)::Vector{GiacExpr}
     iscall(g) || throw(ArgumentError("expression is not a function call"))
-    collect(GiacExpr, symb_argument(g))
+    GiacCxxBindings._have_library || return collect(GiacExpr, symb_argument(g))
+    return with_giac_lock() do
+        leaf = GiacCxxBindings.symb_feuille(_ptr_to_gen(g))
+        # several arguments are a vector of them: a sequence, or for a sum or product a sorted one
+        out = GiacExpr[]
+        if GiacCxxBindings.is_vector(leaf) && GiacCxxBindings.subtype(leaf) in (GiacCxxBindings.VECTSUBTYPE_SEQ, _SORTED_VECT)
+            for i in 0:(GiacCxxBindings.vect_size(leaf) - 1)
+                _push_args!(out, GiacCxxBindings.vect_at(leaf, i))
+            end
+        else
+            push!(out, GiacExpr(_gen_to_ptr(leaf)))
+        end
+        out
+    end
+end
+
+const _SORTED_VECT = 19     # Giac's subtype for the arguments of a sum or product
+
+# An argument, a sequence in it spliced in (a call `f(x, y)` of an undefined function is
+# `of(f, (x, y))`, whose arguments are f, x, y); a vector (a list) stays one argument.
+function _push_args!(out, gen)
+    if GiacCxxBindings.is_vector(gen) && GiacCxxBindings.subtype(gen) == GiacCxxBindings.VECTSUBTYPE_SEQ
+        for i in 0:(GiacCxxBindings.vect_size(gen) - 1)
+            _push_args!(out, GiacCxxBindings.vect_at(gen, i))
+        end
+    else
+        push!(out, GiacExpr(_gen_to_ptr(gen)))
+    end
+    return out
 end
 
 maketerm(::Type{GiacExpr}, op, args, metadata=nothing)::GiacExpr = GiacExpr(op(args...))
 
 
-# Internal helper to convert Gen to GiacExpr
+# Internal helper to convert Gen to GiacExpr: the value itself, not printed and parsed again
 function _gen_to_giacexpr(gen)
-    # Convert CxxWrap Gen to GiacExpr via string representation
-    if gen !== nothing
-        # GiacCxxBindings.to_string returns a CxxWrap StdString, convert to Julia String
-        std_str = GiacCxxBindings.to_string(gen)
-        julia_str = String(std_str)
-        return giac_eval(julia_str)
-    end
-    throw(GiacError("Cannot convert Gen to GiacExpr", :type))
+    gen === nothing && throw(GiacError("Cannot convert Gen to GiacExpr", :type))
+    return GiacExpr(_gen_to_ptr(gen))
 end
