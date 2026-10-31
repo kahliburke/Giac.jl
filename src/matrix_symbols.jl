@@ -311,8 +311,10 @@ Base.hash(A::MatExpr, h::UInt) = hash(_plain(A), hash(size(A), h))
 # Writing expressions: plain text and LaTeX
 # ---------------------------------------------------------------------------------------------
 
-function _plain_factor(f::Factor)
-    b = f.base isa MatrixSymbol ? string(f.base.name) : "(" * _plain(f.base) * ")"
+# Plain text for an expression. With `readable`, traces and determinants in coefficients are written
+# as such; without, as Giac's names for them, which is the form used as a key.
+function _plain_factor(f::Factor, readable::Bool = false)
+    b = f.base isa MatrixSymbol ? string(f.base.name) : "(" * _plain(f.base, readable) * ")"
     orthogonal = f.base isa MatrixSymbol && _has(f.base, :orthogonal)
     if orthogonal && f.power < 0
         return b * "'" * (f.power == -1 ? "" : "^" * string(-f.power))
@@ -323,20 +325,20 @@ function _plain_factor(f::Factor)
     return (t == "" ? b : "(" * b * t * ")") * "^" * string(f.power)
 end
 
-function _plain(A::MatExpr)
+function _plain(A::MatExpr, readable::Bool = false)
     isempty(A.terms) && return "0"
     parts = String[]
     for (w, c) in A.terms
-        word = isempty(w) ? "I" : join(map(_plain_factor, w), "*")
-        cs = string(c)
+        word = isempty(w) ? "I" : join((_plain_factor(f, readable) for f in w), "*")
+        cs = readable ? _atom_plain(string(c)) : string(c)
         push!(parts, cs == "1" ? word : cs == "-1" ? "-" * word :
                      (occursin(r"[+-]", cs[2:end]) ? "(" * cs * ")" : cs) * "*" * word)
     end
     return replace(join(parts, " + "), "+ -" => "- ")
 end
 
-Base.show(io::IO, A::MatExpr) = print(io, _plain(A))
-Base.show(io::IO, ::MIME"text/plain", A::MatExpr) = print(io, "MatExpr (", A.rows, "×", A.cols, "): ", _plain(A))
+Base.show(io::IO, A::MatExpr) = print(io, _plain(A, true))
+Base.show(io::IO, ::MIME"text/plain", A::MatExpr) = print(io, "MatExpr (", A.rows, "×", A.cols, "): ", _plain(A, true))
 
 _symbol_latex(s::MatrixSymbol) = _entry_latex(giac_identifier(string(s.name)))
 _dim_latex(d::Dim) = d isa Int ? string(d) : _entry_latex(giac_identifier(string(d)))
