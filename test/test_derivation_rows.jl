@@ -65,7 +65,7 @@
             a * b^2 / 2 ~ 1 => b
             b^2 ~ b^2
         end
-        @test endswith(rows(d)[1], "\\quad\\Rightarrow\\quad b = \\frac{\\sqrt{2}}{\\sqrt{a}}")
+        @test endswith(rows(d)[1], "\\quad\\Rightarrow\\quad b = \\sqrt{\\frac{2}{a}}")
         @test rows(d)[2] == "b^{2} = \\frac{2}{a}"                  # applied from here on
     end
 
@@ -83,7 +83,7 @@
         r = rows(d)
         @test startswith(r[1], "\\frac{\\mathrm{d}^{2} \\varphi}{\\mathrm{d} x^{2}} = ")   # φ(x) in x: not a partial
         @test occursin("k = \\frac{n \\pi}{a}", r[4])                                    # an integer before π
-        @test endswith(r[5], "B = \\frac{\\sqrt{2}}{\\sqrt{a}}")
+        @test endswith(r[5], "B = \\sqrt{\\frac{2}{a}}")
     end
 
     @testset "conditions in brackets, and tags" begin
