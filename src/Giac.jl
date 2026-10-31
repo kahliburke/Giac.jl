@@ -327,11 +327,13 @@ println("First 10: ", cmds[1:10])
 ```
 """
 function list_commands()
-    if GiacCxxBindings._have_library
-        cmds_str = GiacCxxBindings.list_commands()
-        return split(cmds_str, '\n')
+    return with_giac_lock() do
+        if GiacCxxBindings._have_library
+            cmds_str = GiacCxxBindings.list_commands()
+            return split(cmds_str, '\n')
+        end
+        return String[]
     end
-    return String[]
 end
 
 """
@@ -340,10 +342,12 @@ end
 Return the number of commands in the GIAC help database.
 """
 function help_count()
-    if GiacCxxBindings._have_library
-        return GiacCxxBindings.help_count()
+    return with_giac_lock() do
+        if GiacCxxBindings._have_library
+            return GiacCxxBindings.help_count()
+        end
+        return 0
     end
-    return 0
 end
 
 # ============================================================================
