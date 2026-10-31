@@ -62,7 +62,7 @@ using ..Giac: GiacExpr, GiacMatrix, GiacInput, GiacError, giac_eval, with_giac_l
               HeldCmd,
               _fastpath_disabled, _has_direct_gen, _invoke_cmd_direct,
               RENDER_COMMANDS, _hold_render_arg,
-              _INSIDE_INTEGRALS, _any_node, _is_integral, _node, _around_integrals
+              _INSIDE_HELD, _any_node, _is_held, _node, _around_held
 import LinearAlgebra
 
 import CommonSolve: solve
@@ -160,9 +160,9 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         args = map(_hold_render_arg, args)
     end
 
-    # a held integral is worked on inside: simplifying commands apply to its integrand and the rest
-    if cmd in _INSIDE_INTEGRALS && length(args) == 1 && args[1] isa GiacExpr && _any_node(_is_integral, _node(args[1]))
-        return _around_integrals(e -> invoke_cmd(cmd, e), args[1])
+    # a held integral or evaluation is worked on inside: simplifying commands apply within it and to the rest
+    if cmd in _INSIDE_HELD && length(args) == 1 && args[1] isa GiacExpr && _any_node(_is_held, _node(args[1]))
+        return _around_held(e -> invoke_cmd(cmd, e), args[1])
     end
 
     # Fast path (069-invoke-cmd-fastpath): bypass _arg_to_giac_string + giac_eval

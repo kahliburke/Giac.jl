@@ -112,6 +112,13 @@ function _to_giac_syntax(ex::Expr)
     if ex.head === :call && ex.args[1] isa Expr && ex.args[1].head === :. && ex.args[1].args[2] isa QuoteNode
         return _to_giac_syntax(Expr(:call, ex.args[1].args[2].value, ex.args[2:end]...))
     end
+    # `evaluated(f, x => a)` is GIAC's subst(f, x = a); `evaluated(f, x, a, b)` its preval(f, a, b, x)
+    if ex.head === :call && ex.args[1] === :evaluated
+        a = ex.args[2:end]
+        length(a) == 2 && a[2] isa Expr && a[2].head === :call && a[2].args[1] === :(=>) &&
+            return Expr(:call, :subst, _to_giac_syntax(a[1]), Expr(:kw, map(_to_giac_syntax, a[2].args[2:3])...))
+        length(a) == 4 && return Expr(:call, :preval, map(_to_giac_syntax, a[[1, 3, 4, 2]])...)
+    end
     if ex.head === :. && length(ex.args) == 2 && ex.args[2] isa Expr && ex.args[2].head === :tuple
         return _to_giac_syntax(Expr(:call, ex.args[1], ex.args[2].args...))
     end

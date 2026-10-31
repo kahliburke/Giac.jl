@@ -40,8 +40,8 @@ julia> string(substitute(expr, Dict(x => 2, y => 3)))
 function substitute(expr::GiacExpr, dict::AbstractDict{<:GiacExpr})::GiacExpr
     # Handle empty Dict - return original expression unchanged (no GIAC call).
     isempty(dict) && return expr
-    # GIAC would evaluate a held integral: it is substituted into apart
-    _any_node(_is_integral, _node(expr)) && return _around_integrals(e -> substitute(e, dict), expr)
+    # GIAC would evaluate a held integral or evaluation: it is substituted into apart
+    _any_node(_is_held, _node(expr)) && return _around_held(e -> substitute(e, dict), expr; values = true)
 
     # A sum, product or power as a key is a relation to substitute, which Giac's subst does not
     # do: `x^2 + y^2 => r^2` (see `Rules._substitute_relation`).

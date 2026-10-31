@@ -150,6 +150,8 @@ struct _PDerivOf <: _PNode; arg::_PNode; wrt::Vector{String}; end
 struct _PDerivAt <: _PNode; f::String; args::Vector{_PNode}; idx::Vector{Int}; end
 # an integral of `f` in `var`, between `limits` if there are two
 struct _PIntegral <: _PNode; f::_PNode; var::_PNode; limits::Vector{_PNode}; end
+# `f` evaluated: at `lower` (x = a), or between `lower` and `upper`
+struct _PBar <: _PNode; f::_PNode; lower::_PNode; upper::Union{Nothing, _PNode}; end
 
 const _CALL_TEX = Dict(
     "sin" => "\\sin", "cos" => "\\cos", "tan" => "\\tan", "cot" => "\\cot", "sec" => "\\sec", "csc" => "\\csc",
@@ -228,6 +230,8 @@ function _pnode(e::GiacExpr)
     end
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
+    h == "subst" && length(a) == 2 && iscall(a[2]) && symb_funcname(a[2]) == "=" && return _PBar(_pnode(a[1]), _pnode(a[2]), nothing)
+    h == "preval" && length(a) in (3, 4) && return _PBar(_pnode(a[1]), _pnode(a[2]), _pnode(a[3]))
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
     return _PRaw(tidy_latex(_giac_tex(e)))
 end
@@ -356,6 +360,11 @@ function _variables(root::_PNode, style::TypesetStyle)
             walk(n.lhs); walk(n.rhs)
         elseif n isa _POrder
             walk(n.arg)
+        elseif n isa _PIntegral
+            n.var isa _PAtom && push!(arguments, n.var.name)       # the variable of integration
+            walk(n.f)
+        elseif n isa _PBar
+            walk(n.f)
         end
     end
     walk(root)
@@ -367,7 +376,7 @@ function _variables(root::_PNode, style::TypesetStyle)
         n isa _PAtom && !n.constant && letter(n.name) !== nothing && push!(found, n.name)
         for f in (n isa _PSum ? n.terms : n isa _PProd ? n.factors : n isa _PPow ? [n.base, n.exp] :
                   n isa _PCall || n isa _PDeriv || n isa _PDerivAt ? n.args : n isa _PEq ? [n.lhs, n.rhs] :
-                  n isa _POrder || n isa _PDerivOf ? [n.arg] : _PNode[])
+                  n isa _POrder || n isa _PDerivOf ? [n.arg] : n isa Union{_PIntegral, _PBar} ? [n.f] : _PNode[])
             by_letter(f)
         end
     end
@@ -393,6 +402,7 @@ function _factor_rank(f::_PNode, vars)
     b isa _PDeriv && return (3, 0, length(vars) + 1, b.f * "′"^length(b.wrt))
     b isa _PDerivAt && return (3, 0, length(vars) + 1, b.f * "′"^length(b.idx))
     b isa _PIntegral && return (5, 0, 0, "∫")
+    b isa _PBar && return (5, 0, 0, "|")
     (b isa _PCall && b.f == "exp" || f isa _PPow && b isa _PAtom && b.name == "e") && return (4, 0, 0, "")
     b isa _PCall && return (5, 0, 0, b.f)
     return (6, 0, 0, "")
@@ -651,6 +661,12 @@ function _tex(n::_PIntegral, c::_Ctx)
     bounds = isempty(n.limits) ? "" : "_{" * _tex(n.limits[1], c) * "}^{" * _tex(n.limits[2], c) * "}"
     f = n.f isa _PSum ? "\\left(" * _tex(n.f, c) * "\\right)" : _tex(n.f, c)
     return "\\int" * bounds * " " * f * " \\, \\mathrm{d}" * _tex(n.var, c)
+end
+
+function _tex(n::_PBar, c::_Ctx)
+    f = n.f isa _PSum ? "\\left(" * _tex(n.f, c) * "\\right)" : _tex(n.f, c)
+    limits = "_{" * _tex(n.lower, c) * "}" * (n.upper === nothing ? "" : "^{" * _tex(n.upper, c) * "}")
+    return "\\left. " * f * " \\right|" * limits
 end
 
 function _tex(n::_PDerivAt, c::_Ctx)
