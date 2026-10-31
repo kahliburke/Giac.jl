@@ -9,11 +9,12 @@ The number of nodes in the tree of `e`: the default cost for [`simplest`](@ref).
 expression_size(e::GiacExpr) = iscall(e) ? 1 + sum(expression_size, arguments(e); init = 0) : 1
 
 """
-    simplest(e; goal = :compact, verify = false, depth = 6, width = 10)
-    simplest(e, transforms...; cost, goal, verify, depth, width)
+    simplest(e; goal = :compact, verify = false, trace = false, depth = 6, width = 10)
+    simplest(e, transforms...; cost, goal, verify, trace, depth, width)
 
-Search rewrites of `e` for the form that best meets `goal`, and return the path to it as a trace
-(see [`rewrite`](@ref); `last(t)` is the result). Without transforms it uses
+Search rewrites of `e` for the form that best meets `goal`. With `trace = true`, the path to it
+instead, as a [`RewriteTrace`](@ref) (displayed as the steps; `last(t)` is the result). Without
+transforms it uses
 [`standard_transforms`](@ref): Giac's normal form, factoring, trigonometric forms and the rule
 sets for identities with conditions. Each transform is a rule, a vector of rules, a
 [`Transform`](@ref), or a function of a whole expression such as `expand`.
@@ -32,7 +33,7 @@ simplest(sin(t)^3; goal = :trig_linear)          # 3sin(t)/4 - sin(3t)/4
 ```
 """
 function simplest(e::GiacExpr, transforms...; goal::Symbol = :compact, cost = nothing, verify::Bool = false,
-                  depth::Integer = 6, width::Integer = 10)
+                  trace::Bool = false, depth::Integer = 6, width::Integer = 10)
     rules, fns = Rule[], Any[]
     for t in (isempty(transforms) ? standard_transforms() : transforms)
         t isa Rule ? push!(rules, t) :
@@ -60,10 +61,12 @@ function simplest(e::GiacExpr, transforms...; goal::Symbol = :compact, cost = no
         frontier = next[order[1:min(width, end)]]
         scores[order[1]] < best_score && ((best, best_score) = (next[order[1]], scores[order[1]]))
     end
-    return _trace_display(e, last(best); collapse = false)
+    path = last(best)
+    trace && return _trace_display(e, path; collapse = false)
+    return isempty(path) ? e : first(path[end])
 end
 
-simplest(A::AbstractArray{GiacExpr}, transforms...; kwargs...) = map(e -> last(simplest(e, transforms...; kwargs...)), A)
+simplest(A::AbstractArray{GiacExpr}, transforms...; kwargs...) = map(e -> simplest(e, transforms...; kwargs...), A)
 
 # every expression one step from `e`: a rule at any place in it, or a function of all of it
 function _successors(e::GiacExpr, rules, fns)

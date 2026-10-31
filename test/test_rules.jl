@@ -137,7 +137,9 @@ using Giac.Rules
         # a trace: one rule in one place per step
         t = rewrite(a * (x + y) + sin(z)^2 + cos(z)^2, distribute, pythagoras; trace = true)
         @test last(t) == 1 + a * x + a * y
-        @test length(t.steps.rows) == 2
+        @test length(t.by) == 2 && length(t) == 3
+        @test first(t) == a * (x + y) + sin(z)^2 + cos(z)^2 && last(t) == t[end]
+        @test t.by[2] === pythagoras && collect(t) == t.exprs
         tex = sprint(show, MIME("text/latex"), t)
         @test count("\\text{by }", tex) == 2
         @test occursin("no rule applies", sprint(show, MIME("text/latex"), rewrite(x, pythagoras; trace = true)))
@@ -241,8 +243,9 @@ using Giac.Rules
     @testset "traces and cycles" begin
         distribute = @rule ~u * +(~~ts) => sum(~u * t for t in ~~ts)
         e = a * (x + y) + z * (x + w) + sin(y)^2 + cos(y)^2
-        @test length(rewrite(e, distribute, pythagoras; trace = true).steps.rows) == 2      # distribute ×2
-        @test length(rewrite(e, distribute, pythagoras; trace = :steps).steps.rows) == 3
+        rows(t) = Giac.Rules._trace_rows(t)
+        @test length(rows(rewrite(e, distribute, pythagoras; trace = true))) == 2      # distribute ×2
+        @test length(rows(rewrite(e, distribute, pythagoras; trace = :steps))) == 3
         @test occursin("\\times 2", sprint(show, MIME("text/latex"), rewrite(e, distribute, pythagoras; trace = true)))
         swap = @rules begin
             sin(~t) => cos(~t)
@@ -256,11 +259,12 @@ using Giac.Rules
     @testset "simplest" begin
         e = sin(x)^4 - cos(x)^4
         @test rewrite(e, trig_simplify()) == e                  # no rule applies as it stands
-        t = simplest(e, trig_simplify(), Giac.Commands.factor, Giac.Commands.expand)
+        @test simplest(e, trig_simplify(), Giac.Commands.factor, Giac.Commands.expand) == -cos(2x)
+        t = simplest(e, trig_simplify(), Giac.Commands.factor, Giac.Commands.expand; trace = true)
         @test last(t) == -cos(2x)
-        @test length(t.steps.rows) == 4
+        @test length(t.by) == 4 && first(t) == e
         @test expression_size(x + y) == 3
-        @test last(simplest(x + y, trig_simplify())) == x + y
+        @test simplest(x + y, trig_simplify()) == x + y
         @test_throws ArgumentError simplest(x, 42)
     end
 
@@ -307,18 +311,17 @@ using Giac.Rules
     end
 
     @testset "simplest with the standard transforms" begin
-        @test last(simplest(sin(z)^4 - cos(z)^4)) == -cos(2z)
-        @test string(last(simplest((x^2 - 1) / (x^2 + 2x + 1)))) == "(x-1)/(x+1)"
-        @test last(simplest(exp(2log(x)) + exp(x) * exp(y))) == x^2 + exp(x + y)
-        @test last(simplest(2sin(z) * cos(z) + 3sin(z)^2 + 3cos(z)^2)) == sin(2z) + 3
-        @test last(simplest(sin(z)^3; goal = :trig_linear)) == (3sin(z) - sin(3z)) / 4
-        @test string(last(simplest((x + 1)^2 * (x - 1); goal = :expanded))) == "x^3+x^2-x-1"
-        @test string(last(simplest(x^2 - 1; goal = :factored))) == "(x-1)*(x+1)"
+        @test simplest(sin(z)^4 - cos(z)^4) == -cos(2z)
+        @test string(simplest((x^2 - 1) / (x^2 + 2x + 1))) == "(x-1)/(x+1)"
+        @test simplest(exp(2log(x)) + exp(x) * exp(y)) == x^2 + exp(x + y)
+        @test simplest(2sin(z) * cos(z) + 3sin(z)^2 + 3cos(z)^2) == sin(2z) + 3
+        @test simplest(sin(z)^3; goal = :trig_linear) == (3sin(z) - sin(3z)) / 4
+        @test string(simplest((x + 1)^2 * (x - 1); goal = :expanded)) == "x^3+x^2-x-1"
+        @test string(simplest(x^2 - 1; goal = :factored)) == "(x-1)*(x+1)"
         @test_throws ArgumentError simplest(x; goal = :prettiest)
         @test goal_cost(:factored, (x - 1) * (x + 1))[1] == 1
         # with verify, only steps checked to be equal are taken
-        t = simplest(sin(z)^4 - cos(z)^4; verify = true)
-        @test last(t) == -cos(2z)
+        @test simplest(sin(z)^4 - cos(z)^4; verify = true) == -cos(2z)
         @test any(x -> x isa Transform, standard_transforms())
         @test string.(simplest([x^2 - 1, (x + 1)^2 - x^2]; goal = :factored)) == ["(x-1)*(x+1)", "2*x+1"]
     end
@@ -326,7 +329,7 @@ using Giac.Rules
     @testset "traces in derivations" begin
         d = @derivation begin
             V = sin(z)^4 - cos(z)^4
-            V ~ simplest(V)
+            V ~ simplest(V; trace = true)
         end
         @test length(d.rows) == 3                                # V = e, V = e (start), {} = -cos(2z)
         @test occursin("\\text{by }", last(d.rows[end]))

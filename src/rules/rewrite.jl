@@ -24,9 +24,10 @@ entry by entry to arrays.
 - `once = true` makes a single pass instead of repeating until nothing changes.
 - `within = @pattern(…)` rewrites only inside the subexpressions that pattern matches.
 - `at = n` makes one rewrite, at the `n`th place a rule applies (in the order above).
-- `trace = true` returns the steps instead of the result, displayed as aligned equations: one
-  rule in one place per step, each labelled with its rule, repeats of a rule shown as one step.
-  `trace = :steps` shows every step. The result is `last(t)`.
+- `trace = true` returns the path instead of the result: a [`RewriteTrace`](@ref), the vector of
+  expressions along the way (`last(t)` is the result), displayed as aligned equations, one rule
+  in one place per step, each labelled with its rule, repeats of a rule shown as one step.
+  `trace = :steps` shows every step.
 
 Rules that undo each other are reported by name. Without an expression, `rewrite(rules...)` is
 a function of one, to compose rule sets in order: `e |> rewrite(expand_rules) |> rewrite(trig_rules)`.
@@ -150,44 +151,63 @@ function _trace(e0::GiacExpr, ctx::_Ctx, maxsteps, collapse)
 end
 
 """
-The steps of a traced [`rewrite`](@ref) or of [`simplest`](@ref): displays as aligned
-equations, one per step, each labelled with what made it. `last(t)` is the result.
-"""
-struct RewriteTrace
-    steps::Giac.Derivation
-    result::GiacExpr
-end
-Base.last(t::RewriteTrace) = t.result
-Base.show(io::IO, m::MIME"text/latex", t::RewriteTrace) = show(io, m, t.steps)
-Base.show(io::IO, m::MIME"text/markdown", t::RewriteTrace) = show(io, m, t.steps)
-Base.show(io::IO, t::RewriteTrace) = print(io, "RewriteTrace with $(length(t.steps.rows)) step(s) to ", t.result)
+    RewriteTrace
 
-# `steps` are `(expression after, what made it)`; with `collapse`, a run of steps by the same
-# rule shows as one, with its count
-function _trace_display(e0, steps; collapse::Bool)
+The path a traced [`rewrite`](@ref) or [`simplest`](@ref) took: a vector of the expressions along
+it, so `first(t)` is the start, `last(t)` the result, `t[i]` the expression after step `i - 1`,
+and `length(t)` one more than the number of steps. `t.by[i]` is the rule or transform that
+turned `t[i]` into `t[i + 1]`. Displays as aligned equations, one per step, each labelled with
+what made it; repeats of a rule show as one step unless traced with `trace = :steps`.
+"""
+struct RewriteTrace <: AbstractVector{GiacExpr}
+    exprs::Vector{GiacExpr}
+    by::Vector{Any}
+    collapse::Bool
+end
+Base.size(t::RewriteTrace) = size(t.exprs)
+Base.getindex(t::RewriteTrace, i::Int) = t.exprs[i]
+Base.IndexStyle(::Type{RewriteTrace}) = IndexLinear()
+
+# `steps` are `(expression after, what made it)`
+_trace_display(e0, steps; collapse::Bool) =
+    RewriteTrace(GiacExpr[e0; GiacExpr[first(s) for s in steps]], Any[last(s) for s in steps], collapse)
+
+# The rows of the display: one per step (or per run of a rule, collapsed), the first starting from
+# the expression the trace starts with.
+function _trace_rows(t::RewriteTrace)
     runs = Tuple{GiacExpr, Any, Int}[]
-    for (e, label) in steps
-        if collapse && !isempty(runs) && runs[end][2] === label
+    for (e, label) in zip(t.exprs[2:end], t.by)
+        if t.collapse && !isempty(runs) && runs[end][2] === label
             runs[end] = (e, label, runs[end][3] + 1)
         else
             push!(runs, (e, label, 1))
         end
     end
+    lhs = Giac.giac_latex(first(t))
+    isempty(runs) && return [(lhs, Giac.giac_latex(first(t)) * " \\qquad \\text{(no rule applies)}")]
     rows = Tuple{String, String}[]
-    lhs = Giac.giac_latex(e0)
     for (e, label, n) in runs
         times = n > 1 ? " \\;(\\times $n)" : ""
         push!(rows, (lhs, Giac.giac_latex(e) * " \\qquad \\text{by } " * _label_latex(label) * times))
         lhs = "{}"
     end
-    isempty(rows) && push!(rows, (lhs, Giac.giac_latex(e0) * " \\qquad \\text{(no rule applies)}"))
-    return RewriteTrace(Giac.Derivation(rows), isempty(steps) ? e0 : first(steps[end]))
+    return rows
+end
+
+Base.show(io::IO, m::MIME"text/latex", t::RewriteTrace) = show(io, m, Giac.Derivation(_trace_rows(t)))
+Base.show(io::IO, m::MIME"text/markdown", t::RewriteTrace) = show(io, m, Giac.Derivation(_trace_rows(t)))
+Base.show(io::IO, t::RewriteTrace) = print(io, "RewriteTrace(", first(t), " → ", last(t), ", ", length(t.by), " step(s))")
+function Base.show(io::IO, ::MIME"text/plain", t::RewriteTrace)
+    print(io, "RewriteTrace with ", length(t.by), " step(s):\n  ", first(t))
+    for (e, label) in zip(t.exprs[2:end], t.by)
+        print(io, "\n  = ", e, "    by ", label isa Rule ? label.source : label isa Transform ? label.name : nameof(label))
+    end
 end
 
 # In a `@derivation`, a trace continues the step it is the value of: `lhs = start`, then one row
 # per step.
 function Giac._derivation_rows(left, written, t::RewriteTrace, simplifier)
-    steps = t.steps.rows
+    steps = _trace_rows(t)
     rows = [(left, join(vcat(written, first(steps[1])), " = "))]
     append!(rows, (("{}", last(r)) for r in steps))
     return rows
