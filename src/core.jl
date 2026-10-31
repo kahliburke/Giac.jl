@@ -569,7 +569,16 @@ function _gen_from_node(n::CallNode)
     n.gen === nothing || return n.gen
     B = GiacCxxBindings
     v = B.CxxWrap.StdVector{B.Gen}()
-    foreach(a -> push!(v, _gen_from_node(a)), n.args)
+    if n.f == "of" && length(n.args) > 2
+        # GIAC applies a function to one argument, a sequence when there are several: f(a, b) is
+        # of(f, seq(a, b)), read with the sequence flattened
+        seq = B.CxxWrap.StdVector{B.Gen}()
+        foreach(a -> push!(seq, _gen_from_node(a)), n.args[2:end])
+        push!(v, _gen_from_node(n.args[1]))
+        push!(v, B.make_vect(seq, Int32(B.VECTSUBTYPE_SEQ)))
+    else
+        foreach(a -> push!(v, _gen_from_node(a)), n.args)
+    end
     return B.make_symbolic_unevaluated(n.f == "=" ? "equal" : n.f, v)
 end
 

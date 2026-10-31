@@ -145,6 +145,9 @@ struct _PRaw <: _PNode; tex::String; end
 struct _PDeriv <: _PNode; f::String; args::Vector{_PNode}; wrt::Vector{String}; end
 # the derivative of an expression
 struct _PDerivOf <: _PNode; arg::_PNode; wrt::Vector{String}; end
+# the derivative of the function `f` at arguments that are not names, in the arguments at the
+# positions `idx` (from 0): f′(x + h), ∂₁f(x + h, y)
+struct _PDerivAt <: _PNode; f::String; args::Vector{_PNode}; idx::Vector{Int}; end
 
 const _CALL_TEX = Dict(
     "sin" => "\\sin", "cos" => "\\cos", "tan" => "\\tan", "cot" => "\\cot", "sec" => "\\sec", "csc" => "\\csc",
@@ -198,28 +201,51 @@ function _pnode(e::GiacExpr)
     if h == "diff" && length(a) >= 2 && is_identifier(a[2])
         k = length(a) >= 3 && _is_plain_number(a[3]) ? Int(to_julia(a[3])) : 1
         f, wrt = a[1], fill(string(a[2]), k)
-        if iscall(f) && symb_funcname(f) == "of"
+        # f(x) in x is f's derivative; f(x + h) in h is the derivative of an expression
+        if iscall(f) && symb_funcname(f) == "of" && any(x -> isequal(x, a[2]), arguments(f)[2:end])
             fa = arguments(f)
             return _PDeriv(string(fa[1]), _PNode[_pnode(x) for x in fa[2:end]], wrt)
         end
         return _PDerivOf(_pnode(f), wrt)
     end
-    if h == "of" && iscall(a[1]) && symb_funcname(a[1]) == "diff"
-        # partial derivatives of f at (x, y): of(diff(diff(f, 0), 1), x, y), indices from 0
+    if h == "of" && iscall(a[1]) && symb_funcname(a[1]) in ("diff", "function_diff")
+        # partial derivatives of f at (x, y): of(diff(diff(f, 0), 1), x, y), indices from 0; the
+        # derivative of a function of one argument: of(diff(f), x), evaluated of(function_diff(f), x)
         g, idx = a[1], Int[]
-        while iscall(g) && symb_funcname(g) == "diff"
+        while iscall(g) && symb_funcname(g) in ("diff", "function_diff")
             ga = arguments(g)
-            prepend!(idx, [Int(to_julia(i)) for i in ga[2:end]])
+            prepend!(idx, length(ga) == 1 ? [0] : [Int(to_julia(i)) for i in ga[2:end]])
             g = ga[1]
         end
         args = a[2:end]
-        if is_identifier(g) && all(i -> 0 <= i < length(args) && is_identifier(args[i + 1]), idx)
-            return _PDeriv(string(g), _PNode[_pnode(x) for x in args], [string(args[i + 1]) for i in idx])
+        if is_identifier(g) && all(i -> 0 <= i < length(args), idx)
+            names = [_wrt_name(args[i + 1]) for i in idx]
+            all(!isnothing, names) && return _PDeriv(string(g), _PNode[_pnode(x) for x in args], names)
+            return _PDerivAt(string(g), _PNode[_pnode(x) for x in args], idx)
         end
     end
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
     return _PRaw(tidy_latex(_giac_tex(e)))
+end
+
+# The name of a variable a partial derivative is in, for ∂f/∂x: a symbol's; for a function of
+# variables `q(t)`, the function's; for a derivative of one, that name with dots (q̇, for a
+# derivative in time) or primes. `nothing` for any other expression.
+function _wrt_name(x::GiacExpr)
+    is_identifier(x) && return string(x)
+    iscall(x) || return nothing
+    h, a = symb_funcname(x), arguments(x)
+    h == "of" && all(is_identifier, a) && return string(a[1])
+    if h == "diff" && length(a) in (2, 3) && is_identifier(a[2]) && iscall(a[1]) && symb_funcname(a[1]) == "of"
+        length(a) == 3 && !_is_plain_number(a[3]) && return nothing
+        k = length(a) == 3 ? Int(to_julia(a[3])) : 1
+        base = _wrt_name(a[1])
+        base === nothing && return nothing
+        string(a[2]) == _current_style().time && k <= 3 && return base * ("̇", "̈", "⃛")[k]
+        return base * "′"^k
+    end
+    return nothing
 end
 
 _pnode(n::NumNode) = n.v isa Real ? _PNum(n.v) : _PRaw(tidy_latex(_giac_tex(GiacExpr(n))))
@@ -318,8 +344,8 @@ function _variables(root::_PNode, style::TypesetStyle)
             sp = _symbol_power(n)
             sp !== nothing && sp[2] >= 2 && push!(found, sp[1])
             walk(n.base); walk(n.exp)
-        elseif n isa _PCall || n isa _PDeriv
-            (n isa _PDeriv || n.user) && foreach(a -> a isa _PAtom && !a.constant && push!(arguments, a.name), n.args)
+        elseif n isa _PCall || n isa _PDeriv || n isa _PDerivAt
+            (n isa _PCall ? n.user : true) && foreach(a -> a isa _PAtom && !a.constant && push!(arguments, a.name), n.args)
             foreach(walk, n.args)
         elseif n isa _PDerivOf
             walk(n.arg)
@@ -337,7 +363,7 @@ function _variables(root::_PNode, style::TypesetStyle)
     function by_letter(n)
         n isa _PAtom && !n.constant && letter(n.name) !== nothing && push!(found, n.name)
         for f in (n isa _PSum ? n.terms : n isa _PProd ? n.factors : n isa _PPow ? [n.base, n.exp] :
-                  n isa _PCall || n isa _PDeriv ? n.args : n isa _PEq ? [n.lhs, n.rhs] :
+                  n isa _PCall || n isa _PDeriv || n isa _PDerivAt ? n.args : n isa _PEq ? [n.lhs, n.rhs] :
                   n isa _POrder || n isa _PDerivOf ? [n.arg] : _PNode[])
             by_letter(f)
         end
@@ -361,6 +387,7 @@ function _factor_rank(f::_PNode, vars)
     end
     b isa _PCall && b.user && return (3, 0, length(vars) + 1, b.f)
     b isa _PDeriv && return (3, 0, length(vars) + 1, b.f * "′"^length(b.wrt))
+    b isa _PDerivAt && return (3, 0, length(vars) + 1, b.f * "′"^length(b.idx))
     (b isa _PCall && b.f == "exp" || f isa _PPow && b isa _PAtom && b.name == "e") && return (4, 0, 0, "")
     b isa _PCall && return (5, 0, 0, b.f)
     return (6, 0, 0, "")
@@ -476,7 +503,8 @@ function _unsigned_product(p, c::_Ctx)
         wrap(t, fs, k) = (length(fs) + (isone(k) ? 0 : 1) > 1) ? "\\left(" * t * "\\right)" : t
         return wrap(numtex, num, pn) * "/" * wrap(dentex, den, q)
     end
-    if c.style.fractions === :front && isempty(den) && !isempty(num)
+    # a fraction in the numerator (∂L/∂q) would stack fractions: the number goes in front
+    if (c.style.fractions === :front || occursin("\\frac", numtex)) && isempty(den) && !isempty(num)
         return "\\frac{$(pn)}{$(q)} " * _factors_tex(1, num, c)
     end
     # a fraction's line already groups each side: no parentheses around a lone sum
@@ -590,6 +618,17 @@ function _tex(n::_PDerivOf, c::_Ctx)
         return _leibniz("\\mathrm{d}", n.arg.tex, n.wrt)
     end
     return _leibniz("\\mathrm{d}", "", n.wrt) * "\\left(" * _tex(n.arg, c) * "\\right)"
+end
+
+function _tex(n::_PDerivAt, c::_Ctx)
+    name = _tex_name(n.f)
+    args = "\\left(" * join((_tex(a, c) for a in n.args), ", ") * "\\right)"
+    if length(n.args) == 1
+        k = length(n.idx)
+        base = occursin(r"[_^]", name) ? "{" * name * "}" : name
+        return (k <= 3 ? base * "'"^k : base * "^{($k)}") * args
+    end
+    return join(("\\partial_{$(i + 1)}" for i in n.idx), " ") * " " * name * args
 end
 
 # d^k f / dx^i dy^j, the variables grouped in the order they first come

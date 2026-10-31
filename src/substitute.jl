@@ -57,8 +57,26 @@ function substitute(expr::GiacExpr, dict::AbstractDict{<:GiacExpr})::GiacExpr
     # simultaneously by giac_subst, so e.g. Dict(x => y, y => x) swaps.
     vars = collect(GiacExpr, keys(dict))
     vals = collect(values(dict))
-    return _giac_subst_vec_tier1(expr, vars, vals)
+    return _take_derivatives(_giac_subst_vec_tier1(expr, vars, vals))
 end
+
+# The derivatives a substitution put an expression into, `diff(q(t) + ε*η(t), t)` from
+# `q(t) => q(t) + ε*η(t)`, taken: GIAC's subst leaves them as written.
+function _take_derivatives(e::GiacExpr)
+    n = _node(e)
+    _has_open_derivative(n) || return e
+    return GiacExpr(_replace_nodes(n) do m
+        _is_open_derivative(m) || return nothing
+        return _node(invoke_cmd(:diff, (GiacExpr(a) for a in m.args)...))
+    end)
+end
+
+_is_open_derivative(n::Node) = n isa CallNode && n.f == "diff" && length(n.args) >= 2 && !_is_coordinate(n) &&
+                               !(n.args[1] isa CallNode && n.args[1].f == "of")
+_has_open_derivative(n::Node) = _is_open_derivative(n) ||
+    (n isa CallNode && any(_has_open_derivative, n.args)) ||
+    (n isa AddNode && any(t -> _has_open_derivative(first(t)), n.terms)) ||
+    (n isa MulNode && any(((b, e),) -> _has_open_derivative(b) || _has_open_derivative(e), n.factors))
 
 """
     substitute(expr::GiacExpr, pairs::Pair{<:GiacExpr}...) -> GiacExpr

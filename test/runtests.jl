@@ -33,6 +33,7 @@ using LinearAlgebra
     include("test_presentation.jl")
     include("test_in_form.jl")
     include("test_names.jl")
+    include("test_coordinate_diff.jl")
     include("test_threads.jl")
     include("test_core.jl")
     include("test_matrix_iteration.jl")
