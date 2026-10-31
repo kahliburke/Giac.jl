@@ -99,6 +99,7 @@ include("Commands.jl")
 include("Constants.jl")
 
 # Symbolic linear algebra on Julia arrays (needs Commands and the introspection helpers)
+include("names.jl")
 include("array_algebra.jl")
 include("rewrite.jl")
 include("derivation.jl")

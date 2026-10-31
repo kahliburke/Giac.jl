@@ -10,7 +10,7 @@
         @test L(c + b * x + a * x^2) == "a x^{2} + b x + c"           # descending powers of the variable
         @test L(-x^2 + 1) == "1 - x^{2}"                             # a difference leads with its positive term
         @test L(-a + b) == "b - a"
-        @test L(t * y + 3y) == "t y\\left(t\\right) + 3 y\\left(t\\right)"   # t, the argument of y(t), is a variable
+        @test L(t * y + 3y) == "t y + 3 y"                           # y(t) is written y; t, its argument, is a variable
         @test T(x^2 + 1 + x; order = :ascending) == "1 + x + x^{2}"
         @test T(-x^2 + 1; lead = :as_is) == "-x^{2} + 1"
         @test occursin("O\\left(", L(Giac.Commands.series(sin(x), x, 0, 5)))

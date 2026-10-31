@@ -215,17 +215,6 @@ function _list_latex(g::GiacExpr)
     return "\\left\\{" * join(map(show_item, items), ",\\; ") * "\\right\\}"
 end
 
-const _GREEK_TEX = Dict(
-    'α' => "\\alpha", 'β' => "\\beta", 'γ' => "\\gamma", 'δ' => "\\delta", 'ε' => "\\varepsilon",
-    'ζ' => "\\zeta", 'η' => "\\eta", 'θ' => "\\theta", 'ι' => "\\iota", 'κ' => "\\kappa",
-    'λ' => "\\lambda", 'μ' => "\\mu", 'ν' => "\\nu", 'ξ' => "\\xi", 'ρ' => "\\rho", 'σ' => "\\sigma",
-    'τ' => "\\tau", 'υ' => "\\upsilon", 'φ' => "\\varphi", 'χ' => "\\chi", 'ψ' => "\\psi",
-    'ω' => "\\omega", 'Γ' => "\\Gamma", 'Δ' => "\\Delta", 'Θ' => "\\Theta", 'Λ' => "\\Lambda", 'Ξ' => "\\Xi",
-    'Σ' => "\\Sigma", '∂' => "\\partial",
-    'Π' => "\\Pi", 'Υ' => "\\Upsilon", 'Φ' => "\\Phi", 'Ψ' => "\\Psi", 'Ω' => "\\Omega")
-
-const _MARK_TEX = Dict('★' => "^{\\star}", '′' => "'", '″' => "''")
-
 """
     tidy_latex(s) -> String
 
@@ -237,10 +226,8 @@ and a series remainder `t^{4} \\mathrm{order\\_size}(t)` becomes `O(t^{4})`.
 function tidy_latex(s::AbstractString)
     # \mathrm{…} around a name containing Unicode letters or marks: typeset the parts directly
     s = replace(s, r"\\mathrm\{([^{}]*[^\x00-\x7F][^{}]*)\}" => m -> _tex_name(chop(m; head = 8, tail = 1)))
-    # the same for names Giac leaves bare: accents (x̄, θ̇) and subscript digits (A₀)
-    s = replace(s, r"\p{L}\p{M}" => m -> _tex_accented(m))
-    s = replace(s, r"[₀-₉]+" => m -> _tex_subscript(m))
-    s = replace(s, r"[α-ωΓ-Ω★′″]" => m -> _tex_char(only(m)))
+    # the same for names Giac leaves bare (x̄, A₀, kₚ, Kᵀ, θ)
+    s = replace(s, _BARE_NAME => _bare_name_tex)
     s = replace(s, r"\\frac(\d)\{" => s"\\frac{\1}{")
     s = replace(s, "\\mathrm{det}" => "\\det", "\\mathrm{trace}" => "\\operatorname{tr}")
     # a series' remainder `t^{4} order_size(t)` is O(t⁴)
@@ -249,40 +236,16 @@ function tidy_latex(s::AbstractString)
     return _atom_tex(s)
 end
 
+# a name outside a TeX command; those beyond ASCII letters and digits are rewritten
+const _BARE_NAME = r"(?<![\\A-Za-z])[\p{L}∂∇][\p{L}\p{M}\p{N}′″★ᵀ⁺⁻]*"
+
+function _bare_name_tex(m::AbstractString)
+    isascii(m) && return m
+    t = _tex_name(m)
+    return occursin(r"\\[a-zA-Z]+$", t) ? t * " " : t
+end
+
 const _ORDER_TERM = r"(\\left\([^()]*\\right\)\^\{\d+\}|[A-Za-z]\w*(?:_\{\d+\})?(?:\^\{\d+\})?) \\mathrm\{order\\_size\}\\left\([^()]*\\right\)"
-
-_tex_char(c::Char) = haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] * " " :
-                     haskey(_MARK_TEX, c) ? _MARK_TEX[c] : string(c)
-
-const _ACCENT_TEX = Dict('̂' => "\\hat", '̃' => "\\tilde", '̄' => "\\bar", '̅' => "\\bar",
-                         '̇' => "\\dot", '̈' => "\\ddot", '⃗' => "\\vec")
-
-"A letter with a combining accent (`x̄`, `θ̇`) as `\\bar{x}`, `\\dot{\\theta}`."
-function _tex_accented(s::AbstractString)
-    base, mark = first(s), last(s)
-    haskey(_ACCENT_TEX, mark) || return string(base)
-    return _ACCENT_TEX[mark] * "{" * (haskey(_GREEK_TEX, base) ? _GREEK_TEX[base] : string(base)) * "}"
-end
-
-"Subscript digits `₁₂` as `_{12}`."
-_tex_subscript(s::AbstractString) = "_{" * map(c -> Char(Int(c) - Int('₀') + Int('0')), s) * "}"
-
-function _tex_name(name::AbstractString)
-    # Greek letters → commands, accented letters → accents, marks → superscripts, digit runs
-    # (plain or subscript) → subscripts, as Giac does for `x1`, multi-letter ASCII runs → upright
-    parts = String[]
-    for run in eachmatch(r"\p{L}\p{M}|[A-Za-z]+(?!\p{M})|[0-9]+|[₀-₉]+|.", name)
-        r = run.match
-        c = first(r)
-        push!(parts, length(r) == 2 && !isascii(r) && haskey(_ACCENT_TEX, last(r)) ? _tex_accented(r) :
-                     haskey(_GREEK_TEX, c) ? _GREEK_TEX[c] :
-                     haskey(_MARK_TEX, c) ? _MARK_TEX[c] :
-                     isdigit(c) ? "_{$r}" :
-                     c in '₀':'₉' ? _tex_subscript(r) :
-                     length(r) > 1 ? "\\mathrm{$r}" : r)
-    end
-    return join(parts)
-end
 
 """
     giac_latex(x) -> String

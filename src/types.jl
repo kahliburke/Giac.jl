@@ -82,11 +82,11 @@ end
 
 # a trace or determinant of symbolic matrices shows as such (see matrix_symbols.jl)
 function Base.show(io::IO, expr::GiacExpr)
-    print(io, _atom_plain(string(expr)))
+    print(io, _unspell(_atom_plain(string(expr))))
 end
 
 function Base.show(io::IO, ::MIME"text/plain", expr::GiacExpr)
-    print(io, "GiacExpr: ", _atom_plain(string(expr)))
+    print(io, "GiacExpr: ", _unspell(_atom_plain(string(expr))))
 end
 
 # ============================================================================

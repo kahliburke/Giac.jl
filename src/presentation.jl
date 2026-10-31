@@ -19,6 +19,9 @@ Base.@kwdef struct TypesetStyle
     roots::Symbol = :radical
     products::Symbol = :conventional
     trig_powers::Symbol = :superscript
+    derivatives::Symbol = :dot
+    arguments::Symbol = :auto
+    time::String = "t"
     variable_letters::String = "xyztsuqθφ"
 end
 
@@ -29,7 +32,9 @@ const _TYPESET_OPTIONS = Dict(
     :exp => (:e, :exp),
     :roots => (:radical, :power),
     :products => (:conventional, :as_is),
-    :trig_powers => (:superscript, :parenthesized))
+    :trig_powers => (:superscript, :parenthesized),
+    :derivatives => (:dot, :prime, :leibniz),
+    :arguments => (:auto, :shown))
 
 # The default style, set by `typeset!`; a style for a block of code or one value is the running
 # task's own (in its task-local storage), so concurrent tasks never see each other's.
@@ -49,11 +54,13 @@ function _with(style::TypesetStyle; kwargs...)
             fields[:by] = _names(v)
         elseif k === :variable_letters
             fields[k] = string(v)
+        elseif k === :time
+            fields[k] = only(_names(v))
         elseif haskey(_TYPESET_OPTIONS, k)
             v in _TYPESET_OPTIONS[k] || throw(ArgumentError("typeset: $k is one of $(join(_TYPESET_OPTIONS[k], ", ")), got $v"))
             fields[k] = v
         else
-            throw(ArgumentError("typeset: unknown option `$k`; the options are by, $(join(keys(_TYPESET_OPTIONS), ", "))"))
+            throw(ArgumentError("typeset: unknown option `$k`; the options are by, time, variable_letters, $(join(keys(_TYPESET_OPTIONS), ", "))"))
         end
     end
     return TypesetStyle(; fields...)
@@ -81,6 +88,13 @@ Set how expressions are written from now on (the options given change; the rest 
 - `products = :conventional | :as_is`: a product as numbers, constants, parameters (Latin letters
   before Greek, each in the order they were declared, so `@giac_var m g h` writes `mgh`), variables,
   exponentials, other functions, sums.
+- `derivatives = :dot | :prime | :leibniz`: a derivative in time of a function of time is written
+  with dots (`q̇`, `q̈`, up to the third), with primes (`q′`), or as `dq/dt`. Derivatives in other
+  variables, and partial derivatives, are written `dy/dx` and `∂f/∂x`. A sum puts higher
+  derivatives first (`q̈ + 3q̇ + 2 sin q`).
+- `time = t`: the variable that dots differentiate by.
+- `arguments = :auto | :shown`: `:auto` writes a function of time alone without its argument
+  (`q(t)` is `q`); its other values (`q(0)`) and other functions' arguments are always written.
 """
 function typeset!(; reset::Bool = false, kwargs...)
     reset && (_TYPESET[] = TypesetStyle())
@@ -127,6 +141,10 @@ struct _PCall <: _PNode; f::String; args::Vector{_PNode}; user::Bool; end
 struct _PEq <: _PNode; lhs::_PNode; rhs::_PNode; end
 struct _POrder <: _PNode; arg::_PNode; end
 struct _PRaw <: _PNode; tex::String; end
+# the derivative of the function `f` (of `args`) in the variables `wrt`, one per order
+struct _PDeriv <: _PNode; f::String; args::Vector{_PNode}; wrt::Vector{String}; end
+# the derivative of an expression
+struct _PDerivOf <: _PNode; arg::_PNode; wrt::Vector{String}; end
 
 const _CALL_TEX = Dict(
     "sin" => "\\sin", "cos" => "\\cos", "tan" => "\\tan", "cot" => "\\cot", "sec" => "\\sec", "csc" => "\\csc",
@@ -147,9 +165,6 @@ function _pnode(e::GiacExpr)
         s == "infinity" && return _PAtom("\\infty", s, true)
         if t == IDNT
             haskey(_ATOMS, s) && return _PAtom("{" * _ATOMS[s][4] * "}", s, false)
-            # letters Giac's parser reserves are spelled out in names (Δ is Delta)
-            spelled = findfirst(p -> last(p) == s, GIAC_RESERVED_LETTERS)
-            spelled === nothing || return _PAtom(_tex_name(first(GIAC_RESERVED_LETTERS[spelled])), s, false)
             return _PAtom(_tex_name(s), s, false)
         end
         return _PRaw(tidy_latex(_giac_tex(e)))
@@ -175,6 +190,28 @@ function _pnode(e::GiacExpr)
     h == "order_size" && return _POrder(_pnode(only(a)))
     h == "abs" && return _PCall("abs", _PNode[_pnode(only(a))], false)
     h == "conj" && return _PCall("conj", _PNode[_pnode(only(a))], false)
+    if h == "diff" && length(a) >= 2 && is_identifier(a[2])
+        k = length(a) >= 3 && _is_plain_number(a[3]) ? Int(to_julia(a[3])) : 1
+        f, wrt = a[1], fill(string(a[2]), k)
+        if iscall(f) && symb_funcname(f) == "of"
+            fa = arguments(f)
+            return _PDeriv(string(fa[1]), _PNode[_pnode(x) for x in fa[2:end]], wrt)
+        end
+        return _PDerivOf(_pnode(f), wrt)
+    end
+    if h == "of" && iscall(a[1]) && symb_funcname(a[1]) == "diff"
+        # partial derivatives of f at (x, y): of(diff(diff(f, 0), 1), x, y), indices from 0
+        g, idx = a[1], Int[]
+        while iscall(g) && symb_funcname(g) == "diff"
+            ga = arguments(g)
+            prepend!(idx, [Int(to_julia(i)) for i in ga[2:end]])
+            g = ga[1]
+        end
+        args = a[2:end]
+        if is_identifier(g) && all(i -> 0 <= i < length(args) && is_identifier(args[i + 1]), idx)
+            return _PDeriv(string(g), _PNode[_pnode(x) for x in args], [string(args[i + 1]) for i in idx])
+        end
+    end
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
     return _PRaw(tidy_latex(_giac_tex(e)))
@@ -255,9 +292,11 @@ function _variables(root::_PNode, style::TypesetStyle)
             sp = _symbol_power(n)
             sp !== nothing && sp[2] >= 2 && push!(found, sp[1])
             walk(n.base); walk(n.exp)
-        elseif n isa _PCall
-            n.user && foreach(a -> a isa _PAtom && !a.constant && push!(found, a.name), n.args)
+        elseif n isa _PCall || n isa _PDeriv
+            (n isa _PDeriv || n.user) && foreach(a -> a isa _PAtom && !a.constant && push!(found, a.name), n.args)
             foreach(walk, n.args)
+        elseif n isa _PDerivOf
+            walk(n.arg)
         elseif n isa _PEq
             walk(n.lhs); walk(n.rhs)
         elseif n isa _POrder
@@ -271,7 +310,8 @@ function _variables(root::_PNode, style::TypesetStyle)
     function by_letter(n)
         n isa _PAtom && !n.constant && letter(n.name) !== nothing && push!(found, n.name)
         for f in (n isa _PSum ? n.terms : n isa _PProd ? n.factors : n isa _PPow ? [n.base, n.exp] :
-                  n isa _PCall ? n.args : n isa _PEq ? [n.lhs, n.rhs] : n isa _POrder ? [n.arg] : _PNode[])
+                  n isa _PCall || n isa _PDeriv ? n.args : n isa _PEq ? [n.lhs, n.rhs] :
+                  n isa _POrder || n isa _PDerivOf ? [n.arg] : _PNode[])
             by_letter(f)
         end
     end
@@ -292,9 +332,21 @@ function _factor_rank(f::_PNode, vars)
         greek = first(b.name) in 'α':'ω' || first(b.name) in 'Α':'Ω'
         i === nothing ? (return (2, Int(greek), _declared_order(b.name), b.name)) : (return (3, 0, i, b.name))
     end
+    b isa _PCall && b.user && return (3, 0, length(vars) + 1, b.f)
+    b isa _PDeriv && return (3, 0, length(vars) + 1, b.f * "′"^length(b.wrt))
     (b isa _PCall && b.f == "exp" || f isa _PPow && b isa _PAtom && b.name == "e") && return (4, 0, 0, "")
     b isa _PCall && return (5, 0, 0, b.f)
     return (6, 0, 0, "")
+end
+
+# The highest order of a derivative among a term's factors
+function _derivative_order(t::_PNode)
+    k = 0
+    for f in _split(t).num
+        b = f isa _PPow ? f.base : f
+        b isa Union{_PDeriv, _PDerivOf} && (k = max(k, length(b.wrt)))
+    end
+    return k
 end
 
 # A term's powers of the variables, in priority order.
@@ -305,11 +357,12 @@ function _order_terms(terms::Vector{_PNode}, style::TypesetStyle, vars)
     series = any(t -> _split(t).order !== nothing, terms)
     order === :auto && (order = series ? :ascending : :descending)
     if order !== :as_is
-        if isempty(vars) || all(t -> all(iszero, _powers(t, vars)), terms)
+        key(t) = vcat(_derivative_order(t), _powers(t, vars))
+        if all(t -> all(iszero, key(t)), terms)
             # nothing to order by: as given, with numbers last
             terms = vcat(filter(t -> !(t isa _PNum), terms), filter(t -> t isa _PNum, terms))
         else
-            terms = sort(terms; by = t -> _powers(t, vars), rev = order === :descending, alg = Base.Sort.DEFAULT_STABLE)
+            terms = sort(terms; by = key, rev = order === :descending, alg = Base.Sort.DEFAULT_STABLE)
         end
         # a series' remainder O(…) comes last
         terms = vcat(filter(t -> _split(t).order === nothing, terms), filter(t -> _split(t).order !== nothing, terms))
@@ -433,20 +486,21 @@ function _power_tex(n::_PPow, c::_Ctx)
         return _CALL_TEX[b.f] * "^{" * etex * "}" * _call_argument(b, c)
     end
     btex = _tex(b, c)
-    return (_needs_parens(b) ? "\\left(" * btex * "\\right)" : (occursin(r"[_^]", btex) ? "{" * btex * "}" : btex)) * "^{" * etex * "}"
+    parens = _needs_parens(b) || (b isa Union{_PDeriv, _PDerivOf} && startswith(btex, "\\frac")) ||
+             (b isa _PAtom && _juxtaposed(btex))
+    return (parens ? "\\left(" * btex * "\\right)" : (occursin(r"[_^]", btex) ? "{" * btex * "}" : btex)) * "^{" * etex * "}"
 end
 
 # a function's argument: bare after a named function when it is a symbol or a power of one
 function _call_argument(n::_PCall, c::_Ctx)
     a = only(n.args)
-    simple = a isa _PAtom || a isa _PNum && a.v isa Integer && a.v >= 0 || _symbol_power(a) !== nothing
+    simple = a isa _PAtom || a isa _PNum && a.v isa Integer && a.v >= 0 || _symbol_power(a) !== nothing ||
+             (a isa _PCall && a.user && isempty(_arguments_tex(a.args, c)))      # sin q, for q(t)
     return simple ? " " * _tex(a, c) : "\\left(" * _tex(a, c) * "\\right)"
 end
 
 function _tex(n::_PCall, c::_Ctx)
-    if n.user
-        return _tex_name(n.f) * "\\left(" * join((_tex(a, c) for a in n.args), ", ") * "\\right)"
-    end
+    n.user && return _tex_name(n.f) * _arguments_tex(n.args, c)
     n.f == "abs" && return "\\left|" * _tex(only(n.args), c) * "\\right|"
     n.f == "conj" && return "\\overline{" * _tex(only(n.args), c) * "}"
     if n.f == "exp" && c.style.exp === :e
@@ -454,4 +508,58 @@ function _tex(n::_PCall, c::_Ctx)
     end
     length(n.args) == 1 && return _CALL_TEX[n.f] * _call_argument(n, c)
     return _CALL_TEX[n.f] * "\\left(" * join((_tex(a, c) for a in n.args), ", ") * "\\right)"
+end
+
+# ---------------------------------------------------------------------------------------------
+# Functions of time and derivatives
+# ---------------------------------------------------------------------------------------------
+
+# a name written as symbols side by side (Δx): parenthesized under a power
+function _juxtaposed(tex::AbstractString)
+    depth = 0
+    for ch in tex
+        ch == '{' ? (depth += 1) : ch == '}' ? (depth -= 1) : (ch == ' ' && depth == 0 && return true)
+    end
+    return false
+end
+
+# a function's arguments, left out for a function of time alone (style `arguments = :auto`)
+function _arguments_tex(args::Vector{_PNode}, c::_Ctx)
+    c.style.arguments === :auto && length(args) == 1 && only(args) isa _PAtom && only(args).name == c.style.time && return ""
+    return "\\left(" * join((_tex(a, c) for a in args), ", ") * "\\right)"
+end
+
+# an accent over the main symbol of a name, before its subscripts and superscripts
+function _accent_tex(accent::AbstractString, tex::AbstractString)
+    depth = 0
+    for (i, ch) in pairs(tex)
+        ch == '{' ? (depth += 1) : ch == '}' ? (depth -= 1) : nothing
+        depth == 0 && ch in ('_', '^', '\'') && i > 1 && return accent * "{" * tex[1:prevind(tex, i)] * "}" * tex[i:end]
+    end
+    return accent * "{" * tex * "}"
+end
+
+const _DOTS = ("\\dot", "\\ddot", "\\dddot")
+
+function _tex(n::_PDeriv, c::_Ctx)
+    k, v = length(n.wrt), first(n.wrt)
+    name = _tex_name(n.f)
+    single = length(n.args) == 1 && only(n.args) isa _PAtom && only(n.args).name == v && all(==(v), n.wrt)
+    if single && c.style.derivatives === :dot && v == c.style.time && k <= 3
+        return _accent_tex(_DOTS[k], name) * _arguments_tex(n.args, c)
+    elseif single && c.style.derivatives === :prime
+        base = occursin(r"[_^]", name) ? "{" * name * "}" : name
+        return (k <= 3 ? base * "'"^k : base * "^{($k)}") * _arguments_tex(n.args, c)
+    end
+    return _leibniz(length(n.args) > 1 ? "\\partial" : "\\mathrm{d}", name, n.wrt)
+end
+
+_tex(n::_PDerivOf, c::_Ctx) = _leibniz("\\mathrm{d}", "", n.wrt) * "\\left(" * _tex(n.arg, c) * "\\right)"
+
+# d^k f / dx^i dy^j, the variables grouped in the order they first come
+function _leibniz(d::AbstractString, name::AbstractString, wrt::Vector{String})
+    k = length(wrt)
+    num = (k == 1 ? d : d * "^{$k}") * (isempty(name) ? "" : " " * name)
+    den = join((d * " " * _tex_name(v) * (count(==(v), wrt) > 1 ? "^{$(count(==(v), wrt))}" : "") for v in unique(wrt)), " ")
+    return "\\frac{" * num * "}{" * den * "}"
 end

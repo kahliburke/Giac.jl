@@ -145,11 +145,13 @@ Negative indices are encoded with 'm' prefix (e.g., -1 → `a_m1`).
 """
 function _format_indices(base::Symbol, indices::Tuple, needs_sep::Bool)
     formatted = [_format_index(idx) for idx in indices]
-    if needs_sep
-        return Symbol(base, "_", join(formatted, "_"))
-    else
-        return Symbol(base, join(formatted))
+    name = needs_sep ? Symbol(base, "_", join(formatted, "_")) : Symbol(base, join(formatted))
+    # the name says `m1`; it is written with the index, -1
+    if any(<(0), indices)
+        _TEX_NAMES[replace(string(name), GIAC_RESERVED_LETTERS...)] =
+            _tex_name(string(base)) * "_{" * join(string.(indices), ",") * "}"
     end
+    return name
 end
 
 """
@@ -346,6 +348,20 @@ factors come out), `periodic(T)`, `inverse_of(g)`, or a tuple of them.
 @giac_var φ(x)::odd ψ(t)::(even, periodic(2π))
 ```
 
+Names are written as typed: `x₁`, `x_1` and `x1` are x₁; `x_ref` has an upright subscript;
+`x̂`, `V̇`, `ẍ` carry accents; `kₚ`, `Kᵀ`, `x⁺`, `P★`, `x′` have their sub- and superscripts; `Δx`
+is Δx. For anything else, give the LaTeX with the name:
+```julia
+@giac_var m_c => "m_{\\text{cart}}" (k => "k_\\theta")::positive
+```
+
+A function of one variable, `q(t)`, followed by its name with dots declares its derivatives:
+```julia
+@giac_var t q(t) q̇ q̈        # q̇ is diff(q, t), q̈ is diff(q, t, 2)
+q̈ + 3q̇ + 2sin(q)            # typeset as  q̈ + 3q̇ + 2 sin q
+```
+Without such a function, a dotted name is a symbol of its own.
+
 Single-variable function (NEW):
 ```julia
 @giac_var u(t)        # Creates u as GiacExpr representing "u(t)"
@@ -413,6 +429,22 @@ macro giac_var(args...)
     for arg in args
         # `k::positive`, `x[1:2]::real`, `y::(0, 1)`: a declaration with an assumption
         decl, tag = arg isa Expr && arg.head == :(::) && length(arg.args) == 2 ? (arg.args[1], arg.args[2]) : (arg, nothing)
+        # `m_c => "m_{\\text{cart}}"`: the name and how it is written
+        if decl isa Expr && decl.head == :call && decl.args[1] === :(=>) && length(decl.args) == 3
+            decl, tex = decl.args[2], decl.args[3]
+            name = decl isa Expr && decl.head == :call ? decl.args[1] : decl
+            push!(exprs, :(_set_tex_name!($(string(name)), $(esc(tex)))))
+        end
+        dotted = decl isa Symbol ? _dotted(string(decl)) : nothing
+        if dotted !== nothing
+            # `q̇` after `q(t)`: the derivative; otherwise a symbol of its own
+            base = Symbol(first(dotted))
+            push!(exprs, :($(esc(decl)) = _dotted_variable($(string(decl)), $(esc(:(@isdefined $base))) ? $(esc(base)) : nothing, $(last(dotted)))))
+            push!(varnames, decl)
+            tagex = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) : esc(tag)
+            push!(exprs, :(is_identifier($(esc(decl))) && _declare!($(esc(decl)), $tagex)))
+            continue
+        end
         if decl isa Expr && decl.head == :ref && decl.args[1] isa Symbol
             push!(exprs, _array_declaration(decl.args[1], decl.args[1], decl.args[2:end]))
             push!(varnames, decl.args[1])
