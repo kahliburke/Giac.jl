@@ -380,7 +380,21 @@ Base.log(b::Number, x::GiacExpr)::GiacExpr = log(promote(b, x)...)
 Compute the square root of a GiacExpr.
 Uses Tier 1 C++ wrapper for high performance.
 """
-Base.sqrt(expr::GiacExpr)::GiacExpr = _tier1_or_fallback(_giac_sqrt_tier1, :sqrt, expr)
+function Base.sqrt(expr::GiacExpr)::GiacExpr
+    # what the core takes apart (√(4m²) = 2m for m ≥ 0, √8 = 2√2) it gives; the rest is GIAC's
+    n = _node(expr)
+    r = n isa GenNode ? nothing : _pow(n, _HALF)
+    plain = r === nothing || (r isa MulNode && isone(r.coef) && length(r.factors) == 1 && isequal(first(r.factors[1]), n))
+    plain && return _tier1_or_fallback(_giac_sqrt_tier1, :sqrt, expr)
+    r isa MulNode || return GiacExpr(r)
+    # what is left under a root goes to GIAC, which knows √(x²) = |x|
+    outer, roots = Node[NumNode(r.coef)], GiacExpr[]
+    for (b, e) in r.factors
+        isequal(e, _HALF) && !(b isa NumNode && b.v isa Real && b.v > 0) ? push!(roots, _tier1_or_fallback(_giac_sqrt_tier1, :sqrt, GiacExpr(b))) :
+                                                push!(outer, _pow(b, e))
+    end
+    return reduce(*, roots; init = GiacExpr(_mul(outer...)))
+end
 
 """
     Base.cbrt(expr::GiacExpr) -> GiacExpr

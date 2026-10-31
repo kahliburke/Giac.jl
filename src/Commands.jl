@@ -648,6 +648,17 @@ function _generate_command_functions()
 end
 
 # ============================================================================
+"""
+    integrate(f, x)
+    integrate(f, x, a, b)
+
+GIAC's `integrate`, except that where GIAC returns `infinity` for an indefinite integral of an
+expression with derivatives of unknown functions (`∫(η′p + ηp′) dt`), the antiderivative is found by
+taking off one derivative term at a time: `∫ V u′ uᵖ dt = V uᵖ⁺¹/(p+1) - ∫ V′ uᵖ⁺¹/(p+1) dt`.
+"""
+integrate(args...) = invoke_cmd(:integrate, args...)
+integrate(f::GiacExpr, x::GiacExpr) = parentmodule(@__MODULE__)._integrate(f, x)
+
 # desolve: an unknown declared as `y(t)` is passed by name
 # ============================================================================
 

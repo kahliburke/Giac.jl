@@ -253,8 +253,46 @@ function _pow(b::Node, e::Node)
         c === nothing && return _giac_node("($(_str(b)))^($(_str(e)))")
         return _mul(NumNode(c), (_pow(f, _mul(x, e)) for (f, x) in b.factors)...)
     end
+    if b isa MulNode && e isa NumNode && e.v isa Real
+        r = _nonnegative_power(b, e)
+        r === nothing || return r
+    end
     return MulNode(1, Pair{Node, Node}[b => e])
 end
+
+# A fractional power of a product, distributed over the factors known not to be negative (and a
+# positive coefficient): √(4m²ω²) = 2mω for m, ω ≥ 0. `nothing` if none is.
+function _nonnegative_power(b::MulNode, e::NumNode)
+    c = b.coef
+    known = [f for f in b.factors if _known_nonnegative(first(f)) && last(f) isa NumNode && last(f).v isa Real]
+    split_coef = c isa Real && c > 0 && !isone(c)
+    (isempty(known) && !split_coef) && return nothing
+    rest = Pair{Node, Node}[f for f in b.factors if !any(k -> k === f, known)]
+    parts = Node[split_coef ? _pow(NumNode(c), e) : _ONE]
+    foreach(((f, x),) -> push!(parts, _pow(f, _mul(x, e))), known)
+    rc = split_coef ? 1 : c
+    if !isempty(rest) || !isone(rc)
+        r = isempty(rest) ? NumNode(rc) : length(rest) == 1 && isone(rc) && isequal(last(rest[1]), _ONE) ? first(rest[1]) : MulNode(rc, rest)
+        push!(parts, MulNode(1, Pair{Node, Node}[r => e]))
+    end
+    return _mul(parts...)
+end
+
+# Whether a node is known not to be negative: a number ≥ 0, a name declared positive or
+# nonnegative (or in an interval above 0), pi, and sums, products and powers of such
+_known_nonnegative(n::Node) = false
+_known_nonnegative(n::NumNode) = n.v isa Real && n.v >= 0
+function _known_nonnegative(n::SymNode)
+    n.name == "pi" && return true
+    tag = lock(() -> get(_DECLARED, n.name, nothing), _DECLARED_LOCK)
+    return tag === :positive || tag === :nonnegative || (tag isa Tuple && length(tag) == 2 && tag[1] isa Real && tag[1] >= 0)
+end
+_known_nonnegative(n::MulNode) = n.coef isa Real && n.coef >= 0 &&
+                                 all(((b, e),) -> _known_nonnegative(b) && e isa NumNode && e.v isa Real, n.factors)
+_known_nonnegative(n::AddNode) = all(((m, c),) -> c isa Real && c >= 0 && (m isa NumNode || _known_nonnegative(m)), n.terms)
+_known_nonnegative(n::CallNode) = n.f == "exp" && length(n.args) == 1 && _known_real(n.args[1])
+_known_real(n::Node) = _known_nonnegative(n) || (n isa NumNode && n.v isa Real) ||
+                       (n isa SymNode && lock(() -> get(_DECLARED, n.name, nothing), _DECLARED_LOCK) in (:real, :integer, :negative, :nonpositive))
 
 # b^e for numbers with a fractional exponent: computed for floats, exact for perfect powers
 function _numeric_root(b, e)
@@ -268,6 +306,13 @@ function _numeric_root(b, e)
     r = round(BigInt, big(b)^(1 / big(q)))
     for c in (r - 1, r, r + 1)
         c >= 0 && c^q == b && return NumNode(_npow(_canonical(c), numerator(e)))
+    end
+    # the largest qth power that divides b comes out: 8^(1/2) = 2·2^(1/2)
+    if b <= 10^8
+        for s in r:-1:2
+            k, rem = divrem(b, big(s)^q)
+            rem == 0 && return _mul(NumNode(_npow(_canonical(s), numerator(e))), MulNode(1, Pair{Node, Node}[NumNode(k) => NumNode(e)]))
+        end
     end
     return nothing
 end
