@@ -477,6 +477,7 @@ function _factor_rank(f::_PNode, vars)
     b isa _PBar && return (5, 0, 0, "|")
     (b isa _PCall && b.f == "exp" || f isa _PPow && b isa _PAtom && b.name == "e") && return (4, 0, 0, "")
     b isa _PCall && return (5, 0, 0, b.f)
+    b isa _PBraKet && return (6, 1, 0, "")                             # after its coefficients: (Eₙ - Eₘ)⟨m|n⟩
     return (6, 0, 0, "")
 end
 
@@ -677,7 +678,12 @@ end
 function _tex(n::_PCall, c::_Ctx)
     n.user && return _tex_name(n.f) * _arguments_tex(n.args, c)
     n.f == "abs" && return "\\left|" * _tex(only(n.args), c) * "\\right|"
-    n.f == "conj" && return "\\overline{" * _tex(only(n.args), c) * "}"
+    if n.f == "conj"                                   # z*, φ(x)*, (a + b)*
+        a = only(n.args)
+        t = _tex(a, c)
+        simple = (a isa _PAtom && !occursin('^', t)) || (a isa _PCall && a.user) || a isa _PBraKet
+        return (simple ? t : "\\left(" * t * "\\right)") * "^{*}"
+    end
     if n.f == "exp" && c.style.exp === :e
         return "e^{" * _tex(only(n.args), _in_exponent(c)) * "}"
     end

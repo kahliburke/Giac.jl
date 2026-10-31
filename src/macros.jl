@@ -360,8 +360,9 @@ Assumptions, declared with the variable:
 sqrt(k^2)             # k
 sin(n * pi)           # 0
 ```
-The tags are `positive`, `negative`, `nonnegative`, `nonpositive`, `real`, `integer`, or an open
-interval `(a, b)`. Assumptions are GIAC state, global per name: each declaration replaces what
+The tags are `positive`, `negative`, `nonnegative`, `nonpositive`, `real`, `integer`, `complex`, or
+an open interval `(a, b)`. A name is otherwise taken to be real: `conj(z)` is `z` unless `z::complex`.
+Assumptions are GIAC state, global per name: each declaration replaces what
 was assumed about the name before (a declaration without a tag leaves it with none).
 `assuming` adds to a declared assumption for the length of a block.
 

@@ -27,6 +27,12 @@
         @giac_var Ĥ
         @test L(braket(Ĥ * ii, n)) == "\\langle \\hat{H} \\mathrm{ii} \\vert n \\rangle"
         @test L(braket(ii, Ĥ * n)) == "\\langle \\mathrm{ii} \\vert \\hat{H} n \\rangle"
+        # a complex name keeps its conjugate, written z*; a bra-ket stands after its coefficients
+        @giac_var E_1::complex E_2::complex
+        @test L(conj(E_1)) == "E_{1}^{*}" && L(conj(E_1 + E_2)) == "E_{1}^{*} + E_{2}^{*}"
+        @test Giac.written_latex(:(conj(E_1 + E_2))) == "\\left(E_{1} + E_{2}\\right)^{*}"
+        @test L(Giac.Commands.factor(E_1 * braket(ii, n) - conj(E_1) * braket(ii, n))) ==
+              "\\left(E_{1} - E_{1}^{*}\\right) \\langle \\mathrm{ii} \\vert n \\rangle"
         @giac_var p q
         @test L(kronecker_delta(p, q)) == "\\delta_{p q}"
         @test string(kronecker_delta(2, 2)) == "1" && string(kronecker_delta(2, 3)) == "0" && string(kronecker_delta(p, p)) == "1"

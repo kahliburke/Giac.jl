@@ -6,13 +6,13 @@
 const _DECLARED = Dict{String, Any}()
 const _DECLARED_LOCK = ReentrantLock()
 
-const _ASSUMPTION_TAGS = (:positive, :negative, :nonnegative, :nonpositive, :real, :integer)
+const _ASSUMPTION_TAGS = (:positive, :negative, :nonnegative, :nonpositive, :real, :integer, :complex)
 
 """
     _declare!(v, tag)
 
 Give the variable `v` (or every entry of an array) exactly the assumption `tag`, dropping any it
-had: `:positive`, `:negative`, `:nonnegative`, `:nonpositive`, `:real`, `:integer`, an open
+had: `:positive`, `:negative`, `:nonnegative`, `:nonpositive`, `:real`, `:integer`, `:complex`, an open
 interval `(a, b)`, or `nothing` for none. Used by `@giac_var`.
 """
 # When each name was last declared: products are written with parameters in this order.
@@ -39,7 +39,7 @@ function _assume_tag!(v::GiacExpr, tag)
     elseif tag === :negative;    Commands.assume(v < 0)
     elseif tag === :nonnegative; Commands.assume(v >= 0)
     elseif tag === :nonpositive; Commands.assume(v <= 0)
-    elseif tag === :real || tag === :integer
+    elseif tag === :real || tag === :integer || tag === :complex
         Commands.invoke_cmd(:assume, v, giac_eval(string(tag)))
     else
         throw(ArgumentError("unknown assumption `$tag`; use one of $(join(_ASSUMPTION_TAGS, ", ")) or an interval (a, b)"))
