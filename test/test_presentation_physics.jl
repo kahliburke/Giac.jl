@@ -17,12 +17,15 @@
     end
 
     @testset "bra-ket notation" begin
-        @giac_var n x̂ j::integer
-        @test L(braket(j, n)) == "\\langle j \\vert n \\rangle"
+        @giac_var n x̂ ii::integer
+        @test L(braket(ii, n)) == "\\langle \\mathrm{ii} \\vert n \\rangle"
         @test L(braket(n, x̂, n)) == "\\langle n \\vert \\hat{x} \\vert n \\rangle"
         @test L(bra(n)) == "\\langle n \\vert" && L(ket(n)) == "\\vert n \\rangle"
         @test L(braket(1, 2)) == "\\langle 1 \\vert 2 \\rangle"
         @test Giac.written_latex(:(braket(n, x̂, n))) == "\\langle n \\vert \\hat{x} \\vert n \\rangle"
+        @giac_var p q
+        @test L(kronecker_delta(p, q)) == "\\delta_{p q}"
+        @test string(kronecker_delta(2, 2)) == "1" && string(kronecker_delta(2, 3)) == "0" && string(kronecker_delta(p, p)) == "1"
     end
 
     @testset "initial conditions" begin

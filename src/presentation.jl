@@ -239,6 +239,9 @@ function _pnode(e::GiacExpr)
             return _PDerivAt(string(g), _PNode[_pnode(x) for x in args], idx)
         end
     end
+    if h == "of" && is_identifier(a[1]) && string(a[1]) == "kronecker_delta" && length(a) == 3
+        return _PBraKet("delta", _PNode[_pnode(a[2]), _pnode(a[3])])          # δₘₙ
+    end
     if h == "of" && is_identifier(a[1]) && string(a[1]) in ("braket", "bra", "ket")
         return _PBraKet(string(a[1]), _PNode[_pnode(x) for x in a[2:end]])    # ⟨m|n⟩, ⟨m|, |n⟩
     end
@@ -744,6 +747,12 @@ function _tex(n::_PIntegral, c::_Ctx)
 end
 
 function _tex(n::_PBraKet, c::_Ctx)
+    if n.kind == "delta"
+        # δ_{mn} for two single symbols, δ_{m,n} otherwise
+        labels = [_tex(a, c) for a in n.args]
+        single = all(a -> a isa _PAtom && !_juxtaposed(a.tex) && !occursin(r"[_^]", a.tex), n.args)
+        return "\\delta_{" * join(labels, single ? " " : ", ") * "}"
+    end
     inside = join((_tex(a, c) for a in n.args), " \\vert ")
     n.kind == "bra" && return "\\langle " * inside * " \\vert"
     n.kind == "ket" && return "\\vert " * inside * " \\rangle"

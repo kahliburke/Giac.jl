@@ -26,5 +26,18 @@ bra(m) = _dirac(:bra, m)
 "The ket |n⟩; see [`braket`](@ref)."
 ket(n) = _dirac(:ket, n)
 
+"""
+    kronecker_delta(m, n)
+
+The Kronecker delta δₘₙ, held: 1 when `m` and `n` are equal and 0 otherwise, written δₘₙ. With
+two numbers it is that value. An orthonormal set of states has `braket(m, n) ~ kronecker_delta(m, n)`.
+"""
+function kronecker_delta(m, n)
+    a, b = convert(GiacExpr, m), convert(GiacExpr, n)
+    (_is_plain_number(a) && _is_plain_number(b)) && return convert(GiacExpr, Int(string(a) == string(b)))
+    string(a) == string(b) && return convert(GiacExpr, 1)
+    return _dirac(:kronecker_delta, a, b)
+end
+
 _dirac(kind::Symbol, args...) =
     GiacExpr(CallNode("of", Node[SymNode(string(kind)); [_node(convert(GiacExpr, a)) for a in args]]))

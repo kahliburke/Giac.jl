@@ -439,6 +439,8 @@ function _derivation(simplifier, block)
                                           String[$((:(written_latex($(QuoteNode(w)), $(_values_code(w)))) for w in written)...)],
                                           _apply_rules($value, $rules), $simplifier)))
     bind(name, value) = (name in bound || push!(bound, name); :($(esc(name)) = _apply_rules($value, $rules)))
+    # the code of a value: π, √2 and 1/2 kept exact rather than computed as floats by Julia
+    valued(ex) = esc(_exact_literals(ex))
     # `cond => result where conditions`: shown as cond ⇒ result, conditions; the conditions are
     # declared, and with `apply` the result is substituted into every later value and binding
     function implication(cond, result, name = nothing)
@@ -446,11 +448,11 @@ function _derivation(simplifier, block)
         left = _is_tilde(cond) ? cond.args[2] : cond
         r = gensym(:result)
         # a name alone as the result: the condition solved for it
-        solved = result isa Symbol ? :(_solve_for(_apply_rules($(esc(cond)), $rules), $(esc(result)))) : esc(result)
+        solved = result isa Symbol ? :(_solve_for(_apply_rules($(valued(cond)), $rules), $(esc(result)))) : valued(result)
         code = Any[:(_declare_conditions!($(_conditions_code(conditions)))),
                    :($r = $solved),
                    :(push!($rows, _implication_row(written_latex($(QuoteNode(left)), $(_values_code(left))),
-                                                   _apply_rules($(esc(cond)), $rules), $r,
+                                                   _apply_rules($(valued(cond)), $rules), $r,
                                                    $(_conditions_latex_code(conditions)))))]
         if name === nothing
             push!(code, :(push!($rules, _rule($r))))
@@ -475,20 +477,20 @@ function _derivation(simplifier, block)
         elseif st isa Expr && st.head === :(:=) && st.args[1] isa Symbol && _is_tilde(st.args[2])
             # `name := lhs ~ rhs`: shows lhs (as written) = rhs, and binds name to the equation
             name, eq = st.args
-            push!(out, bind(name, esc(eq)), row(eq.args[2], :(rhs($(esc(name))))))
+            push!(out, bind(name, valued(eq)), row(eq.args[2], :(rhs($(esc(name))))))
         elseif st isa Expr && st.head === :(:=) && st.args[1] isa Symbol
             # `name := expr`: shows expr (as written) = value, and binds name to the value
             name, expr = st.args
-            push!(out, bind(name, esc(expr)), row(expr, esc(name)))
+            push!(out, bind(name, valued(expr)), row(expr, esc(name)))
         elseif st isa Expr && st.head === :(=) && st.args[1] isa Expr && st.args[1].head === :call && st.args[1].args[1] isa Symbol
             # `φ(x) = body`: a function of `x`, shown as its definition
             call, body = st.args
             name = call.args[1]
-            define = esc(Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@giac_function")), nothing, Expr(:(=), call, body)))
+            define = esc(Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@giac_function")), nothing, Expr(:(=), call, _exact_literals(body))))
             push!(out, bind(name, define), row(call, :(_body($(esc(name))))))
         elseif st isa Expr && st.head === :(=) && st.args[1] isa Symbol
             name, rhs_ = st.args
-            push!(out, bind(name, esc(rhs_)),
+            push!(out, bind(name, valued(rhs_)),
                   :(append!($rows, _binding_rows(written_latex($(QuoteNode(name))), $(esc(name)), $simplifier))))
         elseif _is_tilde(st)
             # `a ~ b ~ c` parses as `a ~ (b ~ c)`
@@ -498,9 +500,9 @@ function _derivation(simplifier, block)
                 push!(terms, rest.args[2])
                 rest = rest.args[3]
             end
-            push!(out, row(terms[1], esc(rest); written = terms[2:end]))
+            push!(out, row(terms[1], valued(rest); written = terms[2:end]))
         else
-            push!(out, row(st, esc(st)))
+            push!(out, row(st, valued(st)))
         end
     end
     push!(out, :(Derivation($rows)))

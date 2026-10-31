@@ -86,6 +86,18 @@
         @test endswith(r[5], "B = \\sqrt{\\frac{2}{a}}")
     end
 
+    @testset "exact numbers in a derivation's code" begin
+        d = @derivation begin
+            w = 2π * k / 3                    # not 2.09… k
+            v = sqrt(2) * k                   # not 1.41… k
+            f(n) = n^2 * π^2 / 2
+        end
+        @test rows(d)[1] == "w = \\frac{2 \\pi k}{3}"
+        @test rows(d)[2] == "v = \\sqrt{2} k"
+        @test rows(d)[3] == "f\\left(n\\right) = \\frac{n^{2} \\pi^{2}}{2}"
+        @test string(f(3)) == "9/2*pi^2"
+    end
+
     @testset "conditions in brackets, and tags" begin
         imp = Giac._implication(Giac._rejoin_conditions(:(k ~ 0 => k ~ n where [n::integer, n::nonzero])))
         @test Giac._conditions(imp[2])[2] == Any[:(n::integer), :(n::nonzero)]

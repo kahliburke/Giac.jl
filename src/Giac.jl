@@ -142,7 +142,7 @@ export giac_eval, to_julia, list_commands, help_count
 # giac_latex, written_latex, tidy_latex and Derivation are unexported: Giac.giac_array, …)
 export @giac_var, @giac_several_vars, @giac_matrix, express, ∇, jacobian, hessian, @derivation, assuming
 export lhs, rhs, isolate, @giac_function, taylor, collect_terms, periodic, inverse_of
-export @matsym, MatExpr, quadratic_form, differential, partial, integral, integrand, evaluated, by_parts, braket, bra, ket, derivative, vectorize, vech, typeset, typeset!, in_form
+export @matsym, MatExpr, quadratic_form, differential, partial, integral, integrand, evaluated, by_parts, braket, bra, ket, kronecker_delta, derivative, vectorize, vech, typeset, typeset!, in_form
 
 # Command invocation (009-commands-submodule)
 # invoke_cmd replaces giac_cmd - available from main module and Giac.Commands
@@ -180,6 +180,7 @@ export available_commands, reset_conflict_warnings!
 export GiacCommand
 
 # Held command display (055-held-cmd-display)
+export @exact
 export hold_cmd, release
 
 # Re-export invoke_cmd from Commands submodule (009-commands-submodule)
