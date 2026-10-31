@@ -234,6 +234,8 @@ may be integers or ranges, as for [`giac_array`](@ref).
 Several declarations can be given at once. `symmetric` applies to the declaration it follows:
 `@giac_matrix A[2, 2] P[2, 2] symmetric` declares a general `A` and a symmetric `P`;
 `@giac_matrix A[2, 2] symmetric P[2, 2] symmetric` makes both symmetric.
+
+Entries can carry an assumption, as with [`@giac_var`](@ref): `@giac_matrix A[2, 2]::real`.
 """
 macro giac_matrix(args...)
     isempty(args) && throw(ArgumentError("@giac_matrix needs a declaration such as A[2, 2]"))
@@ -241,12 +243,15 @@ macro giac_matrix(args...)
     names = Symbol[]
     i = 1
     while i <= length(args)
-        spec = args[i]
+        # `A[2, 2]::real`: entries with an assumption, as for @giac_var
+        spec, tag = args[i] isa Expr && args[i].head == :(::) ? (args[i].args[1], args[i].args[2]) : (args[i], nothing)
         (spec isa Expr && spec.head == :ref && spec.args[1] isa Symbol) ||
             throw(ArgumentError("@giac_matrix expects declarations like A[2, 2], got $spec"))
         symmetric = i < length(args) && args[i+1] === :symmetric
         name = spec.args[1]
         push!(decls, _array_declaration(name, Symbol(lowercase(string(name))), spec.args[2:end]; symmetric))
+        tagex = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) : esc(tag)
+        push!(decls, :(_declare!($(esc(name)), $tagex)))
         push!(names, name)
         i += symmetric ? 2 : 1
     end
@@ -281,6 +286,17 @@ Multiple variables:
 ```julia
 @giac_var x y z       # Creates x, y, z as GiacExpr variables
 ```
+
+Assumptions, declared with the variable:
+```julia
+@giac_var k::positive n::integer x::real y::(0, 1) w[1:2]::nonnegative
+sqrt(k^2)             # k
+sin(n * pi)           # 0
+```
+The tags are `positive`, `negative`, `nonnegative`, `nonpositive`, `real`, `integer`, or an open
+interval `(a, b)`. Assumptions are GIAC state, global per name: each declaration replaces what
+was assumed about the name before (a declaration without a tag leaves it with none).
+`assuming` adds to a declared assumption for the length of a block.
 
 Single-variable function (NEW):
 ```julia
@@ -339,14 +355,22 @@ macro giac_var(args...)
     exprs = Expr[]
     varnames = Symbol[]
     for arg in args
-        if arg isa Expr && arg.head == :ref && arg.args[1] isa Symbol
-            push!(exprs, _array_declaration(arg.args[1], arg.args[1], arg.args[2:end]))
-            push!(varnames, arg.args[1])
+        # `k::positive`, `x[1:2]::real`, `y::(0, 1)`: a declaration with an assumption
+        decl, tag = arg isa Expr && arg.head == :(::) && length(arg.args) == 2 ? (arg.args[1], arg.args[2]) : (arg, nothing)
+        if decl isa Expr && decl.head == :ref && decl.args[1] isa Symbol
+            push!(exprs, _array_declaration(decl.args[1], decl.args[1], decl.args[2:end]))
+            push!(varnames, decl.args[1])
         else
-            varname, giac_string = _process_giac_var_arg(arg)
+            varname, giac_string = _process_giac_var_arg(decl)
             push!(exprs, :($(esc(varname)) = giac_identifier($giac_string)))
             push!(varnames, varname)
+            # a function of other variables, `u(t)`, takes no assumptions
+            decl isa Expr && (tag === nothing ? continue :
+                throw(ArgumentError("@giac_var: assumptions apply to variables, not to $decl")))
         end
+        # every declaration starts the name afresh, without assumptions from earlier code
+        tagex = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) : esc(tag)
+        push!(exprs, :(_declare!($(esc(varnames[end])), $tagex)))
     end
 
     # Return tuple of created variables

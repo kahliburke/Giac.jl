@@ -94,3 +94,24 @@ end
     @test string(Giac.Commands.desolve([eq; ics], t, y)) == "2*exp(-t)-exp(-2*t)"
     @test string(Giac.Commands.desolve([eq; ics], y)) == "2*exp(-t)-exp(-2*t)"     # t from y(t)
 end
+
+@testset "declared assumptions" begin
+    @giac_var k::positive n::integer x::real y::(0, 1) z
+    @test string(sqrt(k^2)) == "k" && string(sign(k)) == "1"
+    @test string(sin(n * pi)) == "0"
+    @test string(conj(x)) == "x"
+    @test string(sqrt(y^2)) == "y"
+    @test string(sqrt(z^2)) == "abs(z)"                       # no tag, no assumption
+    @giac_var k                                               # a new declaration starts afresh
+    @test string(sqrt(k^2)) == "abs(k)"
+    @giac_var w[1:2]::positive
+    @test string(sqrt(w1^2) + sqrt(w2^2)) == "w1+w2"
+    @giac_matrix M[2, 2]::positive
+    @test string(sqrt(m12^2)) == "m12"
+    # `assuming` adds to a declaration for its block, then restores it
+    @giac_var r::real
+    @test string(assuming(() -> sqrt(r^2), r > 0)) == "r"
+    @test string(sqrt(r^2)) == "abs(r)" && string(conj(r)) == "r"
+    @test_throws ArgumentError Giac._declare!(z, :wobbly)
+    @test_throws ArgumentError Giac._process_giac_var_arg(:(u(t)::positive))   # functions take none
+end
