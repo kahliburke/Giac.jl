@@ -339,6 +339,14 @@ function (expr::GiacExpr)(args...)
     # so that u(0) produces "u(0)" instead of "u(t)(0)"
     funcname = _extract_function_name(expr_str)
     base_str = funcname !== nothing ? funcname : expr_str
+    # a derivative of a function of one variable, q̇ = diff(q(t), t): at a point, q'(0), as
+    # `Differential(t)(q)(0)` gives it, for initial conditions
+    n = _node(expr)
+    if n isa CallNode && n.f == "diff" && length(n.args) in (2, 3) && _is_function_of_variables(n.args[1]) &&
+       length(n.args[1].args) == 2 && isequal(n.args[2], n.args[1].args[2])
+        k = length(n.args) == 3 ? (n.args[3] isa NumNode && n.args[3].v isa Integer ? n.args[3].v : 0) : 1
+        k > 0 && return DerivativePoint(n.args[1].args[1].name, k, [_arg_to_giac_string(a) for a in args])
+    end
 
     # Convert arguments to GIAC format
     arg_strs = [_arg_to_giac_string(arg) for arg in args]

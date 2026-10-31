@@ -51,6 +51,22 @@
         @test L(differential(q^2 * q̇, q, q̇)) == "2 q \\dot{q} \\mathrm{d}q + q^{2} \\mathrm{d}\\dot{q}"
     end
 
+    @testset "explicit dependence on time" begin
+        @giac_var k Ω
+        Ld = m * q̇^2 / 2 - k * q^2 / 2 + g * q * cos(Ω * t)
+        @test string(partial(Ld, t)) == "-g*q(t)*Ω*sin(Ω*t)"
+        @test string(partial(Ld, q̇)) == string(diff(Ld, q̇))
+        @test L(partial(F(q, q̇, t), t)) == "\\frac{\\partial F}{\\partial t}"
+        @test L(differential(F(q, q̇, t), q, q̇, t)) ==
+              "\\frac{\\partial F}{\\partial q} \\mathrm{d}q + \\frac{\\partial F}{\\partial \\dot{q}} \\mathrm{d}\\dot{q} + \\frac{\\partial F}{\\partial t} \\mathrm{d}t"
+    end
+
+    @testset "a velocity at a point" begin
+        @giac_var ω::positive q₀ v₀ q̈
+        @test string(q̇(0)) == "q'(0)" && string(q̈(1)) == "q''(1)"
+        @test string(desolve([q̈ + ω^2 * q ~ 0, q(0) ~ q₀, q̇(0) ~ v₀], q)) == "q₀*cos(ω*t)+v₀/ω*sin(ω*t)"
+    end
+
     @testset "held integrals in a derivation" begin
         δL = substitute(diff(substitute(F(q, q̇, t), q => q + ε * η), ε), ε => 0)
         d = @derivation begin
