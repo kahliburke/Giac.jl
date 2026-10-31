@@ -261,7 +261,7 @@ _extract_function_name("a+b")       # nothing (not a function call)
 function _extract_function_name(expr_str::String)
     # Match simple function call pattern: identifier followed by (...)
     # Must be a simple identifier (letters, digits, underscore) not containing operators
-    m = match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\(.*\)$", expr_str)
+    m = match(r"^([\p{L}_][\p{L}\p{M}\p{N}_]*)\(.*\)$", expr_str)
     if m !== nothing
         funcname = m.captures[1]
         # Exclude known GIAC functions that should NOT be extracted

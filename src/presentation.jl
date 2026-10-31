@@ -148,6 +148,8 @@ struct _PDerivOf <: _PNode; arg::_PNode; wrt::Vector{String}; end
 # the derivative of the function `f` at arguments that are not names, in the arguments at the
 # positions `idx` (from 0): f′(x + h), ∂₁f(x + h, y)
 struct _PDerivAt <: _PNode; f::String; args::Vector{_PNode}; idx::Vector{Int}; end
+# an integral of `f` in `var`, between `limits` if there are two
+struct _PIntegral <: _PNode; f::_PNode; var::_PNode; limits::Vector{_PNode}; end
 
 const _CALL_TEX = Dict(
     "sin" => "\\sin", "cos" => "\\cos", "tan" => "\\tan", "cot" => "\\cot", "sec" => "\\sec", "csc" => "\\csc",
@@ -225,6 +227,7 @@ function _pnode(e::GiacExpr)
         end
     end
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
+    h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
     return _PRaw(tidy_latex(_giac_tex(e)))
 end
@@ -389,6 +392,7 @@ function _factor_rank(f::_PNode, vars)
     b isa _PCall && b.user && return (3, 0, length(vars) + 1, b.f)
     b isa _PDeriv && return (3, 0, length(vars) + 1, b.f * "′"^length(b.wrt))
     b isa _PDerivAt && return (3, 0, length(vars) + 1, b.f * "′"^length(b.idx))
+    b isa _PIntegral && return (5, 0, 0, "∫")
     (b isa _PCall && b.f == "exp" || f isa _PPow && b isa _PAtom && b.name == "e") && return (4, 0, 0, "")
     b isa _PCall && return (5, 0, 0, b.f)
     return (6, 0, 0, "")
@@ -641,6 +645,12 @@ function _tex(n::_PDerivOf, c::_Ctx)
         return _leibniz("\\mathrm{d}", n.arg.tex, n.wrt)
     end
     return _leibniz("\\mathrm{d}", "", n.wrt) * "\\left(" * _tex(n.arg, c) * "\\right)"
+end
+
+function _tex(n::_PIntegral, c::_Ctx)
+    bounds = isempty(n.limits) ? "" : "_{" * _tex(n.limits[1], c) * "}^{" * _tex(n.limits[2], c) * "}"
+    f = n.f isa _PSum ? "\\left(" * _tex(n.f, c) * "\\right)" : _tex(n.f, c)
+    return "\\int" * bounds * " " * f * " \\, \\mathrm{d}" * _tex(n.var, c)
 end
 
 function _tex(n::_PDerivAt, c::_Ctx)

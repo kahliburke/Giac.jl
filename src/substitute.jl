@@ -40,6 +40,8 @@ julia> string(substitute(expr, Dict(x => 2, y => 3)))
 function substitute(expr::GiacExpr, dict::AbstractDict{<:GiacExpr})::GiacExpr
     # Handle empty Dict - return original expression unchanged (no GIAC call).
     isempty(dict) && return expr
+    # GIAC would evaluate a held integral: it is substituted into apart
+    _any_node(_is_integral, _node(expr)) && return _around_integrals(e -> substitute(e, dict), expr)
 
     # A sum, product or power as a key is a relation to substitute, which Giac's subst does not
     # do: `x^2 + y^2 => r^2` (see `Rules._substitute_relation`).
@@ -64,7 +66,7 @@ end
 # `q(t) => q(t) + ε*η(t)`, taken: GIAC's subst leaves them as written.
 function _take_derivatives(e::GiacExpr)
     n = _node(e)
-    _has_open_derivative(n) || return e
+    _any_node(_is_open_derivative, n) || return e
     return GiacExpr(_replace_nodes(n) do m
         _is_open_derivative(m) || return nothing
         return _node(invoke_cmd(:diff, (GiacExpr(a) for a in m.args)...))
@@ -73,11 +75,6 @@ end
 
 _is_open_derivative(n::Node) = n isa CallNode && n.f == "diff" && length(n.args) >= 2 && !_is_coordinate(n) &&
                                !(n.args[1] isa CallNode && n.args[1].f == "of")
-_has_open_derivative(n::Node) = _is_open_derivative(n) ||
-    (n isa CallNode && any(_has_open_derivative, n.args)) ||
-    (n isa AddNode && any(t -> _has_open_derivative(first(t)), n.terms)) ||
-    (n isa MulNode && any(((b, e),) -> _has_open_derivative(b) || _has_open_derivative(e), n.factors))
-
 """
     substitute(expr::GiacExpr, pairs::Pair{<:GiacExpr}...) -> GiacExpr
 
