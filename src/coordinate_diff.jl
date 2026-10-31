@@ -43,43 +43,9 @@ diff(L, t)           # the total derivative, through q and q̇ as well
 """
 partial(f::GiacExpr, x::GiacExpr) = _diff_holding(f, _node(x))
 
-"""
-    differential(f, x, y, …)
-    differential(x)
-
-The differential of a scalar `f` in the variables `x, y, …`: `∂f/∂x dx + ∂f/∂y dy + …`, each `dx`
-a symbol named after its variable and written as a differential. A variable may be a function of
-time `q(t)` or one of its derivatives; each derivative is a [`partial`](@ref), so the coefficient
-of `dt` is the explicit dependence on time. `differential(x)` of a variable alone is its `dx`, so
-a coefficient reads off as `diff(df, differential(x))`.
-
-```julia
-@giac_var q q̇ p t L(x, v, s)
-dH = differential(p * q̇ - L(q, q̇, t), q, q̇, p, t)
-# -∂L/∂q dq + (p - ∂L/∂q̇) dq̇ + q̇ dp - ∂L/∂t dt
-diff(dH, differential(p))     # q̇
-```
-"""
-function differential(f::GiacExpr, x::GiacExpr, xs::GiacExpr...)
-    dxs = [differential(v) for v in (x, xs...)]
-    # a differential form is written in the order its variables were given
-    lock(_DIFFERENTIAL_LOCK) do
-        foreach(((k, dx),) -> _DIFFERENTIAL_ORDER[string(dx)] = k, enumerate(dxs))
-    end
-    return sum(partial(f, v) * dx for (v, dx) in zip((x, xs...), dxs))
-end
-
-const _DIFFERENTIAL_ORDER = Dict{String, Int}()
+const _DIFFERENTIAL_ORDER = Dict{String, Int}()     # the order a differential form's dx are written in
 const _DIFFERENTIAL_LOCK = ReentrantLock()
 _differential_order(name::AbstractString) = lock(() -> get(_DIFFERENTIAL_ORDER, name, typemax(Int)), _DIFFERENTIAL_LOCK)
-
-function differential(x::GiacExpr)
-    name = _wrt_name(x)
-    # a trace or determinant, or an expression, is differentiated through its matrices
-    (name === nothing || is_identifier(x) && lock(() -> haskey(_ATOMS, string(x)), _ATOMS_LOCK)) &&
-        return _differential(x, nothing)
-    return giac_identifier("d" * name)
-end
 
 # an undefined function of variables, `q(t)` or `f(x, y)`
 _is_function_of_variables(n::Node) =

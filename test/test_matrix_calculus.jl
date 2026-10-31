@@ -15,6 +15,14 @@
         @test Giac.giac_latex(differential(inv(X))) == "-X^{-1} \\mathrm{d}X X^{-1}"
     end
 
+    @testset "scalar variables and matrices together" begin
+        @giac_var u v
+        @test S(differential(u^2 + tr(A * X), u, X)) == "2*u*du+tr(A*dX)"
+        @test S(differential(u^2 + tr(A * X))) == "2*u*du+tr(X*dA)+tr(A*dX)"      # everything varies
+        @test S(differential(u * det(X), u, X)) == "det(X)*du+u*det(X)*tr(inv(X)*dX)"
+        @test S(differential(u * v)) == "v*du+u*dv" && S(differential(u)) == "du"
+    end
+
     @testset "gradients" begin
         @test S(∇(tr(A * X), X)) == "A'"
         @test S(∇(det(X), X)) == "det(X)*inv(X')"

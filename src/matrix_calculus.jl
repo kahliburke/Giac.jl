@@ -17,25 +17,6 @@ _varies(s::MatrixSymbol, vary) = vary === nothing || s.name in vary
 # a word as an expression, or the identity of size `n` if it is empty
 _word_expr(w::Word, n::Dim) = isempty(w) ? identity_matrix(n) : _matexpr(_rows(first(w)), _cols(last(w)), [w => one(GiacExpr)])
 
-"""
-    differential(M)
-    differential(M, X, Y, …)
-
-The differential of a matrix expression or a scalar (a trace, a determinant, a product of them),
-in terms of the differentials `dX` of its symbols: `differential(X*Y)` is `dX*Y + X*dY`,
-`differential(inv(X))` is `-X⁻¹ dX X⁻¹`, `differential(det(X))` is `det(X) tr(X⁻¹ dX)`. With
-symbols given, only those vary; the others are constants.
-
-```julia
-@matsym X[n, n] A[n, n] x[n]
-differential(inv(X))             # -X⁻¹ dX X⁻¹
-differential(tr(A*X))            # tr(A dX)
-differential(x'*A*x)             # dxᵀAx + xᵀA dx
-```
-"""
-differential(M::MatExpr, symbols::MatExpr...) = _differential(M, _vary_set(symbols))
-differential(c::GiacExpr, symbols::MatExpr...) = _differential(c, _vary_set(symbols))
-
 _vary_set(symbols) = isempty(symbols) ? nothing : Set(_matrix_symbol(X).name for X in symbols)
 
 function _matrix_symbol(X::MatExpr)

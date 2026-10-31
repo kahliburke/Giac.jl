@@ -115,6 +115,7 @@ include("integration.jl")
 include("matrix_symbols.jl")
 include("matrix_calculus.jl")
 include("kronecker.jl")
+include("differentials.jl")
 include("presentation.jl")
 include("rules/Rules.jl")      # after the symbolic matrices it also simplifies
 include("in_form.jl")
