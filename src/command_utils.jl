@@ -391,8 +391,8 @@ function Base.sqrt(expr::GiacExpr)::GiacExpr
     # what is left under a root goes to GIAC, which knows √(x²) = |x|
     outer, roots = Node[NumNode(r.coef)], GiacExpr[]
     for (b, e) in r.factors
-        isequal(e, _HALF) && !(b isa NumNode && b.v isa Real && b.v > 0) ? push!(roots, _tier1_or_fallback(_giac_sqrt_tier1, :sqrt, GiacExpr(b))) :
-                                                push!(outer, _pow(b, e))
+        isequal(e, _HALF) && !_known_nonnegative(b) ? push!(roots, _tier1_or_fallback(_giac_sqrt_tier1, :sqrt, GiacExpr(b))) :
+                                                push!(outer, MulNode(1, Pair{Node, Node}[b => e]))
     end
     return reduce(*, roots; init = GiacExpr(_mul(outer...)))
 end

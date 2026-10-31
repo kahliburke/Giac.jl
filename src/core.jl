@@ -261,21 +261,68 @@ function _pow(b::Node, e::Node)
 end
 
 # A fractional power of a product, distributed over the factors known not to be negative (and a
-# positive coefficient): √(4m²ω²) = 2mω for m, ω ≥ 0. `nothing` if none is.
+# positive coefficient): √(4m²ω²) = 2mω for m, ω ≥ 0. For a root, what stays under it is gathered
+# into one radical above and one below: √(ħ²k²/2m) = ħ√(k²)/√(2m). `nothing` if none is.
 function _nonnegative_power(b::MulNode, e::NumNode)
     c = b.coef
     known = [f for f in b.factors if _known_nonnegative(first(f)) && last(f) isa NumNode && last(f).v isa Real]
     split_coef = c isa Real && c > 0 && !isone(c)
     (isempty(known) && !split_coef) && return nothing
     rest = Pair{Node, Node}[f for f in b.factors if !any(k -> k === f, known)]
-    parts = Node[split_coef ? _pow(NumNode(c), e) : _ONE]
-    foreach(((f, x),) -> push!(parts, _pow(f, _mul(x, e))), known)
+    n = e.v isa Rational && numerator(e.v) == 1 ? denominator(e.v) : nothing
+    parts = n === nothing || !(c isa Union{Integer, Rational}) ? _distributed_power(split_coef ? c : 1, known, e) :
+            _gathered_root(split_coef ? c : 1, known, n)
     rc = split_coef ? 1 : c
     if !isempty(rest) || !isone(rc)
         r = isempty(rest) ? NumNode(rc) : length(rest) == 1 && isone(rc) && isequal(last(rest[1]), _ONE) ? first(rest[1]) : MulNode(rc, rest)
         push!(parts, MulNode(1, Pair{Node, Node}[r => e]))
     end
     return _mul(parts...)
+end
+
+_distributed_power(c, known, e::NumNode) = Node[_pow(NumNode(c), e), (_pow(f, _mul(x, e)) for (f, x) in known)...]
+
+# c^(1/n) ∏ fᵏ^(1/n) for c > 0 and f ≥ 0: the whole powers out, the rest under one root above
+# and one below
+function _gathered_root(c, known, n::Integer)
+    sa, ka = _root_parts(numerator(c), n)
+    sb, kb = _root_parts(denominator(c), n)
+    out = Node[NumNode(sa // sb)]
+    above, below = Pair{Node, Node}[], Pair{Node, Node}[]
+    for (f, x) in known
+        k = x.v
+        if !(k isa Integer || (k isa Rational && isone(denominator(k))))
+            push!(out, _pow(f, _mul(x, NumNode(1 // n))))
+            continue
+        end
+        q, r = divrem(Integer(k), n)
+        iszero(q) || push!(out, _pow(f, NumNode(q)))
+        r > 0 && push!(above, f => NumNode(r))
+        r < 0 && push!(below, f => NumNode(-r))
+    end
+    for (k, fs, sign) in ((ka, above, 1), (kb, below, -1))
+        (isone(k) && isempty(fs)) && continue
+        radicand = isempty(fs) ? NumNode(k) :
+                   isone(k) && length(fs) == 1 && isequal(last(fs[1]), _ONE) ? first(fs[1]) : MulNode(k, fs)
+        push!(out, MulNode(1, Pair{Node, Node}[radicand => NumNode(sign // n)]))
+    end
+    return out
+end
+
+# b = s^n k with the largest nth power s^n that divides b (searched for b ≤ 10^8)
+function _root_parts(b::Integer, n::Integer)
+    b <= 1 && return (b, 1)
+    r = round(BigInt, big(b)^(1 / big(n)))
+    for s in (r + 1, r, r - 1)
+        s >= 1 && big(s)^n == b && return (_canonical(s), 1)
+    end
+    if b <= 10^8
+        for s in r:-1:2
+            k, rem = divrem(b, big(s)^n)
+            rem == 0 && return (_canonical(s), _canonical(k))
+        end
+    end
+    return (1, b)
 end
 
 # whether a tree has a floating-point number in it
@@ -309,19 +356,12 @@ function _numeric_root(b, e)
     end
     (b isa Integer && b >= 0 && e isa Rational) || return nothing
     iszero(b) && return e > 0 ? _ZERO : nothing
-    q = denominator(e)
-    r = round(BigInt, big(b)^(1 / big(q)))
-    for c in (r - 1, r, r + 1)
-        c >= 0 && c^q == b && return NumNode(_npow(_canonical(c), numerator(e)))
-    end
     # the largest qth power that divides b comes out: 8^(1/2) = 2·2^(1/2)
-    if b <= 10^8
-        for s in r:-1:2
-            k, rem = divrem(b, big(s)^q)
-            rem == 0 && return _mul(NumNode(_npow(_canonical(s), numerator(e))), MulNode(1, Pair{Node, Node}[NumNode(k) => NumNode(e)]))
-        end
-    end
-    return nothing
+    s, k = _root_parts(b, denominator(e))
+    out = NumNode(_npow(_canonical(s), numerator(e)))
+    isone(k) && return out
+    isone(s) && return nothing
+    return _mul(out, MulNode(1, Pair{Node, Node}[NumNode(k) => NumNode(e)]))
 end
 
 # exp(c)^k as exp(c*k) for a real number c: e^2 is exp(2), e^x is exp(x)
