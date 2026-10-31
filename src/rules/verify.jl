@@ -53,9 +53,10 @@ end
     verify(r; samples = 6) -> Union{Bool, Nothing}
 
 Check that the rule `r` rewrites to an equal expression: its left side is instantiated with a
-fresh variable for each slot (assumed positive, then real, so conditions on signs can hold), the
-rule applied, and the two sides compared with [`equivalent`](@ref). `nothing` if the rule does
-not apply to such an instance (a condition that fresh variables cannot meet).
+fresh variable for each slot, the rule applied, and the two sides compared with
+[`equivalent`](@ref). Each fresh variable is assumed what its slot's test asks for (an interval,
+an integer, a sign); slots without a test are tried positive, then real, then integer, so a
+`where` condition can hold. `nothing` if the rule does not apply to such an instance.
 """
 function verify(r::Rule; samples::Integer = 6)
     slots = _slots(r.lhs)
@@ -63,9 +64,12 @@ function verify(r::Rule; samples::Integer = 6)
                                             giac_identifier("verify_$(s.name)")) for s in slots)
     vars = reduce(vcat, (v isa Vector ? v : [v] for v in values(fresh)); init = GiacExpr[])
     b = foldl((b, (n, v)) -> Bindings(b, n, v), fresh; init = Bindings())
+    tested = Dict(s.name => _assumption_for(s) for s in slots if s isa Slot && _assumption_for(s) !== nothing)
     try
-        for tag in (:positive, :real)
-            foreach(v -> Giac._declare!(v, tag), vars)
+        for tag in (:positive, :real, :integer)
+            for (name, v) in fresh, w in (v isa Vector ? v : [v])
+                Giac._declare!(w, get(tested, name, tag))
+            end
             subject = _instantiate(r.lhs, b)
             result = r(subject)
             result === nothing && continue
@@ -77,3 +81,15 @@ function verify(r::Rule; samples::Integer = 6)
     end
 end
 verify(rs::AbstractVector{Rule}; kwargs...) = [verify(r; kwargs...) for r in rs]
+
+# what to assume of a fresh variable for a slot with a test, so the test can hold
+function _assumption_for(s::Slot)
+    p = s.predicate
+    p isa InInterval && return (_float(p.lo), _float(p.hi))
+    p === is_integer_valued && return :integer
+    p === is_negative && return :negative
+    p === is_positive && return :positive
+    p === is_nonnegative && return :nonnegative
+    p === is_real && return :real
+    return nothing
+end

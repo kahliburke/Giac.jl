@@ -70,3 +70,46 @@ is_negative(e) = (n = _number(e)) === nothing ? _sign(e) == "-1" : n < 0
 is_nonnegative(e) = (n = _number(e)) === nothing ? _key(Giac.invoke_cmd(:abs, e)) == _key(e) : n >= 0
 "See [`is_positive`](@ref)."
 is_real(e) = e isa Real || e isa GiacExpr && (_number(e) !== nothing || _key(Giac.invoke_cmd(:im, e)) == "0")
+
+"""
+    is_integer_valued(e)
+
+Whether `e` is an integer for every value of its variables: an integer, a variable declared
+`::integer`, or a sum, product or nonnegative integer power of such.
+"""
+function is_integer_valued(e)
+    e isa Integer && return true
+    e isa GiacExpr || return false
+    is_integer(e) && return true
+    Giac.is_identifier(e) && return Giac._declared(e) === :integer
+    h = _head(e)
+    h in ("+", "*", "-") && return all(is_integer_valued, arguments(e))
+    h == "^" && return is_integer_valued(arguments(e)[1]) && is_integer(arguments(e)[2]) && Giac.to_julia(arguments(e)[2]) >= 0
+    return false
+end
+
+"""
+    in_interval(lo, hi)
+    in_interval(e, lo, hi)
+
+A test for an expression known to lie in `[lo, hi]`: a number in it, a variable declared in a
+narrower interval (`@giac_var u::(0, 1)`), or anything Giac can place there from the
+assumptions. For a slot: `asin(sin(~x::in_interval(-π/2, π/2))) => ~x`.
+"""
+struct InInterval
+    lo::GiacExpr
+    hi::GiacExpr
+end
+in_interval(lo, hi) = InInterval(convert(GiacExpr, lo), convert(GiacExpr, hi))
+in_interval(e, lo, hi) = in_interval(lo, hi)(e)
+function (p::InInterval)(e)
+    lo, hi = _float(p.lo), _float(p.hi)
+    n = _number(e)
+    n === nothing || return lo <= n <= hi
+    if e isa GiacExpr && Giac.is_identifier(e)
+        tag = Giac._declared(e)
+        tag isa Tuple && return lo <= tag[1] && tag[2] <= hi
+    end
+    return e isa GiacExpr && is_nonnegative(e - p.lo) && is_nonnegative(p.hi - e)
+end
+_float(e::GiacExpr) = Float64(Giac.to_julia(Giac.Commands.evalf(e)))

@@ -16,9 +16,13 @@ struct Segment <: Pattern
     predicate::Any
 end
 
+"An expression that matches only itself; `number` is its value if it is a number."
 struct Leaf <: Pattern
     key::String
+    expr::GiacExpr
+    number::Any
 end
+Leaf(e::GiacExpr) = Leaf(_key(e), e, _is_number(e) ? Giac.to_julia(e) : nothing)
 
 struct Term <: Pattern
     head::String
@@ -52,7 +56,7 @@ _rank(p) = p isa Segment ? (p.predicate === nothing ? 3 : 2) : p isa Slot ? 1 : 
 function _pattern(e::GiacExpr, slots::Dict{String, Pattern})
     key = _key(e)
     haskey(slots, key) && return slots[key]
-    iscall(e) || return Leaf(key)
+    iscall(e) || return Leaf(e)
     head = symb_funcname(e)
     args = Pattern[_pattern(a, slots) for a in arguments(e)]
     if haskey(_AC, head)

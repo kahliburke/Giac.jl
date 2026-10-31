@@ -11,21 +11,41 @@ struct Rule
     rhs::Function           # bindings -> replacement (or `nothing` to decline the match)
     cond::Any               # bindings -> Bool, from `where`; or `nothing`
     source::Expr
+    coefficient::Any        # the numeric coefficient written in the left side, if a product
+    heads::Any              # the heads of the expressions it can match at the top, or `nothing` for any
 end
 
+Rule(lhs::Pattern, rhs::Function, cond, source::Expr) =
+    Rule(lhs, rhs, cond, source, _coefficient(lhs), _top_heads(lhs))
 Rule(lhs_value, slots::Vector, rhs::Function, cond, source::Expr) =
     Rule(_make_pattern(lhs_value, slots), rhs, cond, source)
+
+# The heads an expression must have for the pattern to match it at the top, or `nothing` if it can
+# match more: a slot or segment matches anything, a power also `inv`, a sum or product with a
+# segment or a defaulted slot also a single term, and a product with a numeric coefficient
+# anything it can scale.
+function _top_heads(p::Pattern)
+    p isa Term || return p isa Leaf ? ("",) : nothing
+    p.head == "^" && return ("^", "inv")
+    if haskey(_AC, p.head)
+        any(a -> a isa Segment || a isa Slot && a.default !== nothing, p.args) && return nothing
+        p.head == "*" && _coefficient(p) != 1 && return nothing
+        return (p.head, "-")          # a negated sum or product matches up to sign
+    end
+    return (p.head,)
+end
 
 # the replacement for bindings `b`, or `nothing` if the condition does not hold
 _rhs(r::Rule, b) = r.cond === nothing || r.cond(b) ? r.rhs(b) : nothing
 
 function (r::Rule)(e::GiacExpr)
+    r.heads === nothing || _head(e) in r.heads || return nothing
     p = r.lhs
     p isa Term && haskey(_AC, p.head) || return _match(p, e, Bindings(), b -> _replace(r, b, GiacExpr[]))
     v = _apply_ac(r, p, e)
     v === nothing && p.head == "*" || return v
     # a product matches up to its numeric coefficient: `sin(t)*cos(t)` is half of `2*sin(t)*cos(t)`
-    pc, (c, fs) = _coefficient(p), _split_term(e)
+    pc, (c, fs) = r.coefficient, _split_term(e)
     pc == c && return nothing
     v = _apply_ac(r, p, _scaled(pc, fs))
     return v === nothing ? nothing : _scaled(_div(c, pc), [v])
@@ -194,7 +214,7 @@ const _RELATIONS = Dict(:< => "<", :> => ">", :<= => "\\le", :>= => "\\ge", :(==
 const _PREDICATE_LATEX = Dict(
     :is_positive => a -> a * " > 0", :is_negative => a -> a * " < 0",
     :is_nonnegative => a -> a * " \\ge 0", :is_real => a -> a * " \\in \\mathbb{R}",
-    :is_integer => a -> a * " \\in \\mathbb{Z}")
+    :is_integer => a -> a * " \\in \\mathbb{Z}", :is_integer_valued => a -> a * " \\in \\mathbb{Z}")
 
 # a condition: comparisons of math typeset, `&&` as "and", `is_free(a, x)` as "a free of x"
 function _condition_latex(c)
@@ -205,6 +225,10 @@ function _condition_latex(c)
         haskey(_RELATIONS, op) && _is_math(_plain(a)) && _is_math(_plain(b)) &&
             return _side_latex(a) * " " * _RELATIONS[op] * " " * _side_latex(b)
         op === :is_free && return _side_latex(a) * " \\text{ free of } " * _side_latex(b)
+    end
+    if c isa Expr && c.head === :call && length(c.args) == 4 && c.args[1] === :in_interval
+        bound(v) = v isa GiacExpr ? Giac.giac_latex(v) : _side_latex(v)
+        return bound(c.args[3]) * " \\le " * _side_latex(c.args[2]) * " \\le " * bound(c.args[4])
     end
     if c isa Expr && c.head === :call && length(c.args) == 2 && haskey(_PREDICATE_LATEX, c.args[1]) && _is_math(_plain(c.args[2]))
         return _PREDICATE_LATEX[c.args[1]](_side_latex(c.args[2]))

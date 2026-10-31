@@ -46,9 +46,10 @@ function simplest(e::GiacExpr, transforms...; goal::Symbol = :compact, cost = no
     best, best_score = (e, Path()), score(e)
     seen = Set([_key(e)])
     frontier = [(e, Path())]
+    cache = Dict{String, Vector{Tuple{GiacExpr, Any}}}()     # a subexpression's rule successors
     for _ in 1:depth
         next = Tuple{GiacExpr, Path}[]
-        for (x, path) in frontier, (y, label) in _successors(x, rules, fns)
+        for (x, path) in frontier, (y, label) in _successors(x, rules, fns, cache)
             k = _key(y)
             k in seen && continue
             push!(seen, k)
@@ -69,8 +70,8 @@ end
 simplest(A::AbstractArray{GiacExpr}, transforms...; kwargs...) = map(e -> simplest(e, transforms...; kwargs...), A)
 
 # every expression one step from `e`: a rule at any place in it, or a function of all of it
-function _successors(e::GiacExpr, rules, fns)
-    out = _rule_successors(e, rules)
+function _successors(e::GiacExpr, rules, fns, cache = Dict{String, Vector{Tuple{GiacExpr, Any}}}())
+    out = copy(_rule_successors(e, rules, cache))
     for f in fns
         v = try
             f(e)
@@ -82,18 +83,21 @@ function _successors(e::GiacExpr, rules, fns)
     return out
 end
 
-function _rule_successors(e::GiacExpr, rules)
-    out = Tuple{GiacExpr, Any}[]
-    for r in rules
-        v = r(e)
-        v === nothing || _key(v) == _key(e) || push!(out, (v, r))
+# a subexpression recurs across the expressions of a search: its successors are computed once
+function _rule_successors(e::GiacExpr, rules, cache)
+    get!(cache, _key(e)) do
+        out = Tuple{GiacExpr, Any}[]
+        for r in rules
+            v = r(e)
+            v === nothing || _key(v) == _key(e) || push!(out, (v, r))
+        end
+        iscall(e) || return out
+        args = arguments(e)
+        for i in eachindex(args), (y, label) in _rule_successors(args[i], rules, cache)
+            new = copy(args)
+            new[i] = y
+            push!(out, (_rebuild(e, new), label))
+        end
+        out
     end
-    iscall(e) || return out
-    args = arguments(e)
-    for i in eachindex(args), (y, label) in _rule_successors(args[i], rules)
-        new = copy(args)
-        new[i] = y
-        push!(out, (_rebuild(e, new), label))
-    end
-    return out
 end

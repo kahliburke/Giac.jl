@@ -166,10 +166,7 @@ function _coefficient(p::Pattern)
     return prod((n for a in p.args if a isa Leaf for n in (_leaf_number(a),) if n !== nothing); init = 1)
 end
 
-function _leaf_number(p::Leaf)
-    e = Giac.giac_eval(p.key)
-    return _is_number(e) ? Giac.to_julia(e) : nothing
-end
+_leaf_number(p::Leaf) = p.number
 
 # exact division for integers and rationals, which a coefficient keeps
 _div(a, b) = a isa Union{Integer, Rational} && b isa Union{Integer, Rational} ? a // b : a / b

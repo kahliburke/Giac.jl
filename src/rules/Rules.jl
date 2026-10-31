@@ -42,10 +42,12 @@ module Rules
 using ..Giac: Giac, GiacExpr, giac_identifier, iscall, arguments, operation, symb_funcname, is_integer, substitute
 
 export @rule, @rules, rewrite
-export is_free, depends_on, of_degree, is_positive, is_negative, is_nonnegative, is_real
+export is_free, depends_on, of_degree, is_positive, is_negative, is_nonnegative, is_real,
+       is_integer_valued, in_interval
 export @pattern, @match
 export simplest, expression_size, standard_transforms, Transform, goal_cost
 export rule, inverse, equivalent, verify
+export identities, IdentityCatalog
 export log_expand, log_combine, power_expand, power_combine, exp_expand, exp_combine, trig_simplify
 
 include("patterns.jl")
@@ -54,8 +56,8 @@ include("rule.jl")
 include("predicates.jl")
 include("rewrite.jl")
 include("queries.jl")
-include("library.jl")
 include("identities.jl")
+include("library.jl")
 include("verify.jl")
 include("transforms.jl")
 include("search.jl")

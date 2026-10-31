@@ -33,9 +33,8 @@ The transformations [`simplest`](@ref) uses by default, each valid for every val
 variables (or applied only under the conditions where it is): rational normal form, factoring,
 expansion, partial fractions; trigonometric linearisation (`tlin`), collection (`tcollect`),
 expansion of multiple angles, and rewriting in `sin`, `cos` or `tan` only; `exp(n log x)` as
-`x^n`; and the rule sets [`trig_simplify`](@ref), [`exp_combine`](@ref), [`log_expand`](@ref),
-[`log_combine`](@ref), [`power_expand`](@ref) and [`power_combine`](@ref), whose conditions use
-declared assumptions.
+`x^n`; and the simplifying identities of the catalog ([`identities`](@ref)) with the expanding
+direction of the log and power identities, whose conditions use declared assumptions.
 
 Giac's `simplify`, `lnexpand` and `lncollect` are left out: they combine and split logarithms
 without regard to sign.
@@ -47,7 +46,7 @@ standard_transforms() = Any[
     _at_calls(:texpand, "expand trig", _TRIG),
     _giac(:trigsin, "in sin"), _giac(:trigcos, "in cos"), _giac(:trigtan, "in tan"),
     _giac(:exp2pow, "exp to powers"),
-    trig_simplify(), exp_combine(), log_expand(), log_combine(), power_expand(), power_combine()]
+    identities(), log_expand(), power_expand()]
 
 # ---------------------------------------------------------------------------------------------
 # Goals: what "simplest" means

@@ -2,7 +2,7 @@
 # relation (`x^2 + y^2 => r^2`) where Giac's own substitution only replaces variables and calls.
 
 "An expression for the pattern `p` with its slots and segments taken from the bindings `b`."
-_instantiate(p::Leaf, b) = Giac.giac_eval(p.key)
+_instantiate(p::Leaf, b) = p.expr
 function _instantiate(p::Slot, b)
     haskey(b, p.name) && return b[p.name]
     p.default === nothing && throw(ArgumentError("no value for the slot ~$(p.name)"))
@@ -51,19 +51,32 @@ function rule(eq::GiacExpr, vars...)
     Giac._is_equation(eq) || throw(ArgumentError("rule takes an equation `lhs ~ rhs`, got $eq"))
     vs = GiacExpr[v isa Pair ? first(v) : v for v in vars]
     preds = Any[v isa Pair ? last(v) : nothing for v in vars]
-    names = [Symbol(string(v)) for v in vs]
+    return _rule(eq, vs, preds, [Symbol(string(v)) for v in vs])
+end
+
+# A rule from `eq` with the variables `vs` as slots named `names` (with tests `preds`). The tests
+# show as a `where` clause.
+function _rule(eq::GiacExpr, vs, preds, names)
     left = substitute(Giac.lhs(eq), Dict{GiacExpr, Any}(v => _slot_var(n) for (v, n) in zip(vs, names)))
     right = Giac.rhs(eq)
     rhs = b -> substitute(right, Dict{GiacExpr, Any}(v => b[n] for (v, n) in zip(vs, names)))
-    written(e) = _slotted(Meta.parse(string(e)), names)
-    source = Expr(:call, :(=>), written(Giac.lhs(eq)), written(right))
-    return Rule(left, Any[(n, :slot, p, nothing) for (n, p) in zip(names, preds)], rhs, nothing, source)
+    rename = Dict(Symbol(string(v)) => n for (v, n) in zip(vs, names))
+    written(e) = _slotted(Meta.parse(string(e)), rename)
+    conds = [_test_code(p, n) for (p, n) in zip(preds, names) if p !== nothing]
+    body = written(right)
+    body = isempty(conds) ? body : Expr(:where, body, foldl((a, c) -> Expr(:&&, a, c), conds))
+    slots = Any[(n, :slot, p, nothing) for (n, p) in zip(names, preds)]
+    return Rule(left, slots, rhs, nothing, Expr(:call, :(=>), written(Giac.lhs(eq)), body))
 end
 
-# written code with the names in `names` as slots
-_slotted(ex::Symbol, names) = ex in names ? Expr(:call, :~, ex) : ex
-_slotted(ex::Expr, names) = Expr(ex.head, (_slotted(a, names) for a in ex.args)...)
-_slotted(ex, names) = ex
+# a slot's test as written code, for display
+_test_code(p::InInterval, n) = Expr(:call, :in_interval, Expr(:call, :~, n), p.lo, p.hi)
+_test_code(p, n) = Expr(:call, nameof(p), Expr(:call, :~, n))
+
+# written code with the variables in `rename` as the slots they stand for
+_slotted(ex::Symbol, rename) = haskey(rename, ex) ? Expr(:call, :~, rename[ex]) : ex
+_slotted(ex::Expr, rename) = Expr(ex.head, (_slotted(a, rename) for a in ex.args)...)
+_slotted(ex, rename) = ex
 
 """
     inverse(r)

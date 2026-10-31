@@ -334,4 +334,40 @@ using Giac.Rules
         @test length(d.rows) == 3                                # V = e, V = e (start), {} = -cos(2z)
         @test occursin("\\text{by }", last(d.rows[end]))
     end
+
+    @testset "identity catalog" begin
+        all_ids = Giac.Rules._catalog()
+        @test length(all_ids) > 40
+        # every identity holds, in both directions, under its conditions
+        @test all(r -> verify(r) === true, first.(all_ids))
+        @test all(r -> verify(r) === true, identities(; direction = :expand))
+        @test all(r -> verify(r) === true, identities(:trig_linear, :hyperbolic_linear))
+        @test identities() isa IdentityCatalog && identities() === identities()
+        @test all(t -> !endswith(string(t), "_linear"), identities().topics)
+        @test_throws ArgumentError identities(:astrology)
+        @test occursin("\\textbf{trig}", sprint(show, MIME("text/latex"), identities(:trig)))
+        # generated families
+        @test rewrite(sin(x) * cos(y) + cos(x) * sin(y), identities(:trig)) == sin(x + y)
+        @test rewrite(cosh(x) * cosh(y) + sinh(x) * sinh(y), identities(:hyperbolic)) == cosh(x + y)
+        @test rewrite(4cos(x)^3 - 3cos(x), identities(:trig)) == cos(3x)
+        @test rewrite(3sinh(x) + 4sinh(x)^3, identities(:hyperbolic)) == sinh(3x)
+        @test rewrite(sin(x)^2, identities(:trig_linear)) == (1 - cos(2x)) / 2
+        @test rewrite(cosh(asinh(y)), identities(:inverse_trig)) == sqrt(1 + y^2)
+        # conditions from tests on the variables, shown with the rule
+        @giac_var u::(-1 // 2, 1 // 2) m::integer
+        @test rewrite(sinh(atanh(u)), identities(:inverse_trig)) == u / sqrt(1 - u^2)
+        @test string(rewrite(sinh(atanh(y)), identities(:inverse_trig))) == string(sinh(atanh(y)))   # |y| < 1 unknown
+        @test rewrite(Giac.invoke_cmd(:floor, 2m + 1), identities(:integer)) == 2m + 1
+        @giac_var u m
+        @test occursin("\\le", sprint(show, MIME("text/latex"), identities(:inverse_trig)))
+    end
+
+    @testset "integer and interval tests" begin
+        @giac_var k::integer v::(0, 1)
+        @test is_integer_valued(2k + 1) && is_integer_valued(k^2) && is_integer_valued(3)
+        @test !is_integer_valued(x) && !is_integer_valued(k / 2)
+        @test in_interval(v, 0, 1) && !in_interval(v, 0, 1 // 2) && in_interval(1 // 3, 0, 1)
+        @test !in_interval(x, 0, 1)
+        @giac_var k v
+    end
 end
