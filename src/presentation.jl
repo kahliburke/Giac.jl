@@ -275,9 +275,11 @@ end
 
 # The variables of an expression, in priority order: those asked for, the arguments of function
 # variables (t in y(t)), and symbols that show as variables (different powers across a sum's terms,
-# or a power of 2 or more), the last in the order they were declared.
+# or a power of 2 or more), the last in the order they were declared. With functions of a variable
+# in it, the variables are theirs: a square (ω²) is then a parameter's.
 function _variables(root::_PNode, style::TypesetStyle)
-    found = Set{String}()
+    found = Set{String}()          # from powers
+    arguments = Set{String}()      # of function variables
     function walk(n)
         if n isa _PSum
             degrees = map(_term_degrees, n.terms)
@@ -293,7 +295,7 @@ function _variables(root::_PNode, style::TypesetStyle)
             sp !== nothing && sp[2] >= 2 && push!(found, sp[1])
             walk(n.base); walk(n.exp)
         elseif n isa _PCall || n isa _PDeriv
-            (n isa _PDeriv || n.user) && foreach(a -> a isa _PAtom && !a.constant && push!(found, a.name), n.args)
+            (n isa _PDeriv || n.user) && foreach(a -> a isa _PAtom && !a.constant && push!(arguments, a.name), n.args)
             foreach(walk, n.args)
         elseif n isa _PDerivOf
             walk(n.arg)
@@ -306,6 +308,7 @@ function _variables(root::_PNode, style::TypesetStyle)
     walk(root)
     # variables named in the style are the variables; others are found only without them
     isempty(style.by) || return copy(style.by)
+    isempty(arguments) || (found = arguments)
     letter(name) = findfirst(==(first(name)), collect(style.variable_letters))
     function by_letter(n)
         n isa _PAtom && !n.constant && letter(n.name) !== nothing && push!(found, n.name)
@@ -554,7 +557,16 @@ function _tex(n::_PDeriv, c::_Ctx)
     return _leibniz(length(n.args) > 1 ? "\\partial" : "\\mathrm{d}", name, n.wrt)
 end
 
-_tex(n::_PDerivOf, c::_Ctx) = _leibniz("\\mathrm{d}", "", n.wrt) * "\\left(" * _tex(n.arg, c) * "\\right)"
+function _tex(n::_PDerivOf, c::_Ctx)
+    k, v = length(n.wrt), first(n.wrt)
+    if n.arg isa _PAtom && !n.arg.constant && all(==(v), n.wrt)
+        # a symbol, as in a derivation's left side `diff(V, t)`: V̇, V′ or dV/dt
+        c.style.derivatives === :dot && v == c.style.time && k <= 3 && return _accent_tex(_DOTS[k], n.arg.tex)
+        c.style.derivatives === :prime && return (occursin(r"[_^]", n.arg.tex) ? "{" * n.arg.tex * "}" : n.arg.tex) * "'"^k
+        return _leibniz("\\mathrm{d}", n.arg.tex, n.wrt)
+    end
+    return _leibniz("\\mathrm{d}", "", n.wrt) * "\\left(" * _tex(n.arg, c) * "\\right)"
+end
 
 # d^k f / dx^i dy^j, the variables grouped in the order they first come
 function _leibniz(d::AbstractString, name::AbstractString, wrt::Vector{String})

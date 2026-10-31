@@ -35,15 +35,22 @@
     end
 
     @testset "functions of time and their derivatives" begin
-        @giac_var t q(t) q̇ q̈ V̇ x y
+        @giac_var t q(t) q̇ q̈ V̇ x y u
         @test string(q̇) == "diff(q(t),t)" && string(q̈) == "diff(q(t),t,2)"
         @test is_identifier(V̇)                                         # no V(t): a symbol
         @test L(q̈ + 3q̇ + 2sin(q)) == "\\ddot{q} + 3 \\dot{q} + 2 \\sin q"
         @test L(q̇^2) == "\\dot{q}^{2}"
+        @giac_var ζ ωₙ
+        @test L(q̈ + 2ζ * ωₙ * q̇ + ωₙ^2 * q ~ ωₙ^2 * u) ==               # ωₙ² is a parameter's square
+              "\\ddot{q} + 2 \\zeta \\omega_{n} \\dot{q} + {\\omega_{n}}^{2} q = {\\omega_{n}}^{2} u"
         @test L(q(0)) == "q\\left(0\\right)"
         @test Giac.giac_latex(typeset(q̇ + q; arguments = :shown)) == "\\dot{q}\\left(t\\right) + q\\left(t\\right)"
         @test Giac.giac_latex(typeset(q̈ + q; derivatives = :prime)) == "q'' + q"
         @test Giac.giac_latex(typeset(q̇^2; derivatives = :leibniz)) == "\\left(\\frac{\\mathrm{d} q}{\\mathrm{d} t}\\right)^{2}"
+        @giac_var V
+        @test Giac.written_latex(:(diff(V, t))) == "\\dot{V}"            # a derivation's left side
+        @test Giac.written_latex(:(diff(V, x))) == "\\frac{\\mathrm{d} V}{\\mathrm{d} x}"
+        @test Giac.written_latex(:(diff(V + x, t))) == "\\frac{\\mathrm{d}}{\\mathrm{d} t}\\left(V + x\\right)"
         f = giac_eval("f(x,y)")
         @test L(Giac.Commands.diff(f, x)) == "\\frac{\\partial f}{\\partial x}"
         @test L(Giac.Commands.diff(Giac.Commands.diff(f, x), y)) == "\\frac{\\partial^{2} f}{\\partial x \\partial y}"
