@@ -40,6 +40,21 @@
         @test string(integrand(integral(-a * η, t, t₁, t₂))) == "-a*η(t)"
     end
 
+    @testset "twice by parts, derivatives at the limits" begin
+        @giac_var x b::positive f(x) g(x)
+        I = substitute(by_parts(integral(f * diff(g, x, 2), x, 0, b), f), f(0) => 0, f(b) => 0)
+        @test string(I) == "-integrate(diff(f(x),x)*diff(g(x),x),x,0,b)"
+        # a multiple of an integral, its sign distributed over the result
+        I = by_parts(I, diff(f, x))
+        @test L(I) == "\\int_{0}^{b} \\frac{\\mathrm{d}^{2} f}{\\mathrm{d} x^{2}} g\\left(x\\right) \\, \\mathrm{d}x - \\left. \\frac{\\mathrm{d} f}{\\mathrm{d} x} g\\left(x\\right) \\right|_{0}^{b}"
+        @test string(substitute(I, g(0) => 0, g(b) => 0)) == "integrate(diff(f(x),x,2)*g(x),x,0,b)"
+        # an integral stands after its coefficient's fraction, as a sum holding one does
+        @giac_var m::positive
+        J = -1 / (2m) * integral(f * g, x, 0, b)
+        @test L(J) == "-\\frac{1}{2 m} \\int_{0}^{b} f\\left(x\\right) g\\left(x\\right) \\, \\mathrm{d}x"
+        @test startswith(L(by_parts(J, f)), "-\\frac{1}{2 m} \\left(")
+    end
+
     @testset "a function of one variable at a point" begin
         @test string(η(t₂)) == "η(t₂)"
     end

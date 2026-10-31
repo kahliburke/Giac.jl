@@ -597,16 +597,18 @@ end
 
 function _unsigned_product(p, c::_Ctx)
     num, den = _sorted(p.num, c), _sorted(p.den, c)
-    # derivatives written as fractions, and differentials, stand after a fraction, not in it:
-    # ħ²/2m ∂²ψ/∂x², p/m dp
+    # derivatives written as fractions, differentials, and integrals and evaluations (or a sum
+    # of them) stand after a fraction, not in it: ħ²/2m ∂²ψ/∂x², p/m dp, ħ²/2m ∫ φ′ψ′ dx
     if !isempty(den) || (p.coef isa Rational && !isone(denominator(p.coef)))
         # (a derivative with only a number below stays in front of the rest: ½ dM/dq q̇²)
         derivative(f) = !isempty(den) && f isa Union{_PDeriv, _PDerivOf} && startswith(_tex(f, c), "\\frac")
         differential(f) = f isa _PAtom && _is_differential(f.name)
-        d = vcat(findall(derivative, num), findall(differential, num))
+        held(f) = f isa Union{_PIntegral, _PBar} || (f isa _PSum && any(held, f.terms)) ||
+                  (f isa _PProd && any(held, f.factors))
+        d = sort!(vcat(findall(derivative, num), findall(differential, num), findall(held, num)))
         if !isempty(d) && length(d) < length(num) + (isone(p.coef) ? 0 : 1)
             rest = (; p..., num = num[setdiff(eachindex(num), d)])
-            return _unsigned_product(rest, c) * " " * join((_tex(num[i], c) for i in d), " ")
+            return _unsigned_product(rest, c) * " " * _factors_tex(1, num[d], c)
         end
     end
     coef = p.coef

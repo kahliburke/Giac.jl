@@ -118,8 +118,8 @@ _any_node(pred, n::Node) = pred(n) ||
 """
     by_parts(I, u)
 
-Integrate the held integral `I` (from [`integral`](@ref)) by parts, differentiating `u`: each term
-`u v′` of the integrand becomes `u v` evaluated between the limits, less the integral of `u′ v`.
+Integrate the held integrals in `I` (from [`integral`](@ref)) by parts, differentiating `u`: each
+term `u v′` of an integrand becomes `u v` evaluated between the limits, less the integral of `u′ v`.
 Terms without the factor `u` stay under the integral.
 
 ```julia
@@ -130,7 +130,13 @@ by_parts(integral(f * diff(g, t), t, a, b), f)
 """
 function by_parts(I::GiacExpr, u::GiacExpr)
     n = _node(I)
-    _is_integral(n) || throw(ArgumentError("by_parts works on a held integral; make one with integral(f, t, a, b)"))
+    _is_integral(n) && return _by_parts(n, u)
+    _any_node(_is_integral, n) || throw(ArgumentError("by_parts works on held integrals; make one with integral(f, t, a, b)"))
+    # (`_add` distributes a number over the sum that replaces an integral: -(f|ₐᵇ - ∫) is -f|ₐᵇ + ∫)
+    return GiacExpr(_add(_replace_nodes(m -> _is_integral(m) ? _node(_by_parts(m, u)) : nothing, n)))
+end
+
+function _by_parts(n::CallNode, u::GiacExpr)
     t, limits = GiacExpr(n.args[2]), GiacExpr.(n.args[3:end])
     f, un = n.args[1], _node(u)
     uvs, inside = zero(GiacExpr), zero(GiacExpr)
@@ -172,6 +178,32 @@ function _held_with(f, m::CallNode)
     return isempty(m.args) ? m : CallNode(m.f, Node[g(m.args[1]); m.args[2:end]])
 end
 
+# The value of a held evaluation: f at x = a, or f(b) - f(a)
+function _evaluation_value(h::CallNode)
+    if h.f == "subst"
+        x, a = h.args[2].args
+        return _value_at(h.args[1], x, a)
+    end
+    f, a, b, x = h.args
+    return _value_at(f, x, b) - _value_at(f, x, a)
+end
+
+# `f` at `x = a`. A derivative of a function of `x` is first written as the derivative function at
+# `x`, φ′(x), which GIAC evaluates at a point; diff(φ(x), x) at x = 0 it cannot.
+function _value_at(f::Node, x::Node, a::Node)
+    g = _replace_nodes(f) do m
+        (m isa CallNode && m.f == "diff" && length(m.args) in (2, 3) && isequal(m.args[2], x) &&
+         m.args[1] isa CallNode && m.args[1].f == "of" && length(m.args[1].args) == 2 && isequal(m.args[1].args[2], x)) || return nothing
+        k = length(m.args) == 3 && m.args[3] isa NumNode ? m.args[3].v : 1
+        F = m.args[1].args[1]
+        for _ in 1:k
+            F = CallNode("diff", Node[F])
+        end
+        return CallNode("of", Node[F, x])
+    end
+    return substitute(GiacExpr(g), GiacExpr(x) => GiacExpr(a))
+end
+
 # `f` applied to `expr` with its held forms kept from GIAC, which would evaluate them: each is a
 # symbol while `f` works on the rest, and goes back with `f` applied to what it holds. With
 # `values`, an evaluation whose value `f` changes is replaced by that changed value.
@@ -182,7 +214,7 @@ function _around_held(f, expr::GiacExpr; values::Bool = false)
         s = SymNode("held__$(length(held) + 1)")
         h = _held_with(f, m)
         if values && _is_evaluation(h)
-            v = invoke_cmd(:eval, GiacExpr(h))
+            v = _evaluation_value(h)
             w = f(v)
             isequal(_node(w), _node(v)) || (h = _node(w))
         end
