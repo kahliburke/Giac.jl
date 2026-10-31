@@ -5,11 +5,11 @@ const Bindings = Base.ImmutableDict{Symbol, Any}     # a slot's expression, a se
 
 _test(pred, s) = pred === nothing || pred(s) === true
 
-_match(p::Leaf, s, b, k) = p.key == _key(s) ? k(b) : nothing
+_match(p::Leaf, s, b, k) = isequal(p.expr, s) ? k(b) : nothing
 
 function _match(p::Slot, s, b, k)
     bound = get(b, p.name, nothing)
-    bound === nothing || return _key(bound) == _key(s) ? k(b) : nothing
+    bound === nothing || return isequal(bound, s) ? k(b) : nothing
     _test(p.predicate, s) || return nothing
     return k(Bindings(b, p.name, s))
 end

@@ -52,15 +52,16 @@ mutable struct GiacExpr
     ptr::Ptr{Cvoid}                  # the GIAC object's handle, C_NULL until it is made
     node::Union{Nothing, Node}       # the tree, nothing until it is made
     native::Bool                     # built in Julia: written from the tree
+    args::Union{Nothing, Vector{GiacExpr}}   # `arguments`, once asked for
 
     function GiacExpr(ptr::Ptr{Cvoid})
-        obj = new(ptr, nothing, false)
+        obj = new(ptr, nothing, false, nothing)
         if ptr != C_NULL
             finalizer(_finalize_giacexpr, obj)
         end
         return obj
     end
-    GiacExpr(n::Node, ::Val{:native}) = new(C_NULL, n, true)
+    GiacExpr(n::Node, ::Val{:native}) = new(C_NULL, n, true, nothing)
 end
 GiacExpr(x::GiacExpr) = x
 # an expression from a tree; an opaque GIAC object stays the expression it came from

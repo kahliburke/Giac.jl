@@ -139,7 +139,7 @@ const _UNIT = _ONE                      # the monomial of a constant term
 # a term as monomial and coefficient
 function _split_coef(n::Node)
     n isa NumNode && return (_UNIT, n.v)
-    if n isa MulNode && !isone(n.coef)
+    if n isa MulNode && !_isone_exact(n.coef)
         rest = length(n.factors) == 1 && isequal(last(n.factors[1]), _ONE) ? first(n.factors[1]) : MulNode(1, n.factors)
         return (rest, n.coef)
     end
@@ -370,6 +370,20 @@ end
 # ---------------------------------------------------------------------------------------------
 # GIAC's shape of a node: the head and arguments GIAC itself would show
 # ---------------------------------------------------------------------------------------------
+
+# The head alone, as `_view` would give it, without building the arguments
+_view_head(n::Node) = nothing
+_view_head(n::CallNode) = n.f
+_view_head(n::AddNode) = "+"
+function _view_head(n::MulNode)
+    c = n.coef
+    (isone(-c) || _negative(c)) && return "-"
+    if isone(c) && length(n.factors) == 1
+        e = last(n.factors[1])
+        return e isa NumNode && _negative(e.v) ? "inv" : "^"
+    end
+    return "*"
+end
 
 # (head, arguments) for a compound node, `nothing` for an atom
 _view(n::Node) = nothing

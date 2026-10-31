@@ -508,8 +508,8 @@ symb_funcname(giac_eval("sin(x)"))  # "sin"
 """
 function symb_funcname(g::GiacExpr)::String
     n = _node(g)
-    v = n isa GenNode ? nothing : _view(n)
-    v === nothing || return v[1]
+    h = n isa GenNode ? nothing : _view_head(n)
+    h === nothing || return h
     getfield(g, :native) && throw(GiacError("Gen is not symbolic", :type))
     if g.ptr == C_NULL
         throw(GiacError("Cannot get function name of null expression", :type))
@@ -588,9 +588,15 @@ end
 # anything else as the one argument. Nothing is printed and parsed again, which would also
 # evaluate each argument again.
 function arguments(g::GiacExpr)::Vector{GiacExpr}
+    cached = getfield(g, :args)
+    cached === nothing || return copy(cached)
     n = _node(g)
     v = n isa GenNode ? nothing : _view(n)
-    v === nothing || return GiacExpr[GiacExpr(a) for a in v[2]]
+    if v !== nothing
+        args = GiacExpr[GiacExpr(a) for a in v[2]]
+        setfield!(g, :args, args)        # the same argument objects each time, with their trees
+        return copy(args)
+    end
     getfield(g, :native) && throw(ArgumentError("expression is not a function call"))
     iscall(g) || throw(ArgumentError("expression is not a function call"))
     GiacCxxBindings._have_library || return collect(GiacExpr, symb_argument(g))

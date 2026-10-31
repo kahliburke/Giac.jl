@@ -44,15 +44,14 @@ function rewrite(e::GiacExpr, rules...; order::Symbol = :bottomup, once::Bool = 
         return _trace_display(e, s === nothing ? [] : [s]; collapse = false)
     end
     trace === false || return _trace(e, ctx, once ? 1 : maxpasses, trace === true)
-    seen = Dict(_key(e) => 0)
+    seen = Dict{GiacExpr, Int}(e => 0)
     fired = Vector{Rule}[]
     for pass in 1:(once ? 1 : maxpasses)
         push!(fired, Rule[])
         e′ = _pass(e, ctx, false, fired[end])
-        (once || _key(e′) == _key(e)) && return e′
-        k = _key(e′)
-        haskey(seen, k) && _cycle_error(reduce(vcat, fired[(seen[k] + 1):pass]), e′)
-        seen[k] = pass
+        (once || isequal(e′, e)) && return e′
+        haskey(seen, e′) && _cycle_error(reduce(vcat, fired[(seen[e′] + 1):pass]), e′)
+        seen[e′] = pass
         e = e′
     end
     throw(ErrorException("the rules still change the expression after $maxpasses passes"))
@@ -76,7 +75,7 @@ function _apply(e::GiacExpr, ctx::_Ctx, inside)
     inside || return nothing
     for r in ctx.rules
         v = r(e)
-        v === nothing || _key(v) == _key(e) || return (v, r)
+        v === nothing || isequal(v, e) || return (v, r)
     end
     return nothing
 end
@@ -101,7 +100,7 @@ function _rebuild_args(f, e::GiacExpr)
     iscall(e) || return e
     args = arguments(e)
     new = map(f, args)
-    return any(i -> _key(new[i]) != _key(args[i]), eachindex(args)) ? _rebuild(e, new) : e
+    return any(i -> !isequal(new[i], args[i]), eachindex(args)) ? _rebuild(e, new) : e
 end
 
 # A call of an undefined function `f(a, b)` is Giac's `of(f, a, b)`; the name itself is callable.
