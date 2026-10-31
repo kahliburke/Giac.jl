@@ -269,7 +269,6 @@ function _pnode(n::SymNode)
     return _PAtom(_tex_name(s), s, false)
 end
 _pnode(n::AddNode) = _PSum(_PNode[_pnode(_scale(m, c)) for (m, c) in n.terms])
-function _pnode(n::MulNode)
 
 # A complex number with i as a constant: b i, or a + b i
 const _I = _PAtom("i", "i", true)
@@ -278,6 +277,7 @@ function _complex_pnode(v::Complex)
     bi = isone(b) ? _I : _PProd(_PNode[_PNum(b), _I])
     return iszero(a) ? bi : _PSum(_PNode[_PNum(a), bi])
 end
+function _pnode(n::MulNode)
     fs = _PNode[]
     if n.coef isa Complex
         c = _complex_pnode(n.coef)
