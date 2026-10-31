@@ -33,6 +33,16 @@
         @test r[5] == "E = \\frac{\\pi^{2} n^{2} \\hbar^{2}}{2 a^{2} m}"       # k = nπ/a applied
     end
 
+    @testset "equations as values" begin
+        @giac_var ω
+        d = @derivation begin
+            r := k ~ m * ω^2                  # a written equation: GIAC's `=`
+            eq = k^2 ~ a                      # a bound equation shows as itself
+        end
+        @test rows(d) == ["k = m \\omega^{2}", "k^{2} = a"]
+        @test string(r) == "k=m*ω^2"
+    end
+
     @testset "a named rule is not applied" begin
         d = @derivation begin
             rule := k^2 ~ a => k ~ sqrt(a)

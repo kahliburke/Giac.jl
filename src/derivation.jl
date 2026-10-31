@@ -122,6 +122,8 @@ function _to_giac_syntax(ex::Expr)
     if ex.head === :. && length(ex.args) == 2 && ex.args[2] isa Expr && ex.args[2].head === :tuple
         return _to_giac_syntax(Expr(:call, ex.args[1], ex.args[2].args...))
     end
+    # an equation `a ~ b` is GIAC's `a = b`
+    _is_tilde(ex) && return Expr(:(=), _to_giac_syntax(ex.args[2]), _to_giac_syntax(ex.args[3]))
     args = map(_to_giac_syntax, ex.args)
     if ex.head === :call && args[1] isa Symbol
         args[1] = get(_GIAC_NAMES, ex.args[1], args[1])
@@ -396,6 +398,13 @@ value with steps of its own (a rewrite's trace) continues as one row per step.
 _derivation_rows(left, written, value, simplifier) =
     [(left, join(vcat(written, giac_latex(_shown(simplifier, value))), " = "))]
 
+# The row for a bound value: name = value, or for an equation the equation itself, aligned on its
+# own `=` (`SE = iħ ψ_t ~ …` shows iħ ∂ψ/∂t = …)
+function _binding_rows(left, value, simplifier)
+    value isa GiacExpr && _is_equation(value) || return _derivation_rows(left, String[], value, simplifier)
+    return [(giac_latex(_shown(simplifier, lhs(value))), giac_latex(_shown(simplifier, rhs(value))))]
+end
+
 "Apply a display simplifier to a value, entry by entry for arrays."
 _shown(f, v::AbstractArray) = map(f, v)
 _shown(f, v) = f(v)
@@ -445,6 +454,10 @@ function _derivation(simplifier, block)
             append!(out, implication(_implication(st.args[2])..., st.args[1]))
         elseif _implication(st) !== nothing
             append!(out, implication(_implication(st)...))
+        elseif st isa Expr && st.head === :(:=) && st.args[1] isa Symbol && _is_tilde(st.args[2])
+            # `name := lhs ~ rhs`: shows lhs (as written) = rhs, and binds name to the equation
+            name, eq = st.args
+            push!(out, bind(name, esc(eq)), row(eq.args[2], :(rhs($(esc(name))))))
         elseif st isa Expr && st.head === :(:=) && st.args[1] isa Symbol
             # `name := expr`: shows expr (as written) = value, and binds name to the value
             name, expr = st.args
@@ -456,8 +469,9 @@ function _derivation(simplifier, block)
             define = esc(Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@giac_function")), nothing, Expr(:(=), call, body)))
             push!(out, bind(name, define), row(call, :(_body($(esc(name))))))
         elseif st isa Expr && st.head === :(=) && st.args[1] isa Symbol
-            name, rhs = st.args
-            push!(out, bind(name, esc(rhs)), row(name, esc(name)))
+            name, rhs_ = st.args
+            push!(out, bind(name, esc(rhs_)),
+                  :(append!($rows, _binding_rows(written_latex($(QuoteNode(name))), $(esc(name)), $simplifier))))
         elseif _is_tilde(st)
             # `a ~ b ~ c` parses as `a ~ (b ~ c)`
             terms = Any[st.args[2]]
