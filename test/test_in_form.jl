@@ -8,7 +8,7 @@
         f = in_form(5 / (s^2 + 3s + 4), second_order, (K, ζ, ω))
         @test string.(values(f)) == ["5/4", "3/4", "2"]
         @test string(f[ω]) == "2" && haskey(f, ζ) && !haskey(f, s)
-        @test length(f.alternatives) == 1                             # ω = -2 also fits
+        @test string(only(f.alternatives)[ω]) == "-2"                 # ω = -2 also fits
         @test string(substitute(a * (x - h)^2 + k, in_form(2x^2 - 4x + 7, a * (x - h)^2 + k, (a, h, k)))) == "2*(x-1)^2+5"
         g = in_form((3s + 5) / (s^2 + 3s + 2), A / (s + 1) + B / (s + 2), (A, B))
         @test string(substitute(A / (s + 1) + B / (s + 2), g)) == "2/(s+1)+1/(s+2)"

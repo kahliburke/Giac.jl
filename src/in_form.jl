@@ -33,7 +33,7 @@ function in_form(e, template, params)
     equations = unique(string, GiacExpr[c for (_, c) in _collected(difference, vars)])
     fits = _ranked_fits(isempty(equations) ? [ps] : Commands.solve(equations, ps), ps)
     isempty(fits) && throw(ArgumentError("$e cannot be written in the form $template for $(join(string.(ps), ", "))"))
-    return InForm(template, vars, fits[1], fits[2:end])
+    return InForm(template, vars, fits[1], [InForm(template, vars, fit, InForm[]) for fit in fits[2:end]])
 end
 
 # The solutions as `parameter => value` lists, those contradicting a declared sign left out,
@@ -60,13 +60,13 @@ end
 
 An expression written in the form of a template, from [`in_form`](@ref): a dictionary of
 `parameter => value`, with the `template`, its variables `vars`, and the other choices of values
-that also fit, `alternatives`.
+that also fit, `alternatives`, each an `InForm` of its own.
 """
 struct InForm <: AbstractDict{GiacExpr, GiacExpr}
     template::GiacExpr
     vars::Vector{GiacExpr}
     values::Vector{Pair{GiacExpr, GiacExpr}}
-    alternatives::Vector{Vector{Pair{GiacExpr, GiacExpr}}}
+    alternatives::Vector{InForm}
 end
 
 Base.length(f::InForm) = length(f.values)
