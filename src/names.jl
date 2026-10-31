@@ -51,6 +51,8 @@ declaration records for an entry with a negative index (`c_m1` is c₋₁).
 function _tex_name(name::AbstractString)
     custom = get(_TEX_NAMES, name, nothing)
     custom === nothing || return custom
+    differential = match(_DIFFERENTIAL, Base.Unicode.normalize(name, :NFD))
+    differential === nothing || return "\\mathrm{d}" * _tex_name(Base.Unicode.normalize(differential[1], :NFC))
     plain = _unspell(name)
     parts = split(Base.Unicode.normalize(plain, :NFD), '_')
     core = Tuple{Char, Vector{Char}}[]          # letters with their marks
@@ -97,6 +99,10 @@ function _tex_name(name::AbstractString)
 end
 
 _greek_or(c::Char) = get(_GREEK_TEX, c, string(c))
+
+# a differential: `d` before a single symbol with its marks, subscripts and primes (dx, dq̇, dθ₁,
+# dx_ref, dH), not a word (dist)
+const _DIFFERENTIAL = r"^d(\p{L}[\p{Mn}\p{No}\d′″‴]*(?:_\w+)*)$"
 
 # the main symbol: letters side by side, a run of plain Latin letters as an upright word
 function _core_tex(core)

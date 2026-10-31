@@ -279,6 +279,12 @@ end
     # notes are flush-left rows of an outer array; the steps between them stay aligned
     @test startswith(tex3, "\$\$\\begin{array}{l}\\text{by definition}") && count("&=", tex3) == 1
 
+    # a definition: both sides as written, nothing evaluated
+    d6 = @derivation begin
+        S := integrate(F(x, t), t, 0, T)
+    end
+    @test d6.rows[1][1] == "S" && startswith(d6.rows[1][2], "\\int")
+
     # `=` aligns across note groups; `@realign` starts a new alignment
     widest(tex) = count("\\hphantom", tex)
     d4 = @derivation begin

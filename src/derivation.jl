@@ -135,6 +135,7 @@ end
         expr               # shows  expr (as written) = value
         lhs ~ expr         # shows  lhs (as written) = value; binds nothing
         lhs ~ mid ~ expr   # shows  lhs = mid (both as written) = value
+        lhs := expr        # shows  lhs = expr, both as written; computes nothing
         "a note"           # a line of text
         @realign           # the steps below line up among themselves
     end
@@ -144,7 +145,9 @@ Run a sequence of steps and typeset them as aligned equations: the left side as 
 code (typeset by Giac, unevaluated), the right side as computed. Values can be expressions or
 arrays of expressions. `lhs ~ rhs` is for left sides that are not assignable, such as
 `diff(V, t) ~ ∇(V, x) ⋅ f`; in a chain `lhs ~ mid ~ … ~ expr`, every term but the last is shown
-as written. A string is shown as text; write it as `raw"…"` to include `\$…\$` math.
+as written. `lhs := expr` is a definition, such as `S := integrate(L(q, q̇, t), t, t₁, t₂)`: both
+sides are shown as written and nothing is evaluated. A string is shown as text; write it as
+`raw"…"` to include `\$…\$` math.
 
 The `=` signs line up across the whole derivation, notes included. `@realign` starts a new
 alignment from that point, for when one wide left side would push everything else to the right.
@@ -207,6 +210,9 @@ function _derivation(simplifier, block)
             push!(out, :(push!($rows, _text_row($(esc(st))))))
         elseif st isa Expr && st.head === :macrocall && st.args[1] === Symbol("@realign")
             push!(out, :(push!($rows, _REALIGN)))     # a marker read here, never expanded
+        elseif st isa Expr && st.head === :(:=)
+            # a definition: both sides as written, nothing computed
+            push!(out, :(push!($rows, (written_latex($(QuoteNode(st.args[1]))), written_latex($(QuoteNode(st.args[2])))))))
         elseif st isa Expr && st.head === :(=) && st.args[1] isa Symbol
             name, rhs = st.args
             push!(out, :($(esc(name)) = $(esc(rhs))), row(name, esc(name)))

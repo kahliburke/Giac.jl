@@ -17,6 +17,8 @@
         @test T("x′") == "x'" && T("x′★") == "x^{\\prime \\star}"
         @test T("Deltax") == "\\Delta x" && T("δu") == "\\delta u"
         @test T("xdot") == "\\mathrm{xdot}"
+        @test T("dt") == "\\mathrm{d}t" && T("dq̇") == "\\mathrm{d}\\dot{q}" && T("dθ₁") == "\\mathrm{d}\\theta_{1}"
+        @test T("dH") == "\\mathrm{d}H" && T("dist") == "\\mathrm{dist}"           # differentials, not words
     end
 
     @testset "in expressions" begin
