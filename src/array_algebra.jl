@@ -150,6 +150,33 @@ Hessian `H[i, j] = ∂²f/∂xᵢ∂xⱼ` of the scalar `f`.
 """
 hessian(f, x::AbstractVector) = jacobian(∇(f, x), x)
 
+"""
+    taylor(f, x => a, n)
+    taylor(f, [x1, x2] => (a1, a2), n)
+    taylor(f, x, n)
+
+The Taylor polynomial of `f` about `x = a` (about 0 when no point is given): every term up to
+total degree `n` in the variables. `x` may be a vector of variables, with the point a vector or
+a tuple (a tuple keeps exact constants, `x => (π, 0)`) or one value for all. For an array `f`,
+entry by entry.
+
+```julia
+@giac_var x[1:2] u
+f = [x2, -sin(x1) + u * cos(x1)]
+taylor(f, [x; u] => (π, 0, 0), 1)     # [x2, x1 - π - u]: linearized about the upright position
+```
+"""
+function taylor(f::GiacExpr, point::Pair, n::Integer)
+    x, a = point
+    vars = x isa GiacExpr ? GiacExpr[x] : collect(GiacExpr, x)
+    at = a isa Union{AbstractArray, Tuple} ? collect(Any, a) : fill(a, length(vars))
+    length(at) == length(vars) ||
+        throw(DimensionMismatch("expanding about a point of $(length(at)) values in $(length(vars)) variables"))
+    return invoke_cmd(:series, f, vars, at, n)
+end
+taylor(f::GiacExpr, x::Union{GiacExpr, AbstractVector{GiacExpr}}, n::Integer) = taylor(f, x => 0, n)
+taylor(f::AbstractArray{GiacExpr}, args...) = map(e -> taylor(e, args...), f)
+
 # ---------------------------------------------------------------------------------------------
 # Typesetting
 # ---------------------------------------------------------------------------------------------

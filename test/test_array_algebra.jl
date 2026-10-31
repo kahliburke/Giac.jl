@@ -142,6 +142,18 @@ end
     @test size(jacobian([w1, w2, k * w1], w)) == (3, 2)
 end
 
+@testset "taylor" begin
+    @giac_var q[1:2] u
+    S = string
+    @test S(taylor(sin(q1), q1, 5)) == "q1-q1^3/6+q1^5/120"
+    @test S(taylor(exp(q1), q1 => 1, 1)) == "exp(1)+exp(1)*(q1-1)"
+    # total degree: u*q1^2/2 is third order
+    @test taylor(-sin(q1) + q1 * q2 + u * cos(q1), [q; u], 2) == u - q1 + q1 * q2
+    # a tuple keeps π exact; an array f is expanded entry by entry
+    @test S.(taylor([q2, -sin(q1) + u * cos(q1)], [q; u] => (π, 0, 0), 1)) == ["q2", "q1-pi-u"]
+    @test_throws DimensionMismatch taylor(q1, q => (1, 2, 3), 1)
+end
+
 @testset "array typesetting" begin
     @giac_var r[1:2] k
     @test Giac.giac_latex([r1 r2; k 0]) == "\\begin{bmatrix}r_{1} & r_{2} \\\\ k & 0\\end{bmatrix}"
