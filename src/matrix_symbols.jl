@@ -241,7 +241,12 @@ Base.:*(A::MatExpr, c::_Scalar) = c * A
 Base.:/(A::MatExpr, c::_Scalar) = inv(_coefficient(c)) * A
 
 function Base.:*(A::MatExpr, B::MatExpr)
-    _same_dim(A.cols, B.rows) || throw(DimensionMismatch("product of a $(A.rows)×$(A.cols) and a $(B.rows)×$(B.cols) matrix"))
+    if !_same_dim(A.cols, B.rows)
+        # a 1×1 factor that does not fit as a matrix is a scalar: (xᵀx) b
+        A.rows == 1 && A.cols == 1 && return tr(A) * B
+        B.rows == 1 && B.cols == 1 && return A * tr(B)
+        throw(DimensionMismatch("product of a $(A.rows)×$(A.cols) and a $(B.rows)×$(B.cols) matrix"))
+    end
     return _matexpr(A.rows, B.cols, [vcat(wa, wb) => ca * cb for (wa, ca) in A.terms for (wb, cb) in B.terms])
 end
 
@@ -539,8 +544,9 @@ The algebra of matrices holds as expressions are built: `(A*B)' == B'*A'`, `inv(
 `P' == P`, `Q'*Q == I`, `x'*A'*P*x + x'*P*A*x == 2*x'*P*A*x` (a 1×1 term is its transpose). `tr` and
 `det` give scalars (`tr(A*B) == tr(B*A)`), with what is known recorded for the sign tests and
 reductions of `Giac.Rules` (`det P > 0`, `(det Q)² = 1`). `substitute(M, A => entries, …)` gives
-the explicit matrix; `∇(f, x)` and [`quadratic_form`](@ref) take quadratic forms apart; `[A B; C D]`
-is a block matrix with products, `inv` and `det`.
+the explicit matrix; [`differential`](@ref), `∇`, `jacobian`, `hessian` and [`derivative`](@ref)
+do matrix calculus, and [`quadratic_form`](@ref) takes a quadratic form apart; `[A B; C D]` is a
+block matrix with products, `inv` and `det`.
 """
 macro matsym(args...)
     isempty(args) && throw(ArgumentError("@matsym needs a declaration such as A[n, n]"))
@@ -716,24 +722,6 @@ function _vector_symbol(x::MatExpr)
     s = _symbol_of(x)
     (s === nothing || s.cols != 1) && throw(ArgumentError("$(_plain(x)) is not a vector symbol (declare one with @matsym x[n])"))
     return s
-end
-
-"""
-    ∇(f::MatExpr, x::MatExpr)
-
-The gradient of a scalar (1×1) expression `f` in the vector `x`, a column: for `f = xᵀWx + bᵀx + c`
-it is `(W + Wᵀ)x + b`. `f` must be linear or quadratic in `x`.
-"""
-function ∇(f::MatExpr, x::MatExpr)
-    (f.rows == 1 && f.cols == 1) || throw(DimensionMismatch("∇ takes a scalar (1×1) expression"))
-    s = _vector_symbol(x)
-    g = zero_matrix(s.rows, 1)
-    for (w, c) in f.terms
-        kind, part = _form_part(w, s)
-        kind === :quadratic && (g = g + c * (part + transpose(part)) * x)
-        kind === :linear && (g = g + c * part)
-    end
-    return g
 end
 
 """

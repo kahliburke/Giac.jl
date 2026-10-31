@@ -34,7 +34,7 @@ using Giac.Rules: is_positive, simplest, rewrite, equivalent, matrix_identities,
         @test quadratic_form(Vdot, x) == A' * P + P * A
         @test S(∇(V + b' * x, x)) == "b + 2*P*x"
         @test_throws ArgumentError quadratic_form(b' * x, x)
-        @test_throws ArgumentError ∇(V, A)
+        @test iszero(∇(V, A)) && S(∇(Vdot, A)) == "2*P*x*x'"      # gradients in a matrix
     end
 
     @testset "trace and determinant" begin
