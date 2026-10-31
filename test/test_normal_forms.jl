@@ -1,5 +1,5 @@
 # Forms the core settles on: exponentials merged, the sign of an even or odd function's argument,
-# multiples of π/2 taken out of cos and sin, simplify without new angles
+# multiples of π/2 taken out of cos and sin, simplify without new angles, exact literals
 
 @testset "Normal forms" begin
     C = Giac.Commands
@@ -42,5 +42,12 @@
         X = C.simplify(C.exp2trig(C.integrate(x * C.expand(Ψ * conj(Ψ)), x, 0, a)))
         @test string(X) == "(9*a*pi^2-32*a*cos(3*pi^2*t*ħ/(2*a^2*m)))/(18*pi^2)"
         @giac_var a ħ m
+    end
+
+    @testset "exact literals" begin
+        ex = Giac._exact_literals(:(sin(2π * x) + sqrt(2) * x^(1 / 2) + 2^(1 // 3) * ℯ))
+        @test string(Base.invokelatest(eval(:(x -> $ex)), x)) == string(sin(2 * convert(GiacExpr, π) * x) + sqrt(convert(GiacExpr, 2)) * x^(1 // 2) +
+                                          convert(GiacExpr, 2)^(1 // 3) * convert(GiacExpr, ℯ))
+        @test Giac._exact_literals(:(f(1.5, 2 * 3))) == :(f(1.5, 2 * 3))           # floats and integers as written
     end
 end
