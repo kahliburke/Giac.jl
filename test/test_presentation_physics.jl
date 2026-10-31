@@ -16,6 +16,12 @@
         @test L(SE) == "i \\hbar \\frac{\\partial \\psi}{\\partial t} = -\\frac{\\hbar^{2}}{2 m} \\frac{\\partial^{2} \\psi}{\\partial x^{2}} + V\\left(x\\right) \\psi\\left(x, t\\right)"
     end
 
+    @testset "initial conditions" begin
+        @giac_var q(t) q̇ v₀
+        @test L(q̇(0)) == "q'\\left(0\\right)"
+        @test sprint(show, MIME("text/latex"), q̇(0) ~ v₀) == "\$\$q'\\left(0\\right) = v_{0}\$\$"
+    end
+
     @testset "separation of variables" begin
         @giac_var φ(x) T(t)
         SE = im * ħ * diff(ψ, t) ~ -ħ^2 / (2m) * diff(ψ, x, 2) + V * ψ

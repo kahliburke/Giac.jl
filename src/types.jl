@@ -843,7 +843,10 @@ desolve([D(D(u)) + u ~ 0, u(0) ~ 1, D(u)(0) ~ 0], t, u)
 """
 struct DerivativeCondition
     condition_str::String
+    point::Union{Nothing, DerivativePoint}   # the derivative and its value, for typesetting
+    value::Any
 end
+DerivativeCondition(s::String) = DerivativeCondition(s, nothing, nothing)
 
 function Base.string(dc::DerivativeCondition)
     return dc.condition_str
@@ -857,7 +860,7 @@ end
 function Base.:~(dp::DerivativePoint, value)
     value_str = _arg_to_giac_string(value)
     eq_str = string(dp) * "=" * value_str
-    return DerivativeCondition(eq_str)
+    return DerivativeCondition(eq_str, dp, value)
 end
 
 # Convert to GiacExpr for arithmetic operations

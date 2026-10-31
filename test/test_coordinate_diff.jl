@@ -95,7 +95,7 @@
         Lq = m * q̇^2 / 2 - k * q^2 / 2
         V = k * q^2 / 2
         d = @derivation begin
-            diff(diff(Lq, q̇), t) - diff(Lq, q) => EL
+            EL := diff(diff(Lq, q̇), t) - diff(Lq, q)
             diff(V, q)
         end
         @test d.rows[1][1] == "\\frac{\\mathrm{d}}{\\mathrm{d} t}\\left(\\frac{\\partial \\mathrm{Lq}}{\\partial \\dot{q}}\\right) - \\frac{\\partial \\mathrm{Lq}}{\\partial q}"

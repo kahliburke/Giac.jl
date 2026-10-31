@@ -728,3 +728,24 @@ struct _PHeld <: _PNode
     args::Tuple
 end
 _tex(n::_PHeld, c::_Ctx) = sprint(_print_held_latex, n.cmd, n.args)
+
+# ---------------------------------------------------------------------------------------------
+# A derivative at a point, q′(0), and a condition on one, q′(0) = v₀ (initial conditions)
+# ---------------------------------------------------------------------------------------------
+
+function _derivative_point_latex(dp::DerivativePoint)
+    name = _tex_name(dp.funcname)
+    base = occursin(r"[_^]", name) ? "{" * name * "}" : name
+    primes = dp.order <= 3 ? "'"^dp.order : "^{($(dp.order))}"
+    return base * primes * "\\left(" * join((giac_latex(giac_eval(a)) for a in dp.point_args), ", ") * "\\right)"
+end
+giac_latex(dp::DerivativePoint) = _derivative_point_latex(dp)
+_entry_latex(dp::DerivativePoint) = _derivative_point_latex(dp)
+Base.show(io::IO, ::MIME"text/latex", dp::DerivativePoint) = print(io, "\$\$", giac_latex(dp), "\$\$")
+
+function giac_latex(dc::DerivativeCondition)
+    dc.point === nothing && return dc.condition_str
+    return _derivative_point_latex(dc.point) * " = " * giac_latex(convert(GiacExpr, dc.value))
+end
+_entry_latex(dc::DerivativeCondition) = giac_latex(dc)
+Base.show(io::IO, ::MIME"text/latex", dc::DerivativeCondition) = print(io, "\$\$", giac_latex(dc), "\$\$")
