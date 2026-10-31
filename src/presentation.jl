@@ -172,6 +172,10 @@ function _pnode(e::GiacExpr)
     if !iscall(e)
         t = giac_type(e)
         (t == INT || t == ZINT || t == FRAC || t == DOUBLE || t == REAL) && return _PNum(to_julia(e))
+        if t == CPLX
+            v = to_julia(e)
+            v isa Complex && return _complex_pnode(v)
+        end
         s = string(e)
         s == "pi" && return _PAtom("\\pi", s, true)
         s == "infinity" && return _PAtom("\\infty", s, true)
@@ -255,7 +259,7 @@ function _wrt_name(x::GiacExpr)
     return nothing
 end
 
-_pnode(n::NumNode) = n.v isa Real ? _PNum(n.v) : _PRaw(tidy_latex(_giac_tex(GiacExpr(n))))
+_pnode(n::NumNode) = n.v isa Real ? _PNum(n.v) : n.v isa Complex ? _complex_pnode(n.v) : _PRaw(tidy_latex(_giac_tex(GiacExpr(n))))
 function _pnode(n::SymNode)
     s = n.name
     s == "pi" && return _PAtom("\\pi", s, true)
@@ -265,8 +269,21 @@ function _pnode(n::SymNode)
 end
 _pnode(n::AddNode) = _PSum(_PNode[_pnode(_scale(m, c)) for (m, c) in n.terms])
 function _pnode(n::MulNode)
+
+# A complex number with i as a constant: b i, or a + b i
+const _I = _PAtom("i", "i", true)
+function _complex_pnode(v::Complex)
+    a, b = real(v), imag(v)
+    bi = isone(b) ? _I : _PProd(_PNode[_PNum(b), _I])
+    return iszero(a) ? bi : _PSum(_PNode[_PNum(a), bi])
+end
     fs = _PNode[]
-    _isone_exact(n.coef) || push!(fs, _PNum(n.coef))
+    if n.coef isa Complex
+        c = _complex_pnode(n.coef)
+        append!(fs, c isa _PProd ? c.factors : _PNode[c])
+    else
+        _isone_exact(n.coef) || push!(fs, _PNum(n.coef))
+    end
     for (b, e) in n.factors
         push!(fs, isequal(e, _ONE) ? _pnode(b) : _PPow(_pnode(b), _pnode(e)))
     end
@@ -452,7 +469,9 @@ function _order_terms(terms::Vector{_PNode}, style::TypesetStyle, vars)
     end
     negative(t) = _split(t).sign < 0
     lead = style.lead
-    if negative(terms[1]) && lead !== :as_is && (lead === :positive || length(terms) == 2)
+    # a highest derivative stays first, whatever its sign: -ħ²/2m ψ″ + Vψ
+    led_by_derivative = order !== :as_is && length(terms) > 1 && _derivative_order(terms[1]) > _derivative_order(terms[2])
+    if negative(terms[1]) && lead !== :as_is && (lead === :positive || length(terms) == 2 && !led_by_derivative)
         i = findfirst(!negative, terms)
         i === nothing || (terms = vcat(terms[i:i], terms[1:(i - 1)], terms[(i + 1):end]))
     end
@@ -522,9 +541,12 @@ end
 
 function _unsigned_product(p, c::_Ctx)
     num, den = _sorted(p.num, c), _sorted(p.den, c)
-    # differentials stand after a fraction, not in it: p/m dp
+    # derivatives written as fractions, and differentials, stand after a fraction, not in it:
+    # ħ²/2m ∂²ψ/∂x², p/m dp
     if !isempty(den) || !(p.coef isa Integer)
-        d = findall(f -> f isa _PAtom && _is_differential(f.name), num)
+        derivative(f) = f isa Union{_PDeriv, _PDerivOf} && startswith(_tex(f, c), "\\frac")
+        differential(f) = f isa _PAtom && _is_differential(f.name)
+        d = vcat(findall(derivative, num), findall(differential, num))
         if !isempty(d) && length(d) < length(num) + (isone(p.coef) ? 0 : 1)
             rest = (; p..., num = num[setdiff(eachindex(num), d)])
             return _unsigned_product(rest, c) * " " * join((_tex(num[i], c) for i in d), " ")
@@ -556,7 +578,7 @@ function _factors_tex(k, fs, c::_Ctx)
     for f in fs
         t = f isa _PSum || f isa _PEq ? "\\left(" * _tex(f, c) * "\\right)" : _tex(f, c)
         # a number next to a number, or before a fraction, is written with a dot
-        !isempty(parts) && occursin(r"\d\}?$", parts[end]) && occursin(r"^(\d|\\frac)", t) && (t = "\\cdot " * t)
+        !isempty(parts) && occursin(r"^[\d.]+$", parts[end]) && occursin(r"^(\d|\\frac)", t) && (t = "\\cdot " * t)
         push!(parts, t)
     end
     return join(parts, " ")

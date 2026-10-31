@@ -35,6 +35,7 @@ using LinearAlgebra
     include("test_names.jl")
     include("test_coordinate_diff.jl")
     include("test_held_forms.jl")
+    include("test_presentation_physics.jl")
     include("test_threads.jl")
     include("test_core.jl")
     include("test_roots.jl")
