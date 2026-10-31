@@ -40,7 +40,7 @@
         h = hold_cmd(:integrate, f, x)
         @test L(h ~ release(h)) == "\\int x^{2} \\, \\mathrm{d}x = \\frac{x^{3}}{3}"
         @test L(2 * hold_cmd(:limit, sin(x) / x, x, 0) + 1) == "2 \\lim_{x \\to 0} \\frac{\\sin x}{x} + 1"
-        S = substitute(hold_cmd(:sum, a * n, n, 1, 3), a => 2)
+        S = Giac.substitute(hold_cmd(:sum, a * n, n, 1, 3), a => 2)
         @test string(S) == "sum(2*n,n,1,3)" && string(release(S)) == "12"
     end
 
