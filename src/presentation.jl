@@ -230,9 +230,9 @@ function _split(n::_PNode)
     order = nothing
     factors = _flat_factors(n)
     # a product with powers of numbers is a factorization (2^3·3^2·5): its numbers stay factors
-    factorization = any(f -> f isa _PPow && f.base isa _PNum && f.exp isa _PNum && f.exp.v > 0, factors)
+    factorization = any(f -> f isa _PPow && f.base isa _PNum && f.exp isa _PNum && f.exp.v isa Integer && f.exp.v > 0, factors)
     for f in factors
-        if f isa _PNum && factorization
+        if f isa _PNum && factorization && f.v != -1
             push!(num, f)
         elseif f isa _PNum
             f.v isa AbstractFloat && (float = true)

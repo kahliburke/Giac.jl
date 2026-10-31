@@ -29,6 +29,7 @@
         @test L(x^(-2)) == "\\frac{1}{x^{2}}"
         @test L(2 * (x / 3)) == "\\frac{2 x}{3}"
         @test L(2 * P) == "2 \\pi"
+        @test L(giac_eval("(-sqrt(17)-3)/2")) == "\\frac{-\\sqrt{17} - 3}{2}"   # a root is not a factorization
         @test L(a * exp(-t / τ)) == "a e^{-t/\\tau}"                  # exponents take inline fractions
         @test T(exp(x); exp = :exp) == "\\exp x"
     end
