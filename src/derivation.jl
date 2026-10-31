@@ -175,14 +175,16 @@ _values_code(ex) = Expr(:tuple, (:($(QuoteNode(s)) => ($(esc(:(@isdefined $s))) 
 
 """
     @derivation begin
-        name = expr        # binds `name`; shows  name = value
-        expr               # shows  expr (as written) = value
-        expr => name       # shows  expr (as written) = value; binds `name`
-        lhs ~ expr         # shows  lhs (as written) = value; binds nothing
-        lhs ~ mid ~ expr   # shows  lhs = mid (both as written) = value
-        lhs := expr        # shows  lhs = expr, both as written; computes nothing
-        "a note"           # a line of text
-        @realign           # the steps below line up among themselves
+        name = expr              # shows  name = value; binds `name`
+        φ(x) = expr              # shows  φ(x) = value; binds the function `φ`, so `φ(a)` works
+        expr                     # shows  expr (as written) = value
+        name := expr             # shows  expr (as written) = value; binds `name`
+        lhs ~ expr               # shows  lhs (as written) = value; binds nothing
+        lhs ~ mid ~ expr         # shows  lhs = mid (both as written) = value
+        cond => result where c   # shows  cond ⇒ result, c; applies `result` from here on
+        name := cond => result   # shows  cond ⇒ result; binds the rule `name` instead
+        "a note"                 # a line of text
+        @realign                 # the steps below line up among themselves
     end
     @derivation simplify begin … end
 
@@ -190,14 +192,29 @@ Run a sequence of steps and typeset them as aligned equations: the left side as 
 code (typeset by Giac, unevaluated), the right side as computed. Values can be expressions or
 arrays of expressions. `lhs ~ rhs` is for left sides that are not assignable, such as
 `diff(V, t) ~ ∇(V, x) ⋅ f`; in a chain `lhs ~ mid ~ … ~ expr`, every term but the last is shown
-as written. `lhs := expr` is a definition, such as `S := integrate(L(q, q̇, t), t, t₁, t₂)`: both
-sides are shown as written and nothing is evaluated. A string is shown as text; write it as
-`raw"…"` to include `\$…\$` math.
+as written. A string is shown as text; write it as `raw"…"` to include `\$…\$` math.
+
+An implication `cond => result` states that the condition (an equation, its left side shown as
+written and then as computed) gives the result, an equation such as `k ~ n*π/a`. The result is
+substituted into every later value and into the names bound so far, until the derivation ends.
+Written as `name := cond => result`, the result is bound to `name`, a rule to apply with
+`substitute`, and nothing is substituted. Conditions follow `where`, separated by commas or in
+brackets: tags as for `@giac_var` (`n::integer`, `n::positive`, `n::nonzero`, …) and relations
+(`n != 0`, `n > 0`). They are shown after the result and assumed from that row on (`≠` is shown
+only):
+
+```julia
+@derivation begin
+    φ(x) = A * cos(k * x) + B * sin(k * x)
+    φ(0) ~ 0 => A ~ 0
+    φ(a) ~ 0 => k ~ n * π / a where n::integer, n != 0
+end
+```
 
 A written derivative of a name is a partial when the name's value depends on more variables than
 the one it is taken in: with `L` bound to a Lagrangian in `q` and `q̇`, `diff(L, q̇)` is shown as
 `∂L/∂q̇` and computed as the partial derivative, so a step reads
-`diff(diff(L, q̇), t) - diff(L, q) => EL`.
+`EL := diff(diff(L, q̇), t) - diff(L, q)`.
 
 The `=` signs line up across the whole derivation, notes included. `@realign` starts a new
 alignment from that point, for when one wide left side would push everything else to the right.
@@ -224,7 +241,146 @@ macro derivation(simplifier, block)
 end
 
 _is_tilde(ex) = ex isa Expr && ex.head === :call && ex.args[1] === :~ && length(ex.args) == 3
-_is_binding(ex) = ex isa Expr && ex.head === :call && ex.args[1] === :(=>) && length(ex.args) == 3 && ex.args[3] isa Symbol
+_is_pair(ex) = ex isa Expr && ex.head === :call && ex.args[1] === :(=>) && length(ex.args) == 3
+
+# A statement with conditions after `where` separated by commas parses, in a block, as a tuple
+# `(statement, condition, …)`: the conditions go back into the result, after the `where`.
+function _rejoin_conditions(st)
+    (st isa Expr && st.head === :tuple && length(st.args) > 1) || return st
+    head, extra = st.args[1], st.args[2:end]
+    if head isa Expr && head.head === :(:=)
+        return Expr(:(:=), head.args[1], _rejoin_conditions(Expr(:tuple, head.args[2], extra...)))
+    end
+    imp = _implication(head)
+    imp === nothing && return st
+    cond, result = imp
+    return Expr(:call, :(=>), cond, Expr(:tuple, result, extra...))
+end
+
+# `cond => result` as `(cond, result)`, or nothing. `=>` binds more tightly than `~`, so
+# `a ~ b => c ~ d` parses as `a ~ ((b => c) ~ d)`: the chain splits at the term holding `=>`.
+function _implication(st)
+    _is_pair(st) && return (st.args[2], st.args[3])
+    _is_tilde(st) || return nothing
+    terms = Any[]
+    while _is_tilde(st)
+        push!(terms, st.args[2])
+        st = st.args[3]
+    end
+    push!(terms, st)
+    i = findfirst(_is_pair, terms)
+    i === nothing && return nothing
+    chain(ts) = foldr((a, b) -> Expr(:call, :~, a, b), ts)
+    return (chain([terms[1:(i - 1)]; terms[i].args[2]]), chain([terms[i].args[3]; terms[(i + 1):end]]))
+end
+
+# A result and the conditions it is stated under, `… where n::integer, n != 0`. `where` binds to
+# the operand just before it, and a comma after it makes a tuple, so the clause is found where it
+# lands and taken out.
+function _conditions(ex)
+    ex isa Expr || return (ex, Any[])
+    if ex.head === :where
+        conds = ex.args[2:end]
+        length(conds) == 1 && conds[1] isa Expr && conds[1].head in (:vect, :braces, :tuple) && (conds = conds[1].args)
+        return (ex.args[1], collect(Any, conds))
+    end
+    if ex.head === :tuple && !isempty(ex.args)
+        first_, cs = _conditions(ex.args[1])
+        isempty(cs) || return (first_, Any[cs; ex.args[2:end]])
+    end
+    for i in reverse(eachindex(ex.args))
+        inner, cs = _conditions(ex.args[i])
+        isempty(cs) && continue
+        args = copy(ex.args)
+        args[i] = inner
+        return (Expr(ex.head, args...), cs)
+    end
+    return (ex, Any[])
+end
+
+# Conditions as (kind, variable or relation, …) tuples for the code that declares them:
+# `n::integer` is a tag; `n != 0`, `n > 0` relations
+function _conditions_code(conds)
+    items = Any[]
+    for c in conds
+        if c isa Expr && c.head === :(::) && length(c.args) == 2
+            push!(items, :((:tag, $(esc(c.args[1])), $(QuoteNode(c.args[2])))))
+        elseif c isa Expr && c.head === :call && c.args[1] in (:!=, :≠, :>, :<, :>=, :<=, :≥, :≤) && length(c.args) == 3
+            push!(items, :((:relation, $(QuoteNode(c.args[1])), $(esc(c.args[2])), $(esc(c.args[3])))))
+        else
+            throw(ArgumentError("a condition is a tag such as `n::integer` or a relation such as `n != 0`, got $c"))
+        end
+    end
+    return Expr(:tuple, items...)
+end
+
+_conditions_latex_code(conds) = Expr(:vect, (_condition_latex_code(c) for c in conds)...)
+function _condition_latex_code(c)
+    c.head === :(::) && return :(_tag_latex(written_latex($(QuoteNode(c.args[1]))), $(QuoteNode(c.args[2]))))
+    op = Dict(:!= => "\\ne", :≠ => "\\ne", :> => ">", :< => "<", :>= => "\\ge", :≥ => "\\ge", :<= => "\\le", :≤ => "\\le")[c.args[1]]
+    return :(written_latex($(QuoteNode(c.args[2]))) * " " * $op * " " * written_latex($(QuoteNode(c.args[3]))))
+end
+
+const _TAG_LATEX = Dict(:integer => "\\in \\mathbb{Z}", :real => "\\in \\mathbb{R}", :positive => "> 0",
+                        :negative => "< 0", :nonnegative => "\\ge 0", :nonpositive => "\\le 0", :nonzero => "\\ne 0")
+_tag_latex(name, tag::Symbol) = haskey(_TAG_LATEX, tag) ? name * " " * _TAG_LATEX[tag] :
+    throw(ArgumentError("unknown condition `::$tag`; use one of $(join(keys(_TAG_LATEX), ", "))"))
+
+# Declare what GIAC can assume: the first condition on a name replaces what was assumed about it,
+# the others add to it. A name not yet a variable is made one. `≠` is shown but not assumed.
+function _declare_conditions!(conds)
+    seen = Set{String}()
+    for c in conds
+        v = c[1] === :tag ? c[2] : c[3]
+        v isa GiacExpr || continue
+        first_ = !(string(v) in seen)
+        push!(seen, string(v))
+        if c[1] === :tag
+            c[3] === :nonzero && continue
+            tag = c[3]
+            tag in (:integer, :real) ?
+                Commands.invoke_cmd(first_ ? :assume : :additionally, v, giac_eval(string(tag))) :
+                (first_ ? _declare!(v, tag) : _assume_more!(v, tag))
+        else
+            op, rhs = c[2], c[4]
+            op in (:!=, :≠) && continue
+            rel = op in (:>,) ? v > rhs : op in (:<,) ? v < rhs : op in (:>=, :≥) ? v >= rhs : v <= rhs
+            Commands.invoke_cmd(first_ ? :assume : :additionally, rel)
+        end
+    end
+    return nothing
+end
+
+_assume_more!(v, tag) = Commands.invoke_cmd(:additionally,
+    tag === :positive ? v > 0 : tag === :negative ? v < 0 : tag === :nonnegative ? v >= 0 : v <= 0)
+
+# The row of an implication: the condition's left side as written, its value when that differs,
+# its right side, ⇒, the result, the conditions
+function _implication_row(left::String, cond, result, conditions::Vector)
+    c = cond isa GiacExpr && _is_equation(cond) ? (giac_latex(lhs(cond)), giac_latex(rhs(cond))) : nothing
+    head = c === nothing ? giac_latex(cond) : (c[1] == left ? c[2] : c[1] * " = " * c[2])
+    tail = isempty(conditions) ? "" : ", \\quad " * join(conditions, ", ")
+    # a condition that is its own result, φ(0) = A = 0 giving A = 0, is not stated twice
+    c !== nothing && giac_latex(result) == c[1] * " = " * c[2] && return (left, head * tail)
+    return (left, head * " \\quad\\Rightarrow\\quad " * giac_latex(result) * tail)
+end
+
+# The rule a result gives: an equation, applied by substitution
+function _rule(r)
+    r isa GiacExpr && _is_equation(r) && return r
+    r isa AbstractVector && throw(ArgumentError("the result has several values ($(join(string.(r), ", "))); state the one that holds"))
+    throw(ArgumentError("the result of `=>` is an equation to apply later, got $r"))
+end
+
+# A value with the results established so far substituted in (a function `φ(x) = …`, in its body)
+function _apply_rules(v, rules)
+    (isempty(rules) || !(v isa GiacFunction)) && return v
+    return GiacFunction(v.name, v.argnames, v.args, _apply_rules(v.body, rules))
+end
+_apply_rules(v::GiacExpr, rules) = isempty(rules) ? v : substitute(v, rules)
+_apply_rules(v::AbstractArray{<:GiacExpr}, rules) = isempty(rules) ? v : map(e -> _apply_rules(e, rules), v)
+
+_body(v) = v isa GiacFunction ? v.body : v
 
 _is_docstring(ex) = ex isa Expr && ex.head === :macrocall && ex.args[1] == GlobalRef(Core, Symbol("@doc")) &&
                     length(ex.args) == 4 && _is_text(ex.args[3])
@@ -248,29 +404,60 @@ function _derivation(simplifier, block)
     stmts = block isa Expr && block.head === :block ? block.args : [block]
     # a string followed by a statement parses as a docstring for it: split them again
     stmts = mapreduce(st -> _is_docstring(st) ? Any[st.args[3], st.args[4]] : Any[st], vcat, stmts; init = Any[])
-    rows = gensym(:rows)
-    out = Any[:($rows = Tuple{String, String}[])]
-    # each row is typeset right after its step runs, so a later reassignment can't change it
+    rows, rules = gensym(:rows), gensym(:rules)
+    out = Any[:($rows = Tuple{String, String}[]), :($rules = GiacExpr[])]
+    bound = Symbol[]                  # the names the derivation has bound so far
+    # each row is typeset right after its step runs, so a later reassignment can't change it;
+    # its value has the results established so far substituted in
     row(lhs, value; written = ()) =
         :(append!($rows, _derivation_rows(written_latex($(QuoteNode(lhs)), $(_values_code(lhs))),
                                           String[$((:(written_latex($(QuoteNode(w)), $(_values_code(w)))) for w in written)...)],
-                                          $value, $simplifier)))
+                                          _apply_rules($value, $rules), $simplifier)))
+    bind(name, value) = (name in bound || push!(bound, name); :($(esc(name)) = _apply_rules($value, $rules)))
+    # `cond => result where conditions`: shown as cond ⇒ result, conditions; the conditions are
+    # declared, and with `apply` the result is substituted into every later value and binding
+    function implication(cond, result, name = nothing)
+        result, conditions = _conditions(result)
+        left = _is_tilde(cond) ? cond.args[2] : cond
+        r = gensym(:result)
+        code = Any[:(_declare_conditions!($(_conditions_code(conditions)))),
+                   :($r = $(esc(result))),
+                   :(push!($rows, _implication_row(written_latex($(QuoteNode(left)), $(_values_code(left))),
+                                                   _apply_rules($(esc(cond)), $rules), $r,
+                                                   $(_conditions_latex_code(conditions)))))]
+        if name === nothing
+            push!(code, :(push!($rules, _rule($r))))
+            append!(code, (:($(esc(b)) = _apply_rules($(esc(b)), GiacExpr[_rule($r)])) for b in bound))
+        else
+            push!(code, bind(name, r))
+        end
+        return code
+    end
     for st in stmts
         st isa LineNumberNode && (push!(out, st); continue)
+        st = _rejoin_conditions(st)
         if _is_text(st)
             push!(out, :(push!($rows, _text_row($(esc(st))))))
         elseif st isa Expr && st.head === :macrocall && st.args[1] === Symbol("@realign")
             push!(out, :(push!($rows, _REALIGN)))     # a marker read here, never expanded
-        elseif st isa Expr && st.head === :(:=)
-            # a definition: both sides as written, nothing computed
-            push!(out, :(push!($rows, (written_latex($(QuoteNode(st.args[1]))), written_latex($(QuoteNode(st.args[2])))))))
+        elseif st isa Expr && st.head === :(:=) && st.args[1] isa Symbol && _implication(st.args[2]) !== nothing
+            # `name := cond => result`: the result bound as a rule to apply where it is wanted
+            append!(out, implication(_implication(st.args[2])..., st.args[1]))
+        elseif _implication(st) !== nothing
+            append!(out, implication(_implication(st)...))
+        elseif st isa Expr && st.head === :(:=) && st.args[1] isa Symbol
+            # `name := expr`: shows expr (as written) = value, and binds name to the value
+            name, expr = st.args
+            push!(out, bind(name, esc(expr)), row(expr, esc(name)))
+        elseif st isa Expr && st.head === :(=) && st.args[1] isa Expr && st.args[1].head === :call && st.args[1].args[1] isa Symbol
+            # `φ(x) = body`: a function of `x`, shown as its definition
+            call, body = st.args
+            name = call.args[1]
+            define = esc(Expr(:macrocall, GlobalRef(@__MODULE__, Symbol("@giac_function")), nothing, Expr(:(=), call, body)))
+            push!(out, bind(name, define), row(call, :(_body($(esc(name))))))
         elseif st isa Expr && st.head === :(=) && st.args[1] isa Symbol
             name, rhs = st.args
-            push!(out, :($(esc(name)) = $(esc(rhs))), row(name, esc(name)))
-        elseif _is_binding(st)
-            # `expr => name`: shows expr (as written) = value, and binds name to the value
-            expr, name = st.args[2], st.args[3]
-            push!(out, :($(esc(name)) = $(esc(expr))), row(expr, esc(name)))
+            push!(out, bind(name, esc(rhs)), row(name, esc(name)))
         elseif _is_tilde(st)
             # `a ~ b ~ c` parses as `a ~ (b ~ c)`
             terms = Any[st.args[2]]
