@@ -188,7 +188,12 @@ function _pnode(e::GiacExpr)
     h = symb_funcname(e)
     a = arguments(e)
     h == "+" && return _PSum(_PNode[_pnode(x) for x in a])
-    h == "*" && return _PProd(_PNode[_pnode(x) for x in a])
+    if h == "*"
+        # a product read as the core has it, so its roots are gathered
+        m = _node(e)
+        m isa MulNode && return _pnode(m)
+        return _PProd(_PNode[_pnode(x) for x in a])
+    end
     if h == "-" || h == "inv"
         x = _pnode(only(a))
         # a number stored as -(6) or inv(6), as division by a number is, is that number
@@ -285,10 +290,46 @@ function _pnode(n::MulNode)
     else
         _isone_exact(n.coef) || push!(fs, _PNum(n.coef))
     end
-    for (b, e) in n.factors
+    rest, roots = _gather_roots(n.factors)
+    for (b, e) in rest
         push!(fs, isequal(e, _ONE) ? _pnode(b) : _PPow(_pnode(b), _pnode(e)))
     end
+    append!(fs, roots)
     return length(fs) == 1 ? fs[1] : _PProd(fs)
+end
+
+# Roots of factors known not to be negative, written under one radical above the line and one
+# below: √2 √m as √(2m). When the radicand above is a number, or both are monomials, as one root
+# of the quotient: √2/√a as √(2/a). Roots with nothing to join are left as they are.
+function _gather_roots(factors::Vector{Pair{Node, Node}})
+    index(e) = e isa NumNode && e.v isa Rational && denominator(e.v) > 1 ? denominator(e.v) : 0
+    count_of(k) = count(((b, e),) -> index(e) == k && _known_nonnegative(b), factors)
+    rest, roots = Pair{Node, Node}[], _PNode[]
+    groups = Dict{Int, Tuple{Vector{Node}, Vector{Node}}}()
+    for (b, e) in factors
+        k = index(e)
+        if k > 0 && _known_nonnegative(b) && count_of(k) > 1
+            # the whole power stays outside: m^(3/2) is m √m
+            q, r = divrem(numerator(e.v), k)
+            iszero(q) || push!(rest, b => NumNode(q))
+            above, below = get!(() -> (Node[], Node[]), groups, k)
+            push!(r > 0 ? above : below, abs(r) == 1 ? b : _pow(b, NumNode(abs(r))))
+        else
+            push!(rest, b => e)
+        end
+    end
+    monomial(n) = n isa NumNode || n isa SymNode || (n isa MulNode && all(((b, e),) -> b isa NumNode || b isa SymNode, n.factors))
+    for k in sort!(collect(keys(groups)))
+        above, below = groups[k]
+        A, B = _mul(above...), _mul(below...)
+        if !isempty(above) && !isempty(below) && (A isa NumNode || monomial(A) && monomial(B))
+            push!(roots, _PPow(_pnode(_mul(A, _pow(B, NumNode(-1)))), _PNum(1 // k)))
+        else
+            isempty(above) || push!(roots, _PPow(_pnode(A), _PNum(1 // k)))
+            isempty(below) || push!(roots, _PPow(_pnode(B), _PNum(-1 // k)))
+        end
+    end
+    return rest, roots
 end
 _pnode(n::Union{CallNode, GenNode}) = _pnode(GiacExpr(n))
 
@@ -423,6 +464,7 @@ function _factor_rank(f::_PNode, vars)
     b isa _PCall && b.user && return (3, 0, length(vars) + 1, b.f)
     b isa _PDeriv && return (3, 0, length(vars) + 1, b.f * "′"^length(b.wrt))
     b isa _PDerivAt && return (3, 0, length(vars) + 1, b.f * "′"^length(b.idx))
+    f isa _PPow && b isa _PProd && f.exp isa _PNum && !(f.exp.v isa Integer) && return (4, -1, 0, "")   # √(2/a) before sin
     b isa _PIntegral && return (5, 0, 0, "∫")
     b isa _PBar && return (5, 0, 0, "|")
     (b isa _PCall && b.f == "exp" || f isa _PPow && b isa _PAtom && b.name == "e") && return (4, 0, 0, "")

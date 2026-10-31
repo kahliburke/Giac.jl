@@ -261,52 +261,22 @@ function _pow(b::Node, e::Node)
 end
 
 # A fractional power of a product, distributed over the factors known not to be negative (and a
-# positive coefficient): √(4m²ω²) = 2mω for m, ω ≥ 0. For a root, what stays under it is gathered
-# into one radical above and one below: √(ħ²k²/2m) = ħ√(k²)/√(2m). `nothing` if none is.
+# positive coefficient): √(4m²ω²) = 2mω for m, ω ≥ 0. `nothing` if none is.
+# The roots stay apart, √2 √m, so that they cancel and combine; the typesetter gathers them.
 function _nonnegative_power(b::MulNode, e::NumNode)
     c = b.coef
     known = [f for f in b.factors if _known_nonnegative(first(f)) && last(f) isa NumNode && last(f).v isa Real]
     split_coef = c isa Real && c > 0 && !isone(c)
     (isempty(known) && !split_coef) && return nothing
     rest = Pair{Node, Node}[f for f in b.factors if !any(k -> k === f, known)]
-    n = e.v isa Rational && numerator(e.v) == 1 ? denominator(e.v) : nothing
-    parts = n === nothing || !(c isa Union{Integer, Rational}) ? _distributed_power(split_coef ? c : 1, known, e) :
-            _gathered_root(split_coef ? c : 1, known, n)
+    parts = Node[split_coef ? _pow(NumNode(c), e) : _ONE]
+    foreach(((f, x),) -> push!(parts, _pow(f, _mul(x, e))), known)
     rc = split_coef ? 1 : c
     if !isempty(rest) || !isone(rc)
         r = isempty(rest) ? NumNode(rc) : length(rest) == 1 && isone(rc) && isequal(last(rest[1]), _ONE) ? first(rest[1]) : MulNode(rc, rest)
         push!(parts, MulNode(1, Pair{Node, Node}[r => e]))
     end
     return _mul(parts...)
-end
-
-_distributed_power(c, known, e::NumNode) = Node[_pow(NumNode(c), e), (_pow(f, _mul(x, e)) for (f, x) in known)...]
-
-# c^(1/n) ∏ fᵏ^(1/n) for c > 0 and f ≥ 0: the whole powers out, the rest under one root above
-# and one below
-function _gathered_root(c, known, n::Integer)
-    sa, ka = _root_parts(numerator(c), n)
-    sb, kb = _root_parts(denominator(c), n)
-    out = Node[NumNode(sa // sb)]
-    above, below = Pair{Node, Node}[], Pair{Node, Node}[]
-    for (f, x) in known
-        k = x.v
-        if !(k isa Integer || (k isa Rational && isone(denominator(k))))
-            push!(out, _pow(f, _mul(x, NumNode(1 // n))))
-            continue
-        end
-        q, r = divrem(Integer(k), n)
-        iszero(q) || push!(out, _pow(f, NumNode(q)))
-        r > 0 && push!(above, f => NumNode(r))
-        r < 0 && push!(below, f => NumNode(-r))
-    end
-    for (k, fs, sign) in ((ka, above, 1), (kb, below, -1))
-        (isone(k) && isempty(fs)) && continue
-        radicand = isempty(fs) ? NumNode(k) :
-                   isone(k) && length(fs) == 1 && isequal(last(fs[1]), _ONE) ? first(fs[1]) : MulNode(k, fs)
-        push!(out, MulNode(1, Pair{Node, Node}[radicand => NumNode(sign // n)]))
-    end
-    return out
 end
 
 # b = s^n k with the largest nth power s^n that divides b (searched for b ≤ 10^8)
@@ -353,6 +323,11 @@ function _numeric_root(b, e)
     (b isa Real && e isa Real) || return nothing
     if b isa AbstractFloat || e isa AbstractFloat
         return b >= 0 ? NumNode(Float64(b)^Float64(e)) : nothing
+    end
+    # a fraction: the root of its numerator over the root of its denominator, √(1/2) = 1/√2
+    if b isa Rational && b > 0 && e isa Rational
+        part(k, x) = isone(k) ? _ONE : something(_numeric_root(k, x), MulNode(1, Pair{Node, Node}[NumNode(k) => NumNode(x)]))
+        return _mul(part(numerator(b), e), part(denominator(b), -e))
     end
     (b isa Integer && b >= 0 && e isa Rational) || return nothing
     iszero(b) && return e > 0 ? _ZERO : nothing
