@@ -157,15 +157,19 @@ function _scale(m::Node, c::Number)
     return m isa MulNode ? MulNode(c, m.factors) : MulNode(c, Pair{Node, Node}[m => _ONE])
 end
 
+_add(a::NumNode, b::NumNode) = NumNode(_nadd(a.v, b.v))
+
 function _add(xs::Node...)
     terms = Pair{Node, Number}[]
-    index = Dict{Node, Int}()
+    # like terms found by a scan while the sum is small, through an index beyond that
+    n = sum(x -> x isa AddNode ? length(x.terms) : 1, xs)
+    index = n > 12 ? Dict{Node, Int}() : nothing
     for x in xs
         for (m, c) in (x isa AddNode ? x.terms : (_split_coef(x),))
-            i = get(index, m, 0)
+            i = index === nothing ? something(findfirst(t -> isequal(first(t), m), terms), 0) : get(index, m, 0)
             if i == 0
                 push!(terms, m => c)
-                index[m] = length(terms)
+                index === nothing || (index[m] = length(terms))
             else
                 terms[i] = m => _nadd(last(terms[i]), c)
             end
@@ -213,7 +217,7 @@ end
 function _push_factor!(factors, b::Node, e::Node)
     for (i, (b2, e2)) in pairs(factors)
         if isequal(b2, b)
-            factors[i] = b => _add(e2, e)
+            factors[i] = b => (e2 isa NumNode && e isa NumNode ? NumNode(_nadd(e2.v, e.v)) : _add(e2, e))
             return
         end
     end
@@ -581,20 +585,23 @@ function _expand(n::AddNode)
 end
 function _expand(n::MulNode)
     any(((b, e),) -> b isa AddNode || b isa MulNode || b isa CallNode, n.factors) || return n
-    terms = Node[NumNode(n.coef)]
+    acc = NumNode(n.coef)
     for (b, e) in n.factors
         f = _expand(b)
         if f isa AddNode && e isa NumNode && e.v isa Integer && e.v > 0
             for _ in 1:e.v
-                terms = _distribute(terms, f)
+                acc = _times(acc, f)              # merged after each step, so the sums stay small
             end
         else
-            terms = Node[_mul(t, isequal(e, _ONE) ? f : _pow(f, e)) for t in terms]
+            acc = _times(acc, isequal(e, _ONE) ? f : _pow(f, e))
         end
     end
-    return _add(terms...)
+    return acc
 end
-_distribute(terms, s::AddNode) = Node[_expand(_mul(t, _scale(m, c))) for t in terms for (m, c) in s.terms]
+
+# a product of expanded factors, distributed
+_terms(n::Node) = n isa AddNode ? (_scale(m, c) for (m, c) in n.terms) : (n,)
+_times(a::Node, b::Node) = _add((_mul(t, u) for t in _terms(a) for u in _terms(b))...)
 
 # whether a node has a sum in a denominator (a rational function, not a polynomial)
 _has_denominator(n::Node) = false
