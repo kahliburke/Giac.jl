@@ -21,11 +21,13 @@ struct SymNode <: Node
     h::UInt
 end
 
-# a function call: `sin(x)`, `of(q, t)` (an undefined function applied), `=` (an equation)
+# a function call: `sin(x)`, `of(q, t)` (an undefined function applied), `=` (an equation);
+# `gen` is the GIAC object it was read from, if any, reused when it goes back to GIAC
 struct CallNode <: Node
     f::String
     args::Vector{Node}
     h::UInt
+    gen::Any
 end
 
 # monomial => coefficient; the constant term is under `_UNIT`
@@ -71,7 +73,8 @@ _same_number(a, b) = isequal(a, b) && (a isa AbstractFloat) == (b isa AbstractFl
 _mix(a::UInt, b::UInt) = hash(a, b)
 NumNode(v::Number) = (c = _canonical(v); NumNode(c, hash(c, c isa AbstractFloat ? 0x666c6f6174 % UInt : 0x6e756d % UInt)))
 SymNode(name::AbstractString) = SymNode(String(name), hash(name, 0x73796d % UInt))
-CallNode(f::AbstractString, args::Vector{Node}) = CallNode(String(f), args, foldl((h, a) -> hash(a, h), args; init = hash(f, 0x63616c6c % UInt)))
+CallNode(f::AbstractString, args::Vector{Node}, gen = nothing) =
+    CallNode(String(f), args, foldl((h, a) -> hash(a, h), args; init = hash(f, 0x63616c6c % UInt)), gen)
 AddNode(terms::Vector{Pair{Node, Number}}) =
     AddNode(terms, foldl((h, t) -> h + _mix(first(t).h, hash(last(t))), terms; init = 0x616464 % UInt))
 MulNode(coef::Number, factors::Vector{Pair{Node, Node}}) =
@@ -309,54 +312,80 @@ function _print(io::IO, n::CallNode)
     if haskey(_INFIX, n.f) && length(n.args) == 2
         _print(io, n.args[1]); print(io, n.f == "=" ? "=" : _INFIX[n.f]); _print(io, n.args[2])
     elseif n.f == "of"
-        _print_atom(io, n.args[1]); print(io, "(")
-        join(io, (_str(a) for a in n.args[2:end]), ",")
-        print(io, ")")
+        _print_atom(io, n.args[1]); print(io, "("); _print_args(io, n.args, 2); print(io, ")")
     else
-        print(io, n.f, "(")
-        join(io, (_str(a) for a in n.args), ",")
-        print(io, ")")
+        print(io, n.f, "("); _print_args(io, n.args, 1); print(io, ")")
     end
 end
 
+function _print_args(io::IO, args, from)
+    for i in from:length(args)
+        i > from && print(io, ",")
+        _print(io, args[i])
+    end
+end
+
+# each term written directly: its sign, then its coefficient and factors
 function _print(io::IO, n::AddNode)
     for (i, (m, c)) in pairs(n.terms)
-        t = _str(_scale(m, c))
-        i > 1 && !startswith(t, "-") && print(io, "+")
-        print(io, t)
+        neg = _negative(c)
+        neg ? print(io, "-") : i > 1 && print(io, "+")
+        a = neg ? -c : c
+        m isa NumNode ? _print_number(io, a) : _print_product(io, a, m isa MulNode ? m.factors : (m => _ONE,))
     end
 end
 
 function _print(io::IO, n::MulNode)
-    c = n.coef
-    num, den = String[], String[]
-    if c isa Rational
-        _negative(c) && print(io, "-")
-        a = abs(c)
-        isone(numerator(a)) || push!(num, string(numerator(a)))
-        push!(den, string(denominator(a)))
-    elseif c isa Complex
-        push!(num, "(" * sprint(_print_number, c) * ")")
-    elseif !isone(c)
-        isone(-c) ? print(io, "-") : push!(num, _negative(c) ? "-" * sprint(_print_number, -c) : sprint(_print_number, c))
-    end
-    for (b, e) in n.factors
-        if e isa NumNode && _negative(e.v)
-            push!(den, _factor_str(b, NumNode(-e.v)))
-        else
-            push!(num, _factor_str(b, e))
-        end
-    end
-    isempty(num) && push!(num, "1")
-    print(io, join(num, "*"))
-    isempty(den) || print(io, "/", length(den) == 1 ? den[1] : "(" * join(den, "*") * ")")
+    neg = _negative(n.coef)
+    neg && print(io, "-")
+    _print_product(io, neg ? -n.coef : n.coef, n.factors)
 end
 
-function _factor_str(b::Node, e::Node)
-    isequal(e, _ONE) && return sprint(_print_atom, b)
-    isequal(e, _HALF) && return "sqrt(" * _str(b) * ")"
-    es = e isa NumNode && e.v isa Integer && e.v >= 0 || e isa SymNode ? _str(e) : "(" * _str(e) * ")"
-    return sprint(_print_atom, b) * "^" * es
+# a product with a coefficient that is not negative: the coefficient's numerator and the factors
+# with nonnegative exponents above the line, its denominator and the others below
+function _print_product(io::IO, c, factors)
+    p, q = c isa Rational ? (numerator(c), denominator(c)) : (c, 1)
+    k = 0
+    if !isone(p)
+        p isa Complex ? (print(io, "("); _print_number(io, p); print(io, ")")) : _print_number(io, p)
+        k += 1
+    end
+    nden = isone(q) ? 0 : 1
+    for (b, e) in factors
+        if e isa NumNode && _negative(e.v)
+            nden += 1
+        else
+            k > 0 && print(io, "*")
+            _print_factor(io, b, e)
+            k += 1
+        end
+    end
+    k == 0 && print(io, "1")
+    nden == 0 && return
+    print(io, "/")
+    nden > 1 && print(io, "(")
+    j = 0
+    if !isone(q)
+        print(io, q)
+        j += 1
+    end
+    for (b, e) in factors
+        if e isa NumNode && _negative(e.v)
+            j > 0 && print(io, "*")
+            _print_factor(io, b, NumNode(-e.v))
+            j += 1
+        end
+    end
+    nden > 1 && print(io, ")")
+end
+
+function _print_factor(io::IO, b::Node, e::Node)
+    isequal(e, _ONE) && return _print_atom(io, b)
+    isequal(e, _HALF) && return (print(io, "sqrt("); _print(io, b); print(io, ")"))
+    _print_atom(io, b)
+    print(io, "^")
+    simple = e isa NumNode && e.v isa Integer && e.v >= 0 || e isa SymNode
+    simple ? _print(io, e) : (print(io, "("); _print(io, e); print(io, ")"))
 end
 
 # a factor or a base: parenthesized unless it is a name, a call, or a nonnegative integer
@@ -457,7 +486,7 @@ function _node_from_gen(gen)
             h == "inv" && length(args) == 1 && return _pow(args[1], _MINUS_ONE)
             h == "^" && length(args) == 2 && return _pow(args[1], args[2])
             h == "/" && length(args) == 2 && return _div(args[1], args[2])
-            h in ("+", "*", "-", "inv", "^", "/") || return CallNode(h, args)
+            h in ("+", "*", "-", "inv", "^", "/") || return CallNode(h, args, gen)
         end
     end
     e = GiacExpr(_make_gen_ptr(gen))
@@ -474,3 +503,113 @@ function _push_gen_args!(out, gen)
         push!(out, gen)
     end
 end
+
+# ---------------------------------------------------------------------------------------------
+# To GIAC: the object built with GIAC's own operators, without printing and parsing
+# ---------------------------------------------------------------------------------------------
+
+# The GIAC object for a tree (with the GIAC lock held)
+function _gen_from_node(n::NumNode)
+    B = GiacCxxBindings
+    v = n.v
+    v isa Integer && return _int_gen(v)
+    v isa Rational && return B.make_fraction(_int_gen(numerator(v)), _int_gen(denominator(v)))
+    v isa AbstractFloat && return B.Gen(Float64(v))
+    return B.make_complex(_gen_from_node(NumNode(real(v))), _gen_from_node(NumNode(imag(v))))
+end
+
+function _int_gen(v::Integer)
+    B = GiacCxxBindings
+    typemin(Int32) <= v <= typemax(Int32) && return B.Gen(Int32(v))
+    m, bytes = abs(big(v)), UInt8[]
+    while m > 0
+        pushfirst!(bytes, UInt8(m & 0xff))
+        m >>= 8
+    end
+    return B.make_zint_from_bytes(GiacCxxBindings.CxxWrap.StdVector(bytes), sign(v))
+end
+
+_gen_from_node(n::SymNode) = n.name in _GIAC_NAMED_VALUES ? GiacCxxBindings.giac_eval(n.name) :
+                             GiacCxxBindings.make_identifier(n.name)
+_gen_from_node(n::GenNode) = _get_gen(n.expr.ptr)
+
+function _gen_from_node(n::AddNode)
+    g = nothing
+    for (m, c) in n.terms
+        t = _gen_from_node(_scale(m, c))
+        g = g === nothing ? t : g + t
+    end
+    return g
+end
+
+# a product as numerator / denominator, which GIAC keeps as a product with `inv`
+function _gen_from_node(n::MulNode)
+    B = GiacCxxBindings
+    num = den = nothing
+    for (b, e) in n.factors
+        below = e isa NumNode && _negative(e.v)
+        x = below ? NumNode(-e.v) : e
+        f = isequal(x, _ONE) ? _gen_from_node(b) : B.giac_pow(_gen_from_node(b), _gen_from_node(x))
+        below ? (den = den === nothing ? f : den * f) : (num = num === nothing ? f : num * f)
+    end
+    c = n.coef
+    if !_isone_exact(c)
+        num = isone(-c) && num !== nothing ? -num :
+              num === nothing ? _gen_from_node(NumNode(c)) : _gen_from_node(NumNode(c)) * num
+    end
+    den === nothing && return num
+    return (num === nothing ? B.Gen(Int32(1)) : num) / den
+end
+
+function _gen_from_node(n::CallNode)
+    n.gen === nothing || return n.gen
+    B = GiacCxxBindings
+    v = B.CxxWrap.StdVector{B.Gen}()
+    foreach(a -> push!(v, _gen_from_node(a)), n.args)
+    return B.make_symbolic_unevaluated(n.f == "=" ? "equal" : n.f, v)
+end
+
+# ---------------------------------------------------------------------------------------------
+# Expansion: products distributed over sums, positive integer powers of sums multiplied out
+# ---------------------------------------------------------------------------------------------
+
+_expand(n::Node) = n
+function _expand(n::AddNode)
+    expanded = [_expand(_scale(m, c)) for (m, c) in n.terms]
+    return any(x -> x isa AddNode, expanded) || any(i -> !isequal(expanded[i], _scale(n.terms[i]...)), eachindex(expanded)) ?
+           _add(expanded...) : n
+end
+function _expand(n::MulNode)
+    any(((b, e),) -> b isa AddNode || b isa MulNode || b isa CallNode, n.factors) || return n
+    terms = Node[NumNode(n.coef)]
+    for (b, e) in n.factors
+        f = _expand(b)
+        if f isa AddNode && e isa NumNode && e.v isa Integer && e.v > 0
+            for _ in 1:e.v
+                terms = _distribute(terms, f)
+            end
+        else
+            terms = Node[_mul(t, isequal(e, _ONE) ? f : _pow(f, e)) for t in terms]
+        end
+    end
+    return _add(terms...)
+end
+_distribute(terms, s::AddNode) = Node[_expand(_mul(t, _scale(m, c))) for t in terms for (m, c) in s.terms]
+
+# whether a node has a sum in a denominator (a rational function, not a polynomial)
+_has_denominator(n::Node) = false
+_has_denominator(n::AddNode) = any(t -> _has_denominator(first(t)), n.terms)
+_has_denominator(n::MulNode) = any(((b, e),) -> (b isa AddNode && !(e isa NumNode && e.v isa Integer && e.v > 0)) || _has_denominator(b), n.factors)
+
+# The names of the symbols in a tree; named constants (pi, i) are not symbols
+function _symbol_names(n::Node)
+    out = Set{String}()
+    _symbol_names!(out, n)
+    return out
+end
+_symbol_names!(out, n::NumNode) = out
+_symbol_names!(out, n::SymNode) = (n.name in _GIAC_NAMED_VALUES || push!(out, n.name); out)
+_symbol_names!(out, n::AddNode) = (foreach(t -> _symbol_names!(out, first(t)), n.terms); out)
+_symbol_names!(out, n::MulNode) = (foreach(((b, e),) -> (_symbol_names!(out, b); _symbol_names!(out, e)), n.factors); out)
+_symbol_names!(out, n::CallNode) = (foreach(a -> _symbol_names!(out, a), n.args); out)
+_symbol_names!(out, n::GenNode) = (foreach(s -> push!(out, string(s)), free_symbols(n.expr)); out)

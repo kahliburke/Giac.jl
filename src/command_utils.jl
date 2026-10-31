@@ -499,10 +499,10 @@ collect(x^2 - 4x + 4)  # Returns (x-2)^2
 Base.collect(expr::GiacExpr)::GiacExpr = giac_cmd(:collect, expr)
 
 
-Base.zero(::GiacExpr)::GiacExpr = giac_eval("0")
-Base.zero(::Type{GiacExpr})::GiacExpr = giac_eval("0")
-Base.one(::GiacExpr)::GiacExpr = giac_eval("1")
-Base.one(::Type{GiacExpr})::GiacExpr = giac_eval("1")
+Base.zero(::GiacExpr)::GiacExpr = GiacExpr(_ZERO)
+Base.zero(::Type{GiacExpr})::GiacExpr = GiacExpr(_ZERO)
+Base.one(::GiacExpr)::GiacExpr = GiacExpr(_ONE)
+Base.one(::Type{GiacExpr})::GiacExpr = GiacExpr(_ONE)
 
 # ============================================================================
 # Base Math Fallbacks (Issue #71)

@@ -39,10 +39,10 @@ collect_terms(A::AbstractArray, vars) = map(e -> collect_terms(e, vars), A)
 # `monomial => coefficient` pairs in graded order, zero coefficients dropped
 function _collected(e::GiacExpr, vars)
     varnames = [string(v) for v in (vars isa GiacExpr ? (vars,) : vec(collect(vars)))]
-    depends(f) = any(s -> string(s) in varnames, free_symbols(f))
+    depends(f) = !isdisjoint(_symbol_names(_node(f)), varnames)
     # key => (monomial, its order key, coefficient terms)
     groups = Dict{String, Tuple{GiacExpr, Vector{Int}, Vector{GiacExpr}}}()
-    for term in _sum_terms(Commands.expand(e))
+    for term in _sum_terms(GiacExpr(_expand(_node(e))))
         fs = _product_factors(term)
         # powers of the variables in their order, then other factors (`sin(x1)`)
         mono = sort!(filter(depends, fs); by = f -> (_base_index(f, varnames), string(f)))
@@ -59,8 +59,10 @@ function _collected(e::GiacExpr, vars)
     out = Pair{GiacExpr, GiacExpr}[]
     for key in sort!(collect(keys(groups)); by = k -> (groups[k][2], k))
         m, _, cs = groups[key]
-        c = Commands.normal(reduce(+, cs))
-        iszero(c) || push!(out, m => c)
+        c = reduce(+, cs)
+        _has_denominator(_node(c)) && (c = Commands.normal(c))
+        # a coefficient that cancels is the number 0 by now (summed in normal form, or normal'd)
+        (n = _node(c); n isa NumNode && iszero(n.v)) || push!(out, m => c)
     end
     return out
 end

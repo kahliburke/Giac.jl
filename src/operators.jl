@@ -103,6 +103,8 @@ Note: This performs symbolic equality check, not numerical.
 """
 function Base.:(==)(a::GiacExpr, b::GiacExpr)::Bool
     isequal(a, b) && return true
+    na, nb = _node(a), _node(b)
+    na isa NumNode && nb isa NumNode && return na.v == nb.v
     with_giac_lock() do
         return _giac_equal(a.ptr, b.ptr)
     end
