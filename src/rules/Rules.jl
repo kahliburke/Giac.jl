@@ -43,11 +43,11 @@ using ..Giac: Giac, GiacExpr, giac_identifier, iscall, arguments, operation, sym
 
 export @rule, @rules, rewrite
 export is_free, depends_on, of_degree, is_positive, is_negative, is_nonnegative, is_real,
-       is_integer_valued, in_interval
+       is_integer_valued, in_interval, is_number, multiple_of
 export @pattern, @match
 export simplest, expression_size, standard_transforms, Transform, goal_cost
 export rule, inverse, equivalent, verify
-export identities, IdentityCatalog
+export identities, IdentityCatalog, function_identities
 export log_expand, log_combine, power_expand, power_combine, exp_expand, exp_combine, trig_simplify
 
 include("patterns.jl")
@@ -58,6 +58,7 @@ include("rewrite.jl")
 include("queries.jl")
 include("identities.jl")
 include("library.jl")
+include("function_rules.jl")
 include("verify.jl")
 include("transforms.jl")
 include("search.jl")

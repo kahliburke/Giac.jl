@@ -214,7 +214,8 @@ const _RELATIONS = Dict(:< => "<", :> => ">", :<= => "\\le", :>= => "\\ge", :(==
 const _PREDICATE_LATEX = Dict(
     :is_positive => a -> a * " > 0", :is_negative => a -> a * " < 0",
     :is_nonnegative => a -> a * " \\ge 0", :is_real => a -> a * " \\in \\mathbb{R}",
-    :is_integer => a -> a * " \\in \\mathbb{Z}", :is_integer_valued => a -> a * " \\in \\mathbb{Z}")
+    :is_integer => a -> a * " \\in \\mathbb{Z}", :is_integer_valued => a -> a * " \\in \\mathbb{Z}",
+    :is_number => a -> a * " \\text{ a number}")
 
 # a condition: comparisons of math typeset, `&&` as "and", `is_free(a, x)` as "a free of x"
 function _condition_latex(c)
@@ -225,6 +226,14 @@ function _condition_latex(c)
         haskey(_RELATIONS, op) && _is_math(_plain(a)) && _is_math(_plain(b)) &&
             return _side_latex(a) * " " * _RELATIONS[op] * " " * _side_latex(b)
         op === :is_free && return _side_latex(a) * " \\text{ free of } " * _side_latex(b)
+    end
+    if c isa Expr && c.head === :call && length(c.args) == 3 && c.args[1] === :multiple_of
+        period = c.args[3] isa GiacExpr ? Giac.giac_latex(c.args[3]) : _side_latex(c.args[3])
+        return _side_latex(c.args[2]) * " \\in " * period * "\\,\\mathbb{Z}"
+    end
+    if c isa Expr && c.head === :call && c.args[1] === :! && length(c.args) == 2 &&
+       c.args[2] isa Expr && c.args[2].head === :call && c.args[2].args[1] === :iszero
+        return _side_latex(c.args[2].args[2]) * " \\ne 0"
     end
     if c isa Expr && c.head === :call && length(c.args) == 4 && c.args[1] === :in_interval
         bound(v) = v isa GiacExpr ? Giac.giac_latex(v) : _side_latex(v)

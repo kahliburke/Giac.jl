@@ -113,3 +113,25 @@ function (p::InInterval)(e)
     return e isa GiacExpr && is_nonnegative(e - p.lo) && is_nonnegative(p.hi - e)
 end
 _float(e::GiacExpr) = Float64(Giac.to_julia(Giac.Commands.evalf(e)))
+
+"""
+    is_number(e)
+
+Whether `e` is a number (an integer, rational or float): for a constant factor, as in a linear
+function's `f(c*x) = c*f(x)`.
+"""
+is_number(e) = _number(e) !== nothing
+
+"""
+    multiple_of(T)
+    multiple_of(e, T)
+
+A test for an integer multiple of `T` (`4π` for `T = 2π`; also `2nπ` for `n` declared
+`::integer`).
+"""
+struct MultipleOf
+    period::GiacExpr
+end
+multiple_of(T) = MultipleOf(convert(GiacExpr, T))
+multiple_of(e, T) = multiple_of(T)(e)
+(p::MultipleOf)(e) = is_integer_valued(Giac.Commands.normal(convert(GiacExpr, e) / p.period))

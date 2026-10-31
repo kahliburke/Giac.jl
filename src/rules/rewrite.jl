@@ -105,7 +105,14 @@ function _rebuild_args(f, e::GiacExpr)
 end
 
 # A call of an undefined function `f(a, b)` is Giac's `of(f, a, b)`; the name itself is callable.
-_rebuild(e::GiacExpr, args) = symb_funcname(e) == "of" ? args[1](args[2:end]...) : operation(e)(args...)
+# A rebuilt sum or product has its like terms collected (`regroup`: `f(t) + f(t)` is `2f(t)`,
+# `x*x` is `x^2`), which Giac's arithmetic leaves as written; nothing is expanded.
+function _rebuild(e::GiacExpr, args)
+    h = symb_funcname(e)
+    h == "of" && return args[1](args[2:end]...)
+    v = operation(e)(args...)
+    return h in ("+", "*") ? Giac.invoke_cmd(:regroup, v) : v
+end
 
 # One rewrite at the `count[]`th place a rule applies, in the given order: `(result, rule)`, or
 # `nothing` if there are fewer places.

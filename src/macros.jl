@@ -298,6 +298,13 @@ interval `(a, b)`. Assumptions are GIAC state, global per name: each declaration
 was assumed about the name before (a declaration without a tag leaves it with none).
 `assuming` adds to a declared assumption for the length of a block.
 
+A function variable can carry properties, which `simplest` and `Rules.function_identities()`
+use: `odd`, `even`, `involution` (f(f(x)) = x), `additive`, `linear` (additive, and constant
+factors come out), `periodic(T)`, `inverse_of(g)`, or a tuple of them.
+```julia
+@giac_var φ(x)::odd ψ(t)::(even, periodic(2π))
+```
+
 Single-variable function (NEW):
 ```julia
 @giac_var u(t)        # Creates u as GiacExpr representing "u(t)"
@@ -344,6 +351,14 @@ desolve([tau * diff(u, t) + u ~ U0, u(0) ~ 1], u)
 # See also
 - [`giac_eval`](@ref): For evaluating string expressions
 """
+# a function's property tag as code: names (`odd`) quoted, calls (`periodic(2π)`) evaluated with
+# `π` exact rather than a float
+_property_code(tag) = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) :
+                      tag isa Expr && tag.head === :tuple ? Expr(:tuple, map(_property_code, tag.args)...) : _exact_pi(tag)
+_exact_pi(ex::Symbol) = ex in (:π, :pi) ? :($(GlobalRef(Base, :convert))($GiacExpr, $(Base.MathConstants.π))) : esc(ex)
+_exact_pi(ex::Expr) = Expr(ex.head, (ex.head === :call && i == 1 ? esc(a) : _exact_pi(a) for (i, a) in enumerate(ex.args))...)
+_exact_pi(ex) = ex
+
 macro giac_var(args...)
     # Validate at least one argument
     if isempty(args)
@@ -364,9 +379,11 @@ macro giac_var(args...)
             varname, giac_string = _process_giac_var_arg(decl)
             push!(exprs, :($(esc(varname)) = giac_identifier($giac_string)))
             push!(varnames, varname)
-            # a function of other variables, `u(t)`, takes no assumptions
-            decl isa Expr && (tag === nothing ? continue :
-                throw(ArgumentError("@giac_var: assumptions apply to variables, not to $decl")))
+            # a function of other variables, `u(t)`, takes properties of functions instead
+            if decl isa Expr
+                push!(exprs, :(_declare_function!($(esc(varname)), $(_property_code(tag)))))
+                continue
+            end
         end
         # every declaration starts the name afresh, without assumptions from earlier code
         tagex = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) : esc(tag)

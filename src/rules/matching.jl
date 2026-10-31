@@ -31,6 +31,11 @@ function _match(p::Term, s, b, k)
         return _match_ac(p.head, p.args, 1, _ac_args(p.head, s), b, (b′, rest) -> isempty(rest) ? k(b′) : nothing, true)
     end
     p.head == "^" && return _match_power(p, s, b, k)
+    # `-~x` also matches an expression written mostly with minus signs, as its negation: Giac
+    # writes -(t + 1) as -t - 1
+    if p.head == "-" && length(p.args) == 1 && _head(s) != "-" && _mostly_negative(s)
+        return _match(p.args[1], -s, b, k)
+    end
     _head(s) == p.head || return nothing
     return _match_seq(p.args, arguments(s), 1, 1, b, k)
 end
@@ -74,6 +79,15 @@ function _match_seq(ps, ss, i, j, b, k)
         return _match(p, p.default, b, b′ -> _match_seq(ps, ss, i + 1, j, b′, k))
     end
     return _match(p, ss[j], b, b′ -> _match_seq(ps, ss, i + 1, j + 1, b′, k))
+end
+
+# a negative number, a product with a negative coefficient, or a sum most of whose terms are
+# such (the first one deciding a tie)
+function _mostly_negative(s::GiacExpr)
+    _head(s) == "+" || return first(_split_term(s)) < 0
+    signs = [first(_split_term(t)) < 0 for t in arguments(s)]
+    n = count(signs)
+    return 2n > length(signs) || 2n == length(signs) && first(signs)
 end
 
 "The terms of `s` as arguments of `head`: a negated product is a product with a factor `-1`."

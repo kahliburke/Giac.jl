@@ -44,7 +44,7 @@ using Giac.Rules
 
     @testset "predicates and declined matches" begin
         squares = @rule (~v::is_identifier)^2 => 100 * ~v
-        @test R(x^2 + (x + 1)^2, squares) == "100*x+(x+1)^2"
+        @test R(x^2 + (x + 1)^2, squares) in ("100*x+(x+1)^2", "(x+1)^2+100*x")     # (x+1)^2 untouched
         cubes = @rule ~v^~n => (string(~n) == "3" ? ~v : nothing)     # `~v^~n` reads as `(~v)^(~n)`
         @test R(x^2 + y^3, cubes) == "x^2+y"
     end
@@ -369,5 +369,32 @@ using Giac.Rules
         @test in_interval(v, 0, 1) && !in_interval(v, 0, 1 // 2) && in_interval(1 // 3, 0, 1)
         @test !in_interval(x, 0, 1)
         @giac_var k v
+    end
+
+    @testset "properties of functions" begin
+        @giac_var t n::integer
+        @giac_var φ(t)::odd ψ(t)::(even, periodic(2π)) L(t)::linear h(t)::involution
+        @giac_var g(t) f(t)::inverse_of(g)
+        F(name) = Giac.giac_identifier(name)
+        φ_, ψ_, L_, h_, f_, g_ = F("φ"), F("ψ"), F("L"), F("h"), F("f"), F("g")
+        rules = function_identities()
+        @test length(rules) == 9
+        @test rewrite(φ_(-(t^2 + 1)), rules) == -φ_(t^2 + 1)          # Giac writes the argument -t^2-1
+        @test string(rewrite(φ_(t - 1), rules)) == string(φ_(t - 1))   # not mostly negative: unchanged
+        @test rewrite(ψ_(-t), rules) == ψ_(t)
+        p = convert(GiacExpr, π)
+        @test string(rewrite(ψ_(t + 4p) + ψ_(t - 2p) + ψ_(t + 2n * p), rules)) == "3*ψ(t)"
+        @test string(rewrite(ψ_(t + p), rules)) == string(ψ_(t + p))   # π is not a period
+        @test rewrite(L_(3t + t^2), rules) == 3L_(t) + L_(t^2)
+        @test rewrite(h_(h_(t + 1)), rules) == t + 1
+        @test rewrite(f_(g_(t)) + g_(f_(a)), rules) == t + a
+        @test simplest(φ_(-t) + φ_(t) + sin(t)^2 + cos(t)^2) == 1
+        tex = sprint(show, MIME("text/latex"), rules)
+        @test occursin("2 \\pi", tex) && occursin("\\varphi", tex)
+        @test_throws ArgumentError Giac._declare_function!(φ_(t), :bouncy)
+        # a declaration without properties drops them
+        @giac_var φ(t) ψ(t) L(t) h(t) f(t)
+        @test isempty(function_identities())
+        @giac_var n
     end
 end

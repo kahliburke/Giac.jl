@@ -46,7 +46,7 @@ standard_transforms() = Any[
     _at_calls(:texpand, "expand trig", _TRIG),
     _giac(:trigsin, "in sin"), _giac(:trigcos, "in cos"), _giac(:trigtan, "in tan"),
     _giac(:exp2pow, "exp to powers"),
-    identities(), log_expand(), power_expand()]
+    identities(), log_expand(), power_expand(), function_identities()]
 
 # ---------------------------------------------------------------------------------------------
 # Goals: what "simplest" means

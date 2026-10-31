@@ -80,3 +80,59 @@ function assuming(f, conditions::GiacExpr...)
         foreach(v -> _declare!(v, _declared(v)), vars)     # back to the declared assumption, or none
     end
 end
+
+# ---------------------------------------------------------------------------------------------
+# Properties of functions: `@giac_var φ(x)::odd`, `ψ(t)::(even, periodic(2π))`
+# ---------------------------------------------------------------------------------------------
+
+"""
+    periodic(T)
+
+A property for a function declared with `@giac_var`: `@giac_var ψ(t)::periodic(2π)` makes
+`ψ(t + 2π)`, `ψ(t - 4π)` and the like simplify to `ψ(t)`.
+"""
+periodic(T) = Periodic(convert(GiacExpr, T))
+struct Periodic
+    period::GiacExpr
+end
+
+"""
+    inverse_of(g)
+
+A property for a function declared with `@giac_var`: `@giac_var f(x)::inverse_of(g)` makes
+`f(g(x))` and `g(f(x))` simplify to `x`. `g` is another function variable (`@giac_var g(x)`).
+"""
+inverse_of(g) = InverseOf(_function_name(g))
+struct InverseOf
+    name::String
+end
+
+const _FUNCTION_PROPERTIES = (:odd, :even, :involution, :additive, :linear)
+const _FUNCTION_FACTS = Dict{String, Vector{Any}}()
+
+# the name of a function variable `f(x)` (or of `f` itself)
+function _function_name(f::GiacExpr)
+    is_identifier(f) && return string(f)
+    iscall(f) && symb_funcname(f) == "of" && return string(first(arguments(f)))
+    throw(ArgumentError("$f is not a function variable; declare one with `@giac_var f(x)`"))
+end
+
+"""
+Record exactly the properties `tags` for the function variable `f` (dropping any it had):
+`:odd`, `:even`, `:involution`, `:additive`, `:linear`, `periodic(T)`, `inverse_of(g)`, a tuple
+of these, or `nothing`. Used by `@giac_var`; the rules they give are `Rules.function_identities()`.
+"""
+function _declare_function!(f::GiacExpr, tags)
+    list = tags === nothing ? Any[] : tags isa Tuple ? collect(Any, tags) : Any[tags]
+    for t in list
+        t in _FUNCTION_PROPERTIES || t isa Periodic || t isa InverseOf ||
+            throw(ArgumentError("unknown property `$t` for a function; use one of $(join(_FUNCTION_PROPERTIES, ", ")), periodic(T) or inverse_of(g)"))
+    end
+    name = _function_name(f)
+    lock(_DECLARED_LOCK) do
+        isempty(list) ? delete!(_FUNCTION_FACTS, name) : (_FUNCTION_FACTS[name] = list)
+    end
+    return f
+end
+
+_function_facts() = lock(() -> copy(_FUNCTION_FACTS), _DECLARED_LOCK)
