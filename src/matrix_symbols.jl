@@ -57,11 +57,36 @@ struct MatExpr
     terms::Vector{Pair{Word, GiacExpr}}
 end
 
+"""
+    Kron
+
+The Kronecker product `A ⊗ B` as one factor of a product, of two single products `A` and `B`
+(see `kron`). It is kept untransposed and to the first power: (A⊗B)ᵀ = Aᵀ⊗Bᵀ, (A⊗B)ᵏ = Aᵏ⊗Bᵏ,
+and neighbours multiply as (A⊗B)(C⊗D) = AC⊗BD.
+"""
+struct Kron
+    A::MatExpr
+    B::MatExpr
+end
+
+# Sizes multiply under ⊗: a product of names is the name `m*n` (factors sorted)
+_dim_factors(d::Int) = d == 1 ? String[] : [string(d)]
+_dim_factors(d::Symbol) = split(string(d), "*")
+function _dim_mul(a::Dim, b::Dim)
+    a isa Int && b isa Int && return a * b
+    fs = sort!(vcat(_dim_factors(a), _dim_factors(b)))
+    ints = prod((parse(Int, f) for f in fs if occursin(r"^\d+$", f)); init = 1)
+    names = [f for f in fs if !occursin(r"^\d+$", f)]
+    isempty(names) && return ints
+    return Symbol(join(vcat(ints == 1 ? String[] : [string(ints)], names), "*"))
+end
+
 # ---------------------------------------------------------------------------------------------
 # Keys: a word written as text, to order terms and compare words
 # ---------------------------------------------------------------------------------------------
 
 _base_key(b::MatrixSymbol) = string(b.name)
+_base_key(b::Kron) = "kron(" * _plain(b.A) * "," * _plain(b.B) * ")"
 _base_key(b::MatExpr) = "(" * _plain(b) * ")"
 _factor_key(f::Factor) = _base_key(f.base) * (f.transposed ? "'" : "") * (f.power == 1 ? "" : "^" * string(f.power))
 _word_key(w::Word) = join(map(_factor_key, w), "*")
@@ -77,6 +102,7 @@ _rows(f::Factor) = f.transposed ? _cols(f.base) : _rows(f.base)
 _cols(f::Factor) = f.transposed ? _rows(f.base) : _cols(f.base)
 _rows(b::MatrixSymbol) = b.rows; _cols(b::MatrixSymbol) = b.cols
 _rows(b::MatExpr) = b.rows; _cols(b::MatExpr) = b.cols
+_rows(b::Kron) = _dim_mul(b.A.rows, b.B.rows); _cols(b::Kron) = _dim_mul(b.A.cols, b.B.cols)
 
 # ---------------------------------------------------------------------------------------------
 # Canonical words
@@ -87,6 +113,13 @@ _rows(b::MatExpr) = b.rows; _cols(b::MatExpr) = b.cols
 # sum under an inverse has the transpose taken inside.
 function _canonical(f::Factor)
     b = f.base
+    if b isa Kron
+        (f.transposed || f.power != 1) || return (1, f)
+        A, B = f.transposed ? (transpose(b.A), transpose(b.B)) : (b.A, b.B)
+        k = f.power
+        A, B = k == 1 ? (A, B) : k < 0 ? (inv(A)^(-k), inv(B)^(-k)) : (A^k, B^k)
+        return _kron_factor(A, B)
+    end
     if b isa MatExpr
         return f.transposed ? (1, Factor(transpose(b), false, f.power)) : (1, f)
     end
@@ -111,7 +144,13 @@ function _normalize(w::Word)
         s, f = _canonical(f)
         sign *= s
         f.power == 0 && continue
-        if !isempty(out) && _same_base(out[end], f) && out[end].transposed == f.transposed
+        if !isempty(out) && out[end].base isa Kron && f.base isa Kron && _kron_fits(out[end].base, f.base)
+            # (A⊗B)(C⊗D) = AC⊗BD
+            a, b = pop!(out).base, f.base
+            s, k = _kron_factor(a.A * b.A, a.B * b.B)
+            sign *= s
+            k === nothing || push!(out, k)
+        elseif !isempty(out) && _same_base(out[end], f) && out[end].transposed == f.transposed
             p = out[end].power + f.power
             pop!(out)
             p == 0 || push!(out, Factor(f.base, f.transposed, p))
@@ -121,6 +160,21 @@ function _normalize(w::Word)
     end
     return sign, out
 end
+
+# A ⊗ B of single products as a factor, with the sign that comes out of them; no factor (nothing)
+# for I ⊗ I, which is the identity
+function _kron_factor(A::MatExpr, B::MatExpr)
+    (length(A.terms) == 1 && length(B.terms) == 1) || throw(ArgumentError("a Kronecker factor holds single products"))
+    (wa, ca), (wb, cb) = only(A.terms), only(B.terms)
+    c = Commands.normal(ca * cb)
+    sign = string(c) == "1" ? 1 : string(c) == "-1" ? -1 :
+           throw(ArgumentError("a Kronecker factor's coefficient is ±1, got $c"))
+    isempty(wa) && isempty(wb) && return (sign, nothing)
+    unit(w, M) = MatExpr(M.rows, M.cols, [w => one(GiacExpr)])
+    return (sign, Factor(Kron(unit(wa, A), unit(wb, B)), false, 1))
+end
+
+_kron_fits(a::Kron, b::Kron) = _same_dim(a.A.cols, b.A.rows) && _same_dim(a.B.cols, b.B.rows)
 
 # the transpose of a word: reversed, each factor transposed
 function _transpose_word(w::Word)
@@ -319,6 +373,7 @@ Base.hash(A::MatExpr, h::UInt) = hash(_plain(A), hash(size(A), h))
 # Plain text for an expression. With `readable`, traces and determinants in coefficients are written
 # as such; without, as Giac's names for them, which is the form used as a key.
 function _plain_factor(f::Factor, readable::Bool = false)
+    f.base isa Kron && return "kron(" * _plain(f.base.A, readable) * ", " * _plain(f.base.B, readable) * ")"
     b = f.base isa MatrixSymbol ? string(f.base.name) : "(" * _plain(f.base, readable) * ")"
     orthogonal = f.base isa MatrixSymbol && _has(f.base, :orthogonal)
     if orthogonal && f.power < 0
@@ -349,6 +404,7 @@ _symbol_latex(s::MatrixSymbol) = _entry_latex(giac_identifier(string(s.name)))
 _dim_latex(d::Dim) = d isa Int ? string(d) : _entry_latex(giac_identifier(string(d)))
 
 function _factor_latex(f::Factor)
+    f.base isa Kron && return "\\left(" * _matexpr_latex(f.base.A) * " \\otimes " * _matexpr_latex(f.base.B) * "\\right)"
     if f.base isa MatExpr
         b = "\\left(" * _matexpr_latex(f.base) * "\\right)"
     else
@@ -384,6 +440,9 @@ function _term_latex(w::Word, c::GiacExpr)
     p = _split(root)
     q = p.coef isa Rational ? denominator(p.coef) : 1
     pn = p.coef isa Rational ? numerator(p.coef) : p.coef
+    # a term that is only a Kronecker product needs no parentheses: ⊗ binds tighter than +
+    alone = isone(pn) && isempty(p.num) && isempty(p.den) && isone(q) && length(w) == 1 && w[1].base isa Kron
+    alone && (word = chop(word; head = 6, tail = 7))
     above = isone(pn) && isempty(p.num) ? word : _factors_tex(pn, _sorted(p.num, ctx), ctx) * " " * word
     (isempty(p.den) && isone(q)) && return (p.sign, above)
     den = _sorted(p.den, ctx)
@@ -465,7 +524,9 @@ end
 function _trace_word(w::Word, n::Dim)
     sign, cw = _cyclic_canonical(w)
     sign == 0 && return zero(GiacExpr)
-    v = isempty(cw) ? _dim_expr(n) : _trace_atom(cw)
+    v = isempty(cw) ? _dim_expr(n) :
+        length(cw) == 1 && cw[1].base isa Kron ? tr(cw[1].base.A) * tr(cw[1].base.B) :     # tr(A⊗B) = tr A tr B
+        _trace_atom(cw)
     return sign == 1 ? v : -v
 end
 
@@ -521,6 +582,8 @@ end
 
 function _det_factor(f::Factor)
     b = f.base
+    # det(A⊗B) = det(A)ᵐ det(B)ⁿ for A n×n, B m×m
+    b isa Kron && return det(b.A)^_dim_expr(b.B.rows) * det(b.B)^_dim_expr(b.A.rows)
     b isa MatExpr && return _det_atom(b)^f.power
     _has(b, :orthogonal) && return isodd(f.power) ? _det_atom(b) : one(GiacExpr)
     _has(b, :skew) && b.rows isa Int && isodd(b.rows) && return zero(GiacExpr)
@@ -535,8 +598,9 @@ end
     @matsym A[n, n] P[n, n]::posdef Q[n, n]::orthogonal x[n] B[n, m]
 
 Declare symbolic matrices: each name is bound to a [`MatExpr`](@ref) standing for a matrix of the
-given size, whose products do not commute. A size is a number or a name (`n`; use `\$k` for the
-value of a Julia variable `k`); `x[n]` is an `n × 1` column. Tags after `::` (or a tuple of them)
+given size, whose products do not commute. A size is a number, a name (`n`; use `\$k` for the
+value of a Julia variable `k`), or a product of them (`m*n`, the size of a Kronecker product);
+`x[n]` is an `n × 1` column. Tags after `::` (or a tuple of them)
 are properties: `symmetric`, `skew`, `diagonal` (symmetric), `orthogonal`, `posdef` and `negdef`
 (symmetric and invertible), `invertible`.
 
@@ -557,12 +621,7 @@ macro matsym(args...)
         (spec isa Expr && spec.head === :ref && spec.args[1] isa Symbol && 2 <= length(spec.args) <= 3) ||
             throw(ArgumentError("@matsym expects declarations like A[n, n] or x[n], got $spec"))
         name = spec.args[1]
-        dims = Any[]
-        foreach(spec.args[2:end]) do d
-            push!(dims, d isa Integer ? d : d isa Symbol ? QuoteNode(d) :
-            d isa Expr && d.head === :$ ? esc(d.args[1]) :
-            throw(ArgumentError("@matsym: a size is a number, a name, or \$value; got $d")))
-        end
+        dims = Any[_size_code(d) for d in spec.args[2:end]]
         length(dims) == 1 && push!(dims, 1)
         tags = tag === nothing ? Symbol[] : tag isa Symbol ? [tag] :
                tag isa Expr && tag.head === :tuple && all(a -> a isa Symbol, tag.args) ? collect(Symbol, tag.args) :
@@ -571,6 +630,15 @@ macro matsym(args...)
         push!(names, name)
     end
     return Expr(:block, code..., Expr(:tuple, map(esc, names)...))
+end
+
+# a size in a declaration as code: a number, a name, `\$value`, or a product of them (`m*n`)
+function _size_code(d)
+    d isa Integer && return d
+    d isa Symbol && return QuoteNode(d)
+    d isa Expr && d.head === :$ && return esc(d.args[1])
+    d isa Expr && d.head === :call && d.args[1] === :* && return :(reduce($(GlobalRef(@__MODULE__, :_dim_mul)), ($(map(_size_code, d.args[2:end])...),)))
+    throw(ArgumentError("@matsym: a size is a number, a name, \$value, or a product of them; got $d"))
 end
 
 function _declare_matsym(name::Symbol, rows, cols, props::Tuple)
@@ -649,7 +717,9 @@ function _matrix_values(pairs)
 end
 
 _dim_value(d::Int, dims) = d
-_dim_value(d::Symbol, dims) = haskey(dims, d) ? dims[d] : throw(ArgumentError("no size given for $d"))
+_dim_value(d::Symbol, dims) = occursin('*', string(d)) ? prod(_dim_factor_value(f, dims) for f in split(string(d), "*")) :
+                              haskey(dims, d) ? dims[d] : throw(ArgumentError("no size given for $d"))
+_dim_factor_value(f, dims) = occursin(r"^\d+$", f) ? parse(Int, f) : _dim_value(Symbol(f), dims)
 
 function _evaluate(M::MatExpr, values, dims)
     m, n = _dim_value(M.rows, dims), _dim_value(M.cols, dims)
@@ -666,6 +736,7 @@ end
 _word_matrix(w::Word, values, dims) = reduce(*, (_factor_value(f, values, dims) for f in w))
 
 function _factor_value(f::Factor, values, dims)
+    f.base isa Kron && return kron(_evaluate(f.base.A, values, dims), _evaluate(f.base.B, values, dims))
     B = f.base isa MatExpr ? _evaluate(f.base, values, dims) :
         haskey(values, f.base.name) ? values[f.base.name] :
         throw(ArgumentError("substitute: no entries given for $(f.base.name)"))
@@ -823,5 +894,6 @@ map_coefficients(f, A::MatExpr) = _matexpr(A.rows, A.cols, [w => convert(GiacExp
 
 # the matrix symbols in an atom's payload: a symbol, a word, or an expression
 _symbols_in(s::MatrixSymbol) = [s]
+_symbols_in(k::Kron) = unique(s -> s.name, vcat(_symbols_in(k.A), _symbols_in(k.B)))
 _symbols_in(w::Word) = unique(s -> s.name, reduce(vcat, (_symbols_in(f.base) for f in w); init = MatrixSymbol[]))
 _symbols_in(M::MatExpr) = unique(s -> s.name, reduce(vcat, (_symbols_in(w) for (w, _) in M.terms); init = MatrixSymbol[]))

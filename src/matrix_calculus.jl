@@ -60,6 +60,12 @@ end
 
 function _dfactor(f::Factor, vary)
     B = f.base
+    if B isa Kron
+        # d(A⊗B) = dA⊗B + A⊗dB (a Kronecker factor is untransposed, to the first power)
+        dA, dB = _differential(B.A, vary), _differential(B.B, vary)
+        D = kron(dA, B.B) + kron(B.A, dB)
+        return iszero(D) ? nothing : D
+    end
     if B isa MatrixSymbol
         _varies(B, vary) || return nothing
         X, dX = MatExpr(B), MatExpr(_dsym(B))
