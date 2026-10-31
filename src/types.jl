@@ -527,7 +527,7 @@ function D(expr::GiacExpr)
     Base.depwarn(
         "D($funcname) is deprecated; use Differential($(args[1]))($funcname) instead. " *
         "D will be removed in the next published release.",
-        :D,
+        :D; force = true,       # a transitional alias: warn even without --depwarn
     )
     return DerivativeExpr(expr, funcname, Tuple{String, Int}[(args[1], 1)])
 end
@@ -553,7 +553,7 @@ function D(expr::GiacExpr, n::Int)
     Base.depwarn(
         "D($funcname, $n) is deprecated; use Differential($(args[1])) applied $n times to $funcname instead. " *
         "D will be removed in the next published release.",
-        :D,
+        :D; force = true,       # a transitional alias: warn even without --depwarn
     )
     return DerivativeExpr(expr, funcname, Tuple{String, Int}[(args[1], n)])
 end
@@ -568,7 +568,7 @@ function D(d::DerivativeExpr)
     Base.depwarn(
         "D(::DerivativeExpr) is deprecated; use Differential(var)(d) instead. " *
         "D will be removed in the next published release.",
-        :D,
+        :D; force = true,       # a transitional alias: warn even without --depwarn
     )
     var, n = d.steps[1]
     return DerivativeExpr(d.base_expr, d.funcname, Tuple{String, Int}[(var, n + 1)])
@@ -587,7 +587,7 @@ function D(d::DerivativeExpr, n::Int)
     Base.depwarn(
         "D(::DerivativeExpr, $n) is deprecated; use Differential(var) applied $n times to d instead. " *
         "D will be removed in the next published release.",
-        :D,
+        :D; force = true,       # a transitional alias: warn even without --depwarn
     )
     var, k = d.steps[1]
     return DerivativeExpr(d.base_expr, d.funcname, Tuple{String, Int}[(var, k + n)])
@@ -603,7 +603,7 @@ function D(expr::GiacExpr, var::GiacExpr)
     Base.depwarn(
         "D(expr, var) is deprecated; use Differential($(string(var)))(expr) instead. " *
         "D will be removed in the next published release.",
-        :D,
+        :D; force = true,       # a transitional alias: warn even without --depwarn
     )
     return Differential(var)(expr)
 end
@@ -615,7 +615,7 @@ function D(expr::GiacExpr, var::GiacExpr, n::Int)
     Base.depwarn(
         "D(expr, var, $n) is deprecated; use Differential($(string(var))) applied $n times to expr instead. " *
         "D will be removed in the next published release.",
-        :D,
+        :D; force = true,       # a transitional alias: warn even without --depwarn
     )
     parsed = _parse_function_args(string(expr))
     if parsed === nothing
@@ -629,7 +629,7 @@ function D(d::DerivativeExpr, var::GiacExpr)
     Base.depwarn(
         "D(::DerivativeExpr, var) is deprecated; use Differential($(string(var)))(d) instead. " *
         "D will be removed in the next published release.",
-        :D,
+        :D; force = true,       # a transitional alias: warn even without --depwarn
     )
     return Differential(var)(d)
 end

@@ -579,7 +579,7 @@
         @giac_var t u(t)
 
         @testset "D(u) emits depwarn pointing to Differential(t)(u)" begin
-            # @test_logs captures logs (including Base.depwarn) regardless of --depwarn flag.
+            # D warns with `force = true`, so the warning is logged without --depwarn too.
             @test_logs (:warn, r"D\(u\) is deprecated.*Differential\(t\)\(u\)") match_mode=:any D(u)
         end
 
