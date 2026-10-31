@@ -609,7 +609,9 @@ function _unsigned_product(p, c::_Ctx)
     dentex = _factors_tex(q, den, c)
     if c.exponent || c.style.fractions === :inline
         wrap(t, fs, k) = (length(fs) + (isone(k) ? 0 : 1) > 1) ? "\\left(" * t * "\\right)" : t
-        return wrap(numtex, num, pn) * "/" * wrap(dentex, den, q)
+        # a product above the line needs no parentheses: e^{-iEt/ħ}; one below does: e^{-t/(RC)}
+        above = any(f -> f isa _PSum, num) ? wrap(numtex, num, pn) : numtex
+        return above * "/" * wrap(dentex, den, q)
     end
     # a fraction in the numerator (∂L/∂q) would stack fractions: the number goes in front
     if (c.style.fractions === :front || occursin("\\frac", numtex)) && isempty(den) && !isempty(num)
