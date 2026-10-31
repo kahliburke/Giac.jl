@@ -232,6 +232,26 @@ end
     # notes are flush-left rows of an outer array; the steps between them stay aligned
     @test startswith(tex3, "\$\$\\begin{array}{l}\\text{by definition}") && count("&=", tex3) == 1
 
+    # `=` aligns across note groups; `@realign` starts a new alignment
+    widest(tex) = count("\\hphantom", tex)
+    d4 = @derivation begin
+        W
+        "note"
+        W
+    end
+    t4 = sprint(show, MIME("text/latex"), d4)
+    @test widest(t4) == 2                                        # both groups padded to one width
+    d5 = @derivation begin
+        W
+        @realign
+        "note"
+        q' * S * q
+    end
+    t5 = sprint(show, MIME("text/latex"), d5)
+    @test length(d5.rows) == 4 && d5.rows[2] == ("", "")
+    @test !occursin("hphantom{\\begin{matrix}W \\\\ q", t5)       # the segments don't share a width
+    @test count("&=", sprint(show, MIME("text/markdown"), d5)) == 2
+
     # markdown form: notes as paragraphs, steps as aligned display blocks
     md = sprint(show, MIME("text/markdown"), d3)
     @test startswith(md, "by definition\n\n\$\$\\begin{aligned}")

@@ -12,15 +12,20 @@ struct Derivation
 end
 
 function Base.show(io::IO, ::MIME"text/latex", d::Derivation)
-    any(_is_note, d.rows) || return print(io, "\$\$", _aligned(d.rows, ""), "\$\$")
+    rows = d.rows
+    any(r -> _is_note(r) || _is_realign(r), rows) || return print(io, "\$\$", _aligned(rows), "\$\$")
     # Notes are headings, flush left; each run of steps between them is an aligned block,
-    # indented. Every block's left column is as wide as the widest left side, so the `=` signs
-    # line up across blocks.
-    widest = "\\hphantom{\\begin{matrix}" * join((l for (l, _) in d.rows if !isempty(l)), " \\\\ ") * "\\end{matrix}}"
+    # indented. Within an alignment segment (the rows between `@realign` markers) every block's
+    # left column is as wide as the segment's widest left side, so the `=` signs line up across
+    # its blocks; a new segment starts a new column.
     parts, run = String[], Tuple{String, String}[]
-    flush() = isempty(run) || (push!(parts, "\\quad " * _aligned(run, widest)); empty!(run))
-    for row in d.rows
-        if _is_note(row)
+    pad = _segment_pad(rows, 1)
+    flush() = isempty(run) || (push!(parts, "\\quad " * _aligned(run, pad)); empty!(run))
+    for (k, row) in enumerate(rows)
+        if _is_realign(row)
+            flush()
+            pad = _segment_pad(rows, k + 1)
+        elseif _is_note(row)
             flush()
             push!(parts, last(row))
         else
@@ -48,7 +53,9 @@ function Base.show(io::IO, ::MIME"text/markdown", d::Derivation)
     flush() = isempty(run) ||
         (print(io, "\$\$\\begin{aligned}", join(("$l &= $r" for (l, r) in run), " \\\\ "), "\\end{aligned}\$\$\n\n"); empty!(run))
     for row in d.rows
-        if _is_note(row)
+        if _is_realign(row)
+            flush()
+        elseif _is_note(row)
             flush()
             print(io, _note_text(last(row)), "\n\n")
         else
@@ -61,8 +68,20 @@ end
 # a note row's `\text{…}` back as markdown text (its `$…$` math stays math)
 _note_text(tex) = replace(chop(tex; head = 6, tail = 1), "\\&" => "&", "\\%" => "%", "\\#" => "#")
 
-_is_note(row) = isempty(first(row))                  # a text row has no left side
+# an `@realign` marker: an empty row
+const _REALIGN = ("", "")
+_is_realign(row) = row == _REALIGN
+_is_note(row) = isempty(first(row)) && !_is_realign(row)     # a text row has no left side
 _is_note_part(p) = startswith(p, "\\text{")
+
+# An invisible box as wide as the widest left side in the segment starting at row `k` (up to the
+# next `@realign`); "" if the segment has no steps.
+function _segment_pad(rows, k)
+    stop = something(findnext(_is_realign, rows, k), length(rows) + 1) - 1
+    lefts = [l for (l, _) in rows[k:stop] if !isempty(l)]
+    isempty(lefts) && return ""
+    return "\\hphantom{\\begin{matrix}" * join(lefts, " \\\\ ") * "\\end{matrix}}"
+end
 
 # Vertical space comes from empty rows. KaTeX treats a positive `\\[gap]` as a minimum depth for
 # the row above, not as added space, so after a tall matrix it adds nothing; an empty row always
@@ -72,7 +91,7 @@ const _STEP_SPACER = " \\\\ \\\\[-0.9em] "
 const _NOTE_SPACER = " \\\\ \\rule{0pt}{1em} \\\\ "
 
 "An aligned block of steps; `pad` widens every left side to a common width (see `show`)."
-function _aligned(rows, pad)
+function _aligned(rows, pad = "")
     lines = (isempty(pad) ? "$l &= $r" : "$pad\\mathllap{$l} &= $r" for (l, r) in rows)
     return "\\begin{aligned}" * join(lines, _STEP_SPACER) * "\\end{aligned}"
 end
@@ -116,6 +135,7 @@ end
         lhs ~ expr         # shows  lhs (as written) = value; binds nothing
         lhs ~ mid ~ expr   # shows  lhs = mid (both as written) = value
         "a note"           # a line of text
+        @realign           # the steps below line up among themselves
     end
     @derivation simplify begin … end
 
@@ -124,6 +144,9 @@ code (typeset by Giac, unevaluated), the right side as computed. Values can be e
 arrays of expressions. `lhs ~ rhs` is for left sides that are not assignable, such as
 `diff(V, t) ~ ∇(V, x) ⋅ f`; in a chain `lhs ~ mid ~ … ~ expr`, every term but the last is shown
 as written. A string is shown as text; write it as `raw"…"` to include `\$…\$` math.
+
+The `=` signs line up across the whole derivation, notes included. `@realign` starts a new
+alignment from that point, for when one wide left side would push everything else to the right.
 
 An optional function before the block (`simplify`, `expand`, `factor`, or any function of one
 expression) is applied to each displayed value, entry by entry for arrays. Bound variables keep
@@ -174,6 +197,8 @@ function _derivation(simplifier, block)
         st isa LineNumberNode && (push!(out, st); continue)
         if _is_text(st)
             push!(out, :(push!($rows, _text_row($(esc(st))))))
+        elseif st isa Expr && st.head === :macrocall && st.args[1] === Symbol("@realign")
+            push!(out, :(push!($rows, _REALIGN)))     # a marker read here, never expanded
         elseif st isa Expr && st.head === :(=) && st.args[1] isa Symbol
             name, rhs = st.args
             push!(out, :($(esc(name)) = $(esc(rhs))), row(name, esc(name)))
