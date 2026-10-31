@@ -634,7 +634,7 @@ function _evaluate(M::MatExpr, values, dims)
                          _word_matrix(w, values, dims)
         R = R + _evaluate_scalar(c, values, dims) * P
     end
-    return R
+    return map(e -> invoke_cmd(:regroup, e), R)      # like terms collected, nothing expanded
 end
 
 # the matrix of a (nonempty) word
