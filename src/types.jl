@@ -53,15 +53,18 @@ mutable struct GiacExpr
     node::Union{Nothing, Node}       # the tree, nothing until it is made
     native::Bool                     # built in Julia: written from the tree
     args::Union{Nothing, Vector{GiacExpr}}   # `arguments`, once asked for
+    # a GIAC object the tree has replaced (its form normalized in reading it), kept until the
+    # expression is freed, as a handle to it may still be in use
+    replaced::Ptr{Cvoid}
 
     function GiacExpr(ptr::Ptr{Cvoid})
-        obj = new(ptr, nothing, false, nothing)
+        obj = new(ptr, nothing, false, nothing, C_NULL)
         if ptr != C_NULL
             finalizer(_finalize_giacexpr, obj)
         end
         return obj
     end
-    GiacExpr(n::Node, ::Val{:native}) = new(C_NULL, n, true, nothing)
+    GiacExpr(n::Node, ::Val{:native}) = new(C_NULL, n, true, nothing, C_NULL)
 end
 GiacExpr(x::GiacExpr) = x
 # an expression from a tree; an opaque GIAC object stays the expression it came from
@@ -73,10 +76,12 @@ GiacExpr(n::Node) = n isa GenNode ? n.expr : GiacExpr(n, Val(:native))
 Cleanup function for GiacExpr. Called by the garbage collector.
 """
 function _finalize_giacexpr(expr::GiacExpr)
-    p = getfield(expr, :ptr)
-    if p != C_NULL
-        _giac_free_expr(p)
-        setfield!(expr, :ptr, C_NULL)
+    for f in (:ptr, :replaced)
+        p = getfield(expr, f)
+        if p != C_NULL
+            _giac_free_expr(p)
+            setfield!(expr, f, C_NULL)
+        end
     end
     nothing
 end
@@ -109,20 +114,28 @@ function _node(e::GiacExpr)
     n = getfield(e, :node)
     n === nothing || return n
     p = getfield(e, :ptr)
-    n = with_giac_lock() do
+    n, rewritten = with_giac_lock() do
+        _REWRITTEN[] = false
         gen = _get_gen(p)
-        gen === nothing ? nothing : _node_from_gen(gen)
+        (gen === nothing ? nothing : _node_from_gen(gen)), _REWRITTEN[]
     end
     # an object the tree does not model is this expression itself
     n = n === nothing || n isa GenNode ? GenNode(e, _giac_expr_to_string(p)) : n
     setfield!(e, :node, n)
+    if rewritten && !(n isa GenNode)
+        # the tree normalized GIAC's form (e^a e^b as e^{a+b}): the tree is the expression, and
+        # GIAC is given it from now on
+        setfield!(e, :replaced, p)
+        setfield!(e, :ptr, C_NULL)
+        setfield!(e, :native, true)
+    end
     return n
 end
 
 # String conversion for GiacExpr: an expression built in Julia is written from its tree, one
 # from GIAC as GIAC writes it
 function Base.string(expr::GiacExpr)::String
-    n = getfield(expr, :node)
+    n = getfield(expr, :ptr) == C_NULL ? getfield(expr, :node) : _node(expr)
     getfield(expr, :native) && n !== nothing && return _str(n)
     p = getfield(expr, :ptr)
     p == C_NULL && return n === nothing ? "<null GiacExpr>" : _str(n)

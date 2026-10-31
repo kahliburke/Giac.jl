@@ -202,6 +202,7 @@ function _mul(xs::Node...)
             _push_factor!(factors, x, _ONE)
         end
     end
+    _merge_exponentials!(factors)
     # numeric bases whose exponents became integers fold into the coefficient
     kept = Pair{Node, Node}[]
     for (b, e) in factors
@@ -220,6 +221,19 @@ function _mul(xs::Node...)
     isempty(kept) && return NumNode(coef)
     _isone_exact(coef) && length(kept) == 1 && isequal(last(kept[1]), _ONE) && return first(kept[1])
     return MulNode(coef, kept)
+end
+
+# e^a e^b as e^{a+b}, for exponentials to whole powers
+function _merge_exponentials!(factors)
+    is_exp((b, e)) = b isa CallNode && b.f == "exp" && length(b.args) == 1 && e isa NumNode && e.v isa Integer
+    idx = findall(is_exp, factors)
+    (length(idx) > 1 || length(idx) == 1 && !isequal(last(factors[idx[1]]), _ONE)) || return factors
+    a = _add((_mul(first(factors[i]).args[1], last(factors[i])) for i in idx)...)
+    deleteat!(factors, idx)
+    _REWRITTEN[] = true
+    m = _exp(a)
+    isequal(m, _ONE) || push!(factors, m => _ONE)
+    return factors
 end
 
 function _push_factor!(factors, b::Node, e::Node)
@@ -340,12 +354,70 @@ function _numeric_root(b, e)
 end
 
 # exp(c)^k as exp(c*k) for a real number c: e^2 is exp(2), e^x is exp(x)
+# exp(a)^k as exp(k a), for a real number a or a whole power k: e^2 is exp(2), (e^x)^2 is e^{2x}
 function _exp_power(b::Node, e::Node)
-    (b isa CallNode && b.f == "exp" && length(b.args) == 1 && b.args[1] isa NumNode && b.args[1].v isa Real && !isequal(e, _ONE)) || return nothing
-    return CallNode("exp", Node[_mul(b.args[1], e)])
+    (b isa CallNode && b.f == "exp" && length(b.args) == 1 && !isequal(e, _ONE)) || return nothing
+    (b.args[1] isa NumNode && b.args[1].v isa Real || e isa NumNode && e.v isa Integer) || return nothing
+    return _exp(_mul(b.args[1], e))
+end
+
+_exp(a::Node) = isequal(a, _ZERO) ? _ONE : CallNode("exp", Node[a])
+
+# A function applied, written with its argument's sign taken out where the function is even or
+# odd: cos(b - a) is cos(a - b) whichever way GIAC wrote it, sin(-x) is -sin(x)
+# Set when reading a GIAC object rewrites its form (under the GIAC lock; see `_node`)
+const _REWRITTEN = Ref(false)
+
+const _EVEN_FUNCTIONS = Set(["cos", "cosh", "sec", "sech"])
+const _ODD_FUNCTIONS = Set(["sin", "tan", "sinh", "tanh", "asin", "atan", "asinh", "atanh", "csc", "cot", "csch", "coth"])
+function _call(h::String, args::Vector{Node}, gen = nothing)
+    if (h == "cos" || h == "sin") && length(args) == 1
+        x = _pi_shifted(h, args[1])
+        x === nothing || return x
+    end
+    even, odd = h in _EVEN_FUNCTIONS, h in _ODD_FUNCTIONS
+    ((even || odd) && length(args) == 1 && _negated_first(args[1], even)) || return CallNode(h, args, gen)
+    _REWRITTEN[] = true
+    f = CallNode(h, Node[_negate(args[1])])
+    return even ? f : _neg(f)
+end
+
+# cos(u + jπ/2) and sin(u + jπ/2) with the multiple of π/2 taken out: cos(u + π) = -cos(u),
+# sin(u + π/2) = cos(u). `nothing` if the argument has no such term.
+function _pi_shifted(h::String, a::Node)
+    x = a isa MulNode && any(f -> first(f) isa AddNode, a.factors) ? _expand(a) : a
+    x isa AddNode || return nothing
+    i = findfirst(((m, c),) -> m isa SymNode && m.name == "pi" && c isa Union{Integer, Rational} && isinteger(2c), x.terms)
+    i === nothing && return nothing
+    u = _add((_scale(m, c) for (k, (m, c)) in enumerate(x.terms) if k != i)...)
+    isequal(u, _ZERO) && return nothing
+    j = mod(Int(2 * x.terms[i][2]), 4)
+    _REWRITTEN[] = true
+    f = iseven(j) ? h : (h == "cos" ? "sin" : "cos")
+    negative = h == "cos" ? j in (1, 2) : j in (2, 3)
+    r = _call(f, Node[u])
+    return negative ? _neg(r) : r
+end
+
+# Whether -u is the argument to write: more negative terms than positive ones, and a tie decided
+# by the hash, so that u and -u settle on the same one
+function _negated_first(u::Node, even::Bool)
+    if u isa MulNode
+        return u.coef isa Real && u.coef < 0
+    elseif u isa AddNode
+        cs = [c for (m, c) in u.terms if !(m isa NumNode)]
+        all(c -> c isa Real, cs) || return false
+        neg, pos = count(<(0), cs), count(>(0), cs)
+        neg == pos || return neg > pos
+        # as many of each: only an even function, which takes no sign, settles on one of u and -u
+        return even && u.h > _negate(u).h
+    end
+    return u isa NumNode && u.v isa Real && u.v < 0
 end
 
 _neg(a::Node) = _mul(_MINUS_ONE, a)
+# -u with a sum's terms negated, not a sum times -1
+_negate(u::Node) = u isa AddNode ? AddNode(Pair{Node, Number}[m => -c for (m, c) in u.terms]) : _neg(u)
 _sub(a::Node, b::Node) = _add(a, _neg(b))
 function _div(a::Node, b::Node)
     b isa NumNode && iszero(b.v) && return _giac_node("($(_str(a)))/($(_str(b)))")
@@ -548,7 +620,7 @@ function _node_from_gen(gen)
         (re isa NumNode && im isa NumNode && re.v isa Real && im.v isa Real) && return NumNode(Complex(re.v, im.v))
     elseif t == SYMB
         h = String(B.symb_sommet_name(gen))
-        if h in ("+", "*", "-", "inv", "^", "/") || haskey(_INFIX, h) || occursin(_CALL_NAME, h)
+        if (h in ("+", "*", "-", "inv", "^", "/") || haskey(_INFIX, h) || occursin(_CALL_NAME, h)) && !_is_factorization(gen)
             leaf = B.symb_feuille(gen)
             raw = Any[]
             if B.is_vector(leaf) && B.subtype(leaf) in (B.VECTSUBTYPE_SEQ, _SORTED_VECT)
@@ -565,11 +637,29 @@ function _node_from_gen(gen)
             h == "inv" && length(args) == 1 && return _pow(args[1], _MINUS_ONE)
             h == "^" && length(args) == 2 && return _pow(args[1], args[2])
             h == "/" && length(args) == 2 && return _div(args[1], args[2])
-            h in ("+", "*", "-", "inv", "^", "/") || return CallNode(h, args, gen)
+            h in ("+", "*", "-", "inv", "^", "/") || return _call(h, args, gen)
         end
     end
     e = GiacExpr(_make_gen_ptr(gen))
     return GenNode(e, String(B.to_string(gen)))
+end
+
+# A product of powers of integers, as ifactor writes 2^3*3^2*5: a form, kept as GIAC has it rather
+# than multiplied out
+function _is_factorization(gen)
+    B = GiacCxxBindings
+    integer(g) = (t = T(B.type(g)); t == INT || t == ZINT)
+    function power(g)
+        (T(B.type(g)) == SYMB && String(B.symb_sommet_name(g)) == "^") || return false
+        leaf = B.symb_feuille(g)
+        return B.is_vector(leaf) && B.vect_size(leaf) == 2 && integer(B.vect_at(leaf, 0)) && integer(B.vect_at(leaf, 1))
+    end
+    power(gen) && return true
+    (T(B.type(gen)) == SYMB && String(B.symb_sommet_name(gen)) == "*") || return false
+    leaf = B.symb_feuille(gen)
+    B.is_vector(leaf) || return false
+    gs = [B.vect_at(leaf, i) for i in 0:(B.vect_size(leaf) - 1)]
+    return any(power, gs) && all(g -> integer(g) || power(g), gs)
 end
 
 function _push_gen_args!(out, gen)

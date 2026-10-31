@@ -152,6 +152,10 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
     # This helps users understand why certain commands can't be exported directly
     _warn_conflict(cmd)
 
+    # an expression from GIAC is read into the tree first: reading it may normalize its form
+    # (e^a e^b as e^{a+b}), and GIAC is then given the normalized one
+    foreach(a -> a isa GiacExpr && _node(a), args)
+
     # Rendering commands (071-latex-render-form): GIAC re-evaluates command
     # arguments, which collapses results like ifactor(360) == 2^3*3^2*5 back to
     # 360. Quoting each GiacExpr argument keeps the expression as given.
@@ -162,6 +166,12 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
     # a held integral or evaluation is worked on inside: simplifying commands apply within it and to the rest
     if cmd in _INSIDE_HELD && length(args) == 1 && args[1] isa GiacExpr && _any_node(_is_held, _node(args[1]))
         return _around_held(e -> invoke_cmd(cmd, e), args[1])
+    end
+
+    # a simplify that writes trigonometric functions in angles the expression did not have, and is
+    # not clearly shorter for it, is not taken (trig_simplify.jl)
+    if cmd === :simplify && length(args) == 1 && args[1] isa GiacExpr && !_fastpath_disabled[]
+        return parentmodule(@__MODULE__)._trig_safe_simplify(args[1])
     end
 
     # Fast path (069-invoke-cmd-fastpath): bypass _arg_to_giac_string + giac_eval
