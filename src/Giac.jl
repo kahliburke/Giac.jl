@@ -105,6 +105,7 @@ include("derivation.jl")
 include("rules.jl")
 include("codegen.jl")
 include("assuming.jl")
+include("equations.jl")
 
 # Types
 export GiacExpr, GiacContext, GiacMatrix, GiacError, HelpResult, GiacInput
@@ -124,6 +125,7 @@ export giac_eval, to_julia, list_commands, help_count
 # array declarations, symbolic linear algebra and derivations (giac_identifier, giac_array,
 # giac_latex, written_latex, tidy_latex and Derivation are unexported: Giac.giac_array, …)
 export @giac_var, @giac_several_vars, @giac_matrix, express, ∇, jacobian, hessian, @derivation, assuming
+export lhs, rhs, isolate
 
 # Command invocation (009-commands-submodule)
 # invoke_cmd replaces giac_cmd - available from main module and Giac.Commands

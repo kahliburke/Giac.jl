@@ -174,17 +174,24 @@ _substitution_pairs(p::Pair{<:AbstractArray, <:AbstractArray}) =
 # a tuple of values keeps exact constants that an array literal would promote: `x => (π, 0)`
 _substitution_pairs(p::Pair{<:AbstractArray, <:Tuple}) = _substitution_pairs(first(p) => collect(Any, last(p)))
 _substitution_pairs(p::Pair) = (p,)
+# an equation `y ~ 2x` puts its right side in place of its left side
+_substitution_pairs(eq::GiacExpr) = (lhs(eq) => rhs(eq),)
+_substitution_pairs(eqs::AbstractVector{GiacExpr}) = map(eq -> lhs(eq) => rhs(eq), eqs)
 
 """
     substitute(expr, x => [1, 2], y => 3, ...)
+    substitute(expr, y ~ 2x, ...)
 
 Pairs may map a vector (or array) of variables to values of the same shape, entry by entry,
 and may be mixed with scalar pairs. Give the values as a tuple, `x => (π, 0)`, to keep exact
 constants: the array literal `[π, 0]` is a `Vector{Float64}`.
+
+An equation `a ~ b`, or a vector of them (such as the result of [`isolate`](@ref)), substitutes
+`b` for `a`.
 """
-function substitute(expr::GiacExpr, pairs::Pair...)::GiacExpr
-    isempty(pairs) && return expr
-    return substitute(expr, Dict{GiacExpr, Any}(p for q in pairs for p in _substitution_pairs(q)))
+function substitute(expr::GiacExpr, rules::Union{Pair, GiacExpr, AbstractVector{GiacExpr}}...)::GiacExpr
+    isempty(rules) && return expr
+    return substitute(expr, Dict{GiacExpr, Any}(p for q in rules for p in _substitution_pairs(q)))
 end
 
 """
