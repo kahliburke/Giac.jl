@@ -142,4 +142,125 @@ using Giac.Rules
         @test count("\\text{by }", tex) == 2
         @test occursin("no rule applies", sprint(show, MIME("text/latex"), rewrite(x, pythagoras; trace = true)))
     end
+
+    @testset "sums up to a common factor" begin
+        @test R(3sin(x)^2 + 3cos(x)^2, pythagoras) == "3"
+        @test rewrite(a * sin(x)^2 + a * cos(x)^2 + y, pythagoras) == a + y
+        @test rewrite(sin(x)^2 / 2 + cos(x)^2 / 2, pythagoras) == 1 // 2
+        # a larger coefficient is used in part
+        @test rewrite(3sin(x)^2 + 2cos(x)^2, pythagoras) == 2 + sin(x)^2
+        @test rewrite(2sin(x)^2 + 3cos(x)^2 + y, pythagoras) == 2 + cos(x)^2 + y
+        @test pythagoras(3sin(x)^2 - 2cos(x)^2) === nothing     # opposite signs
+        # a product up to its numeric coefficient
+        double = @rule 2 * sin(~t) * cos(~t) => sin(2 * ~t)
+        @test rewrite(sin(x) * cos(x), double) == sin(2x) / 2
+        @test rewrite(3sin(x) * cos(x) * y, double) == 3 // 2 * sin(2x) * y
+    end
+
+    @testset "defaults and powers" begin
+        merge = @rule ~v^(~n = 1) * ~v^(~m = 1) => ~v^(~n + ~m)
+        @test R(x * x^2, merge) == "x^3"
+        exponent = @rule ~v^~n => ~n
+        @test string(exponent(1 / x)) == "-1"                   # inv(x) is x^-1
+        @test string(exponent(1 / x^2)) == "-2"
+        coefficient = @rule (~c = 1) * sin(~t) => ~c
+        @test R(sin(y), coefficient) == "1" && R(3sin(y), coefficient) == "3"
+        @giac_var f
+        second = @rule f(~p, ~q = 0) => ~p + ~q
+        @test R(f(x), second) == "x" && R(f(x, y), second) == "x+y"
+    end
+
+    @testset "segments with tests" begin
+        @giac_var q[1:2]
+        parts = @rule ~~l::of_degree(1, q) + ~~n::of_degree(2, q) + ~~rest => 100length(~~l) + 10length(~~n) + length(~~rest)
+        @test string(parts(q1 + 2q2 + q1 * q2 + q1^2 + 7 + sin(q1))) == "222"
+        linear = @rule +(~~l::of_degree(1, q)) + ~~rest => +(~~l)
+        @test linear(q1 + 2q2 + q1 * q2 + 7) == q1 + 2q2
+        consts = @rule ~~c::is_free(q) + ~~rest => length(~~c)
+        @test string(consts(q1 + a + 3)) == "2"
+        @test depends_on(q1 * a, q) && !depends_on(a, q)
+    end
+
+    @testset "tests that use assumptions" begin
+        @giac_var p::positive w::positive r::real
+        @test is_positive(p + 1) && is_positive(p * w) && !is_positive(x)
+        @test is_negative(-p) && is_nonnegative(p^2 + 0) && is_real(r * p)
+        @test is_positive(3) && !is_positive(-2)
+        @giac_var p w r
+        @test !is_positive(p)
+    end
+
+    @testset "identity library" begin
+        @giac_var p::positive w::positive
+        @test rewrite(log(p * w), log_expand()) == log(p) + log(w)
+        @test rewrite(2log(p) + 2log(w), log_combine()) == 2log(p * w)
+        @test rewrite(sqrt(p) * sqrt(w), power_combine()) == sqrt(p * w)
+        @giac_var p w
+        @test string(rewrite(log(x * y), log_expand())) == string(log(x * y))   # sign unknown
+        @test rewrite((x * y)^3, power_expand()) == x^3 * y^3                    # integer power
+        @test rewrite(exp(x) * exp(y), exp_combine()) == exp(x + y)
+        @test rewrite(3 - 3sin(x)^2, trig_simplify()) == 3cos(x)^2
+        @test rewrite(sin(x) / cos(x) + 1, trig_simplify()) == tan(x) + 1
+        @test trig_simplify() === trig_simplify()                                 # built once
+        @test occursin("> 0", sprint(show, MIME("text/latex"), log_expand()))
+    end
+
+    @testset "patterns as queries" begin
+        quad = @pattern ~a * x^2 + (~b = 0) * x + ~c
+        m = match(quad, 3x^2 + 2x + 1)
+        @test string.((m[:a], m[:b], m[:c])) == ("3", "2", "1")
+        @test string(match(quad, 3x^2 + 1)[:b]) == "0"
+        @test match(quad, x^3) === nothing
+        @test occursin(@pattern(sin(~t)), x + sin(y)^2) && !occursin(@pattern(sin(~t)), x + y)
+        found = findall(@pattern(sin(~t)), sin(x) + cos(sin(y)))
+        @test Set(string(f[:t]) for f in found) == Set(["x", "y"])
+        classify(e) = @match e begin
+            ~a * x^2 + (~b = 0) * x + ~c => (:quadratic, string(~a)) where is_free(~a, x) && is_free(~b, x) && is_free(~c, x)
+            ~a * x + ~b => (:linear, string(~a)) where is_free(~a, x)
+            _ => :other
+        end
+        @test classify(3x^2 + 1) == (:quadratic, "3")
+        @test classify(2x + y) == (:linear, "2")
+        @test classify(x^3) == :other
+        strict(e) = @match e begin
+            sin(~t) => ~t
+        end
+        @test_throws ArgumentError strict(x)
+    end
+
+    @testset "where and which place" begin
+        distribute = @rule ~u * +(~~ts) => sum(~u * t for t in ~~ts)
+        @test rewrite(a * (x + y) + sin(z * (x + y)), distribute; within = @pattern(sin(~t))) ==
+              a * (x + y) + sin(z * x + z * y)
+        e = a * (x + y) + z * (x + w)
+        @test rewrite(e, distribute; at = 1) == a * x + a * y + z * (x + w)
+        @test rewrite(e, distribute; at = 2) == a * (x + y) + z * x + z * w
+        @test rewrite(e, distribute; at = 3) == e
+    end
+
+    @testset "traces and cycles" begin
+        distribute = @rule ~u * +(~~ts) => sum(~u * t for t in ~~ts)
+        e = a * (x + y) + z * (x + w) + sin(y)^2 + cos(y)^2
+        @test length(rewrite(e, distribute, pythagoras; trace = true).steps.rows) == 2      # distribute ×2
+        @test length(rewrite(e, distribute, pythagoras; trace = :steps).steps.rows) == 3
+        @test occursin("\\times 2", sprint(show, MIME("text/latex"), rewrite(e, distribute, pythagoras; trace = true)))
+        swap = @rules begin
+            sin(~t) => cos(~t)
+            cos(~t) => sin(~t)
+        end
+        err = try rewrite(sin(x), swap); nothing catch err; err end
+        @test err isa ErrorException && occursin("undo each other", err.msg) && occursin("cos(~t) => sin(~t)", err.msg)
+        @test_throws ErrorException rewrite(sin(x), swap; trace = true)
+    end
+
+    @testset "simplest" begin
+        e = sin(x)^4 - cos(x)^4
+        @test rewrite(e, trig_simplify()) == e                  # no rule applies as it stands
+        t = simplest(e, trig_simplify(), Giac.Commands.factor, Giac.Commands.expand)
+        @test last(t) == -cos(2x)
+        @test length(t.steps.rows) == 4
+        @test expression_size(x + y) == 3
+        @test last(simplest(x + y, trig_simplify())) == x + y
+        @test_throws ArgumentError simplest(x, 42)
+    end
 end

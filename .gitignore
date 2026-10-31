@@ -14,6 +14,8 @@
 
 !src/
 !src/*.jl
+!src/rules/
+!src/rules/*.jl
 
 !ext/
 !ext/*.jl
