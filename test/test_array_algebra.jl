@@ -253,7 +253,7 @@ end
     @test string(W) == string(q' * S * q / 2)              # bound, unsimplified
     @test d.rows[1][1] == "W"
     @test d.rows[2][1] == "\\nabla _{q}W"
-    @test occursin("\\mathrm{d}", d.rows[3][1])
+    @test occursin("\\partial", d.rows[3][1])
     @test d.rows[2][2] == Giac.giac_latex(Giac.Commands.expand.(S * q))   # ∇(qᵀSq/2) = Sq
     tex = sprint(show, MIME("text/latex"), d)
     @test startswith(tex, "\$\$\\begin{aligned}") && count("&=", tex) == 3
