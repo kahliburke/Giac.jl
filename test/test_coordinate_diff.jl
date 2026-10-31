@@ -71,7 +71,7 @@
     @testset "held integrals in a derivation" begin
         δL = substitute(diff(substitute(F(q, q̇, t), q => q + ε * η), ε), ε => 0)
         d = @derivation begin
-            δS = Giac.Commands.hold_cmd(:integrate, δL, t, 0, h)
+            δS = integral(δL, t, 0, h)
         end
         @test d.rows[1][2] == "\\int_{0}^{h} \\left(\\frac{\\partial F}{\\partial q} \\eta + \\frac{\\partial F}{\\partial \\dot{q}} \\dot{\\eta}\\right) \\, \\mathrm{d}t"
         @test L(diff(substitute(F(q, q̇, t), q => q + ε * η), ε)) ==
@@ -81,5 +81,25 @@
     @testset "a function of several arguments rebuilt from its tree" begin
         n = Giac._node(F(q, q̇, t))
         @test string(Giac.invoke_cmd(:eval, GiacExpr(Giac.CallNode(n.f, n.args)))) == "F(q(t),diff(q(t),t),t)"
+    end
+
+    @testset "a function of the coordinates, declared" begin
+        @giac_var G(q, q̇, t) u(t)
+        @test string(G) == "G(q(t),diff(q(t),t),t)"
+        @test string(u) == "u(t)"                                     # t is a symbol: as before
+        @test L(diff(G, q̇)) == "\\frac{\\partial G}{\\partial \\dot{q}}"
+    end
+
+    @testset "written derivatives in a derivation" begin
+        @giac_var k::positive
+        Lq = m * q̇^2 / 2 - k * q^2 / 2
+        V = k * q^2 / 2
+        d = @derivation begin
+            diff(diff(Lq, q̇), t) - diff(Lq, q) => EL
+            diff(V, q)
+        end
+        @test d.rows[1][1] == "\\frac{\\mathrm{d}}{\\mathrm{d} t}\\left(\\frac{\\partial \\mathrm{Lq}}{\\partial \\dot{q}}\\right) - \\frac{\\partial \\mathrm{Lq}}{\\partial q}"
+        @test string(EL) == string(m * diff(q, t, 2) + k * q)
+        @test d.rows[2][1] == "\\frac{\\mathrm{d} V}{\\mathrm{d} q}"   # V depends on q alone
     end
 end

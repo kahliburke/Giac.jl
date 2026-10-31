@@ -15,6 +15,22 @@ function _build_function_string(funcname::Symbol, args::Vector{Symbol})
     return string(funcname, "(", join(string.(args), ","), ")")
 end
 
+# The argument names each function variable was declared with (`L(q, q̇, t)`), so a derivative
+# at other arguments is written in them: ∂L/∂q̇ at (q + εη, q̇ + εη̇, t)
+const _ARGUMENT_NAMES = Dict{String, Vector{String}}()
+const _ARGUMENT_NAMES_LOCK = ReentrantLock()
+_argument_names(name::AbstractString) = lock(() -> get(_ARGUMENT_NAMES, name, nothing), _ARGUMENT_NAMES_LOCK)
+
+# A function variable declared as `L(q, q̇, t)`: applied to the coordinates its argument names
+# hold (`q` bound to `q(t)`, `q̇` to its derivative), the other arguments symbols of their names
+function _function_variable(src::String, name::String, argnames, argvals)
+    lock(() -> (_ARGUMENT_NAMES[name] = collect(String, argnames)), _ARGUMENT_NAMES_LOCK)
+    coordinate(v) = v isa GiacExpr && _is_coordinate(_node(v))
+    any(coordinate, argvals) || return giac_identifier(src)
+    args = Node[coordinate(v) ? _node(v) : SymNode(a) for (a, v) in zip(argnames, argvals)]
+    return GiacExpr(CallNode("of", Node[SymNode(name); args]))
+end
+
 """
     _process_giac_var_arg(arg) -> Tuple{Symbol, String}
 
@@ -458,7 +474,14 @@ macro giac_var(args...)
             push!(varnames, decl.args[1])
         else
             varname, giac_string = _process_giac_var_arg(decl)
-            push!(exprs, :($(esc(varname)) = giac_identifier($giac_string)))
+            if decl isa Expr
+                # `L(q, q̇, t)` after `q(t) q̇`: the function of the coordinates those names hold
+                fargs = decl.args[2:end]
+                vals = Expr(:tuple, (:($(esc(:(@isdefined $a))) ? $(esc(a)) : nothing) for a in fargs)...)
+                push!(exprs, :($(esc(varname)) = _function_variable($giac_string, $(string(varname)), $(Tuple(string.(fargs))), $vals)))
+            else
+                push!(exprs, :($(esc(varname)) = giac_identifier($giac_string)))
+            end
             push!(varnames, varname)
             # a function of other variables, `u(t)`, takes properties of functions instead
             if decl isa Expr

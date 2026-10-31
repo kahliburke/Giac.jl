@@ -129,17 +129,55 @@ function _to_giac_syntax(ex::Expr)
     return Expr(ex.head, args...)
 end
 
-"LaTeX for written Julia code, typeset without evaluating it, in the order it was written."
-function written_latex(ex)
+"""
+LaTeX for written Julia code, typeset without evaluating it, in the order it was written.
+`values` are the values of names it uses (`name => value`): a derivative of a name whose value
+depends on more than the variable it is taken in is written as a partial, `∂L/∂q̇`.
+"""
+function written_latex(ex, values = ())
     src = string(_to_giac_syntax(ex))
     as_written = _with(_current_style(); order = :as_is, lead = :as_is, products = :as_is)
-    return _in_style(() -> _entry_latex(giac_eval("'" * src * "'")), as_written)
+    held = Dict{String, GiacExpr}(string(_to_giac_syntax(k)) => v for (k, v) in values if v isa GiacExpr)
+    return task_local_storage(_WRITTEN_KEY, held) do
+        _in_style(() -> _entry_latex(giac_eval("'" * src * "'")), as_written)
+    end
 end
+
+const _WRITTEN_KEY = :giac_written_values
+
+# Whether the written derivative of `name` in `x` is a partial: the value of `name` depends on
+# more variables than `x`. Its variables are its coordinates (q, q̇) and the symbols in it other
+# than time and parameters (names declared with an assumption, `m::positive`).
+function _written_partial(name::AbstractString, x::AbstractString)
+    v = get(get(task_local_storage(), _WRITTEN_KEY, Dict{String, GiacExpr}()), name, nothing)
+    v === nothing && return false
+    coordinates = [GiacExpr(c) for c in _coordinates!(Node[], _node(v))]
+    vars = Set{String}(something(_wrt_name(c), "") for c in coordinates)
+    functions = Set(string(_function_name(c)) for c in coordinates if _is_trajectory(_node(c)))
+    parameter(s) = s == _current_style().time || s in functions || lock(() -> haskey(_DECLARED, s), _DECLARED_LOCK)
+    foreach(s -> parameter(s) || push!(vars, s), (string(s) for s in free_symbols(v)))
+    push!(vars, x)
+    return length(vars) > 1
+end
+
+# The names an expression uses, other than the functions it calls
+_names_used(ex) = _names_used!(Symbol[], ex)
+_names_used!(out, s::Symbol) = (s in out || push!(out, s); out)
+function _names_used!(out, ex::Expr)
+    args = ex.head === :call ? ex.args[2:end] : ex.args
+    foreach(a -> _names_used!(out, a), args)
+    return out
+end
+_names_used!(out, x) = out
+
+# code giving `name => value` for each name an expression uses that is defined
+_values_code(ex) = Expr(:tuple, (:($(QuoteNode(s)) => ($(esc(:(@isdefined $s))) ? $(esc(s)) : nothing)) for s in _names_used(ex))...)
 
 """
     @derivation begin
         name = expr        # binds `name`; shows  name = value
         expr               # shows  expr (as written) = value
+        expr => name       # shows  expr (as written) = value; binds `name`
         lhs ~ expr         # shows  lhs (as written) = value; binds nothing
         lhs ~ mid ~ expr   # shows  lhs = mid (both as written) = value
         lhs := expr        # shows  lhs = expr, both as written; computes nothing
@@ -155,6 +193,11 @@ arrays of expressions. `lhs ~ rhs` is for left sides that are not assignable, su
 as written. `lhs := expr` is a definition, such as `S := integrate(L(q, q̇, t), t, t₁, t₂)`: both
 sides are shown as written and nothing is evaluated. A string is shown as text; write it as
 `raw"…"` to include `\$…\$` math.
+
+A written derivative of a name is a partial when the name's value depends on more variables than
+the one it is taken in: with `L` bound to a Lagrangian in `q` and `q̇`, `diff(L, q̇)` is shown as
+`∂L/∂q̇` and computed as the partial derivative, so a step reads
+`diff(diff(L, q̇), t) - diff(L, q) => EL`.
 
 The `=` signs line up across the whole derivation, notes included. `@realign` starts a new
 alignment from that point, for when one wide left side would push everything else to the right.
@@ -181,6 +224,7 @@ macro derivation(simplifier, block)
 end
 
 _is_tilde(ex) = ex isa Expr && ex.head === :call && ex.args[1] === :~ && length(ex.args) == 3
+_is_binding(ex) = ex isa Expr && ex.head === :call && ex.args[1] === :(=>) && length(ex.args) == 3 && ex.args[3] isa Symbol
 
 _is_docstring(ex) = ex isa Expr && ex.head === :macrocall && ex.args[1] == GlobalRef(Core, Symbol("@doc")) &&
                     length(ex.args) == 4 && _is_text(ex.args[3])
@@ -208,8 +252,8 @@ function _derivation(simplifier, block)
     out = Any[:($rows = Tuple{String, String}[])]
     # each row is typeset right after its step runs, so a later reassignment can't change it
     row(lhs, value; written = ()) =
-        :(append!($rows, _derivation_rows(written_latex($(QuoteNode(lhs))),
-                                          String[$((:(written_latex($(QuoteNode(w)))) for w in written)...)],
+        :(append!($rows, _derivation_rows(written_latex($(QuoteNode(lhs)), $(_values_code(lhs))),
+                                          String[$((:(written_latex($(QuoteNode(w)), $(_values_code(w)))) for w in written)...)],
                                           $value, $simplifier)))
     for st in stmts
         st isa LineNumberNode && (push!(out, st); continue)
@@ -223,6 +267,10 @@ function _derivation(simplifier, block)
         elseif st isa Expr && st.head === :(=) && st.args[1] isa Symbol
             name, rhs = st.args
             push!(out, :($(esc(name)) = $(esc(rhs))), row(name, esc(name)))
+        elseif _is_binding(st)
+            # `expr => name`: shows expr (as written) = value, and binds name to the value
+            expr, name = st.args[2], st.args[3]
+            push!(out, :($(esc(name)) = $(esc(expr))), row(expr, esc(name)))
         elseif _is_tilde(st)
             # `a ~ b ~ c` parses as `a ~ (b ~ c)`
             terms = Any[st.args[2]]

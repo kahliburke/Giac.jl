@@ -651,6 +651,8 @@ function _tex(n::_PDerivOf, c::_Ctx)
     if n.arg isa _PAtom && !n.arg.constant && all(==(v), n.wrt)
         # a symbol, as in a derivation's left side `diff(V, t)`: V̇, V′ or dV/dt
         c.style.derivatives === :dot && v == c.style.time && k <= 3 && return _accent_tex(_DOTS[k], n.arg.tex)
+        # a written derivative of a quantity of several variables is a partial: ∂L/∂q̇
+        _written_partial(n.arg.name, v) && return _leibniz("\\partial", n.arg.tex, n.wrt)
         c.style.derivatives === :prime && return (occursin(r"[_^]", n.arg.tex) ? "{" * n.arg.tex * "}" : n.arg.tex) * "'"^k
         return _leibniz("\\mathrm{d}", n.arg.tex, n.wrt)
     end
@@ -677,6 +679,10 @@ function _tex(n::_PDerivAt, c::_Ctx)
         base = occursin(r"[_^]", name) ? "{" * name * "}" : name
         return (k <= 3 ? base * "'"^k : base * "^{($k)}") * args
     end
+    # in the names the function was declared with: ∂L/∂q̇ at (q + εη, q̇ + εη̇, t)
+    names = _argument_names(n.f)
+    names !== nothing && length(names) == length(n.args) &&
+        return _leibniz("\\partial", name, [names[i + 1] for i in n.idx]) * args
     return join(("\\partial_{$(i + 1)}" for i in n.idx), " ") * " " * name * args
 end
 
