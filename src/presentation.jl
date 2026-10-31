@@ -679,9 +679,9 @@ function _tex(n::_PDerivOf, c::_Ctx)
     k, v = length(n.wrt), first(n.wrt)
     if n.arg isa _PAtom && !n.arg.constant && all(==(v), n.wrt)
         # a symbol, as in a derivation's left side `diff(V, t)`: V̇, V′ or dV/dt
-        c.style.derivatives === :dot && v == c.style.time && k <= 3 && return _accent_tex(_DOTS[k], n.arg.tex)
-        # a written derivative of a quantity of several variables is a partial: ∂L/∂q̇
+        # a written derivative of a quantity of several variables is a partial, in time too: ∂L/∂q̇, ∂ψ/∂t
         _written_partial(n.arg.name, v) && return _leibniz("\\partial", n.arg.tex, n.wrt)
+        c.style.derivatives === :dot && v == c.style.time && k <= 3 && return _accent_tex(_DOTS[k], n.arg.tex)
         c.style.derivatives === :prime && return (occursin(r"[_^]", n.arg.tex) ? "{" * n.arg.tex * "}" : n.arg.tex) * "'"^k
         return _leibniz("\\mathrm{d}", n.arg.tex, n.wrt)
     end

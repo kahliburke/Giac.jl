@@ -105,7 +105,7 @@ Base.show(io::IO, d::Derivation) = print(io, "Derivation with $(length(d.rows)) 
 const _GIAC_NAMES = Dict(:∇ => :grad, :⋅ => :dot, :tr => :trace, :jacobian => :diff, :inv => :inv)
 
 _to_giac_syntax(x) = x
-_to_giac_syntax(s::Symbol) = Symbol(replace(string(s), GIAC_RESERVED_LETTERS...))
+_to_giac_syntax(s::Symbol) = s === :im ? :i : Symbol(replace(string(s), GIAC_RESERVED_LETTERS...))   # Julia's im is GIAC's i
 function _to_giac_syntax(ex::Expr)
     ex.head === Symbol("'") && return Expr(:call, :transpose, _to_giac_syntax(ex.args[1]))
     # `C.f(x)` is written `f(x)`; a broadcast `f.(x)` is written `f(x)`
