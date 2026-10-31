@@ -237,7 +237,8 @@ function tidy_latex(s::AbstractString)
     s = replace(s, "\\mathrm{det}" => "\\det", "\\mathrm{trace}" => "\\operatorname{tr}")
     # a series' remainder `t^{4} order_size(t)` is O(t⁴)
     s = replace(s, _ORDER_TERM => s"O\\left(\1\\right)")
-    return s
+    # the trace or determinant of symbolic matrices, written as such (see matrix_symbols.jl)
+    return _atom_tex(s)
 end
 
 const _ORDER_TERM = r"(\\left\([^()]*\\right\)\^\{\d+\}|[A-Za-z]\w*(?:_\{\d+\})?(?:\^\{\d+\})?) \\mathrm\{order\\_size\}\\left\([^()]*\\right\)"

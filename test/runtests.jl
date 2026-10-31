@@ -27,6 +27,7 @@ using LinearAlgebra
     include("test_codegen.jl")
     include("test_equations.jl")
     include("test_functions.jl")
+    include("test_matrix_symbols.jl")
     include("test_matrix_iteration.jl")
     include("test_memory.jl")
 
