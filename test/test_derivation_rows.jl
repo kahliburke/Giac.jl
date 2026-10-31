@@ -52,6 +52,13 @@
         @test string(substitute(k^3, rule)) == string(substitute(k^3, k => sqrt(a)))
     end
 
+    @testset "conditions after a comma, without where" begin
+        d = @derivation begin
+            k^2 ~ a^2 => k ~ a * n, n::integer, n != 0
+        end
+        @test endswith(rows(d)[1], "k = a n, \\quad n \\in \\mathbb{Z}, n \\ne 0")
+    end
+
     @testset "conditions in brackets, and tags" begin
         imp = Giac._implication(Giac._rejoin_conditions(:(k ~ 0 => k ~ n where [n::integer, n::nonzero])))
         @test Giac._conditions(imp[2])[2] == Any[:(n::integer), :(n::nonzero)]

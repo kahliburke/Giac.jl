@@ -200,10 +200,11 @@ An implication `cond => result` states that the condition (an equation, its left
 written and then as computed) gives the result, an equation such as `k ~ n*π/a`. The result is
 substituted into every later value and into the names bound so far, until the derivation ends.
 Written as `name := cond => result`, the result is bound to `name`, a rule to apply with
-`substitute`, and nothing is substituted. Conditions follow `where`, separated by commas or in
-brackets: tags as for `@giac_var` (`n::integer`, `n::positive`, `n::nonzero`, …) and relations
-(`n != 0`, `n > 0`). They are shown after the result and assumed from that row on (`≠` is shown
-only):
+`substitute`, and nothing is substituted. Conditions follow the result after `where` or just a
+comma, separated by commas or in brackets: tags as for `@giac_var` (`n::integer`, `n::positive`,
+`n::nonzero`, …) and relations (`n != 0`, `n > 0`). They are shown after the result and assumed
+from that row on (`≠` is shown only). The comma form (`k ~ n*π/a, n::integer`) also suits tools
+that analyse code before macros expand it, which reject `where` outside a type:
 
 ```julia
 @derivation begin
@@ -286,9 +287,10 @@ function _conditions(ex)
         length(conds) == 1 && conds[1] isa Expr && conds[1].head in (:vect, :braces, :tuple) && (conds = conds[1].args)
         return (ex.args[1], collect(Any, conds))
     end
+    # `result, n::integer, n != 0`: the conditions after a comma, with or without `where`
     if ex.head === :tuple && !isempty(ex.args)
         first_, cs = _conditions(ex.args[1])
-        isempty(cs) || return (first_, Any[cs; ex.args[2:end]])
+        return (first_, Any[cs; ex.args[2:end]])
     end
     for i in reverse(eachindex(ex.args))
         inner, cs = _conditions(ex.args[i])
