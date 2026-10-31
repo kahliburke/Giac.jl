@@ -167,42 +167,60 @@ giac_identifier(name::AbstractString) =
 const GIAC_RESERVED_LETTERS = ("Δ" => "Delta", "Σ" => "Sigma", "∂" => "partial")
 
 """
-    giac_array(base::Symbol, dims...; symmetric = false) -> Array{GiacExpr}
+    giac_array(base::Symbol, dims...; structure = :general) -> Array{GiacExpr}
 
 A Julia array of symbolic entries named from `base` and their indices, following the same
 naming scheme as [`GiacMatrix(base, dims...)`](@ref) (`a12`, `a_1_10`, `a_m1`). Each dimension
-is an integer `n` (meaning `1:n`) or a range. With `symmetric = true` (two equal ranges) entry
-`(i, j)` and `(j, i)` are the same variable, named with `i ≤ j`.
+is an integer `n` (meaning `1:n`) or a range.
+
+`structure` shapes a square matrix (two equal ranges): `:symmetric` (entry `(j, i)` is entry
+`(i, j)`, named with `i ≤ j`), `:skew` (entry `(j, i)` is minus entry `(i, j)`, the diagonal 0),
+`:diagonal`, `:upper` or `:lower` (triangular, the rest 0). `symmetric = true` is
+`structure = :symmetric`.
 
 The result is an ordinary `Array{GiacExpr}`, so Julia's generic linear algebra, slicing and
 broadcasting apply to it.
 
 ```julia
-giac_array(:x, 2)                     # [x1, x2]
-giac_array(:a, 2, 2)                  # [a11 a12; a21 a22]
-giac_array(:p, 2, 2; symmetric=true)  # [p11 p12; p12 p22]
+giac_array(:x, 2)                         # [x1, x2]
+giac_array(:a, 2, 2)                      # [a11 a12; a21 a22]
+giac_array(:p, 2, 2; structure = :symmetric)  # [p11 p12; p12 p22]
+giac_array(:w, 3, 3; structure = :skew)   # [0 w12 w13; -w12 0 w23; -w13 -w23 0]
 ```
 """
-function giac_array(base::Symbol, dims::Union{Integer, OrdinalRange}...; symmetric::Bool = false)
+function giac_array(base::Symbol, dims::Union{Integer, OrdinalRange}...; symmetric::Bool = false,
+                    structure::Symbol = symmetric ? :symmetric : :general)
     isempty(dims) && throw(ArgumentError("giac_array needs at least one dimension"))
     ranges = map(_to_range, dims)
     needs_sep = _needs_separator_for_macro_ranges(ranges)
     entry(idx) = giac_identifier(string(_format_indices(base, idx, needs_sep)))
-    if symmetric
-        (length(ranges) == 2 && ranges[1] == ranges[2]) ||
-            throw(ArgumentError("a symmetric array needs two equal index ranges, got $(ranges)"))
-        r = ranges[1]
-        return GiacExpr[entry(i ≤ j ? (i, j) : (j, i)) for i in r, j in r]
-    end
-    return GiacExpr[entry(idx) for idx in Iterators.product(ranges...)]
+    structure === :general && return GiacExpr[entry(idx) for idx in Iterators.product(ranges...)]
+    structure in _STRUCTURES || throw(ArgumentError("unknown structure :$structure; use one of $(join(_STRUCTURES, ", "))"))
+    (length(ranges) == 2 && ranges[1] == ranges[2]) ||
+        throw(ArgumentError("a $structure array needs two equal index ranges, got $(ranges)"))
+    r = ranges[1]
+    zero_ = zero(GiacExpr)
+    value(i, j) = structure === :symmetric ? entry(i ≤ j ? (i, j) : (j, i)) :
+                  structure === :skew ? (i == j ? zero_ : i < j ? entry((i, j)) : -entry((j, i))) :
+                  structure === :diagonal ? (i == j ? entry((i, j)) : zero_) :
+                  structure === :upper ? (i ≤ j ? entry((i, j)) : zero_) :
+                  (i ≥ j ? entry((i, j)) : zero_)
+    return GiacExpr[value(i, j) for i in r, j in r]
 end
+
+const _STRUCTURES = (:symmetric, :skew, :diagonal, :upper, :lower)
+
+# whether entry (i, j) of a matrix with `structure` is a variable of its own (bound by name)
+_own_entry(structure, i, j) = structure === :general || structure === :symmetric && i ≤ j ||
+    structure === :skew && i < j || structure === :diagonal && i == j ||
+    structure === :upper && i ≤ j || structure === :lower && i ≥ j
 
 """
 Code for an array declaration `name = giac_array(base, dims...)`. When every dimension is a
 literal, each distinct entry is also bound to a variable of its own name (`a11`, `a12`, …).
 """
-function _array_declaration(name::Symbol, base::Symbol, dims; symmetric::Bool = false)
-    decl = :($(esc(name)) = giac_array($(QuoteNode(base)), $(map(esc, dims)...); symmetric = $symmetric))
+function _array_declaration(name::Symbol, base::Symbol, dims; structure::Symbol = :general)
+    decl = :($(esc(name)) = giac_array($(QuoteNode(base)), $(map(esc, dims)...); structure = $(QuoteNode(structure))))
     literal_range(d) = _is_range_expr(d) && all(a -> a isa Integer, d.args[2:end])
     literal = all(d -> d isa Integer || literal_range(d), dims)
     literal || return decl
@@ -211,7 +229,7 @@ function _array_declaration(name::Symbol, base::Symbol, dims; symmetric::Bool = 
     bindings = Expr[]
     seen = Set{Symbol}()
     for (k, idx) in enumerate(Iterators.product(ranges...))
-        symmetric && idx[1] > idx[2] && continue
+        length(idx) == 2 && !_own_entry(structure, idx...) && continue
         entry = _format_indices(base, idx, needs_sep)
         entry in seen && continue
         push!(seen, entry)
@@ -221,21 +239,33 @@ function _array_declaration(name::Symbol, base::Symbol, dims; symmetric::Bool = 
     return Expr(:block, decl, bindings...)
 end
 
+# matrix properties recorded as facts about the entries (see `_declare_matrix!`); `posdef` and
+# `negdef` also make the matrix symmetric
+const _MATRIX_PROPERTIES = (:orthogonal, :posdef, :negdef, :invertible)
+
 """
     @giac_matrix A[m, n]
     @giac_matrix P[n, n] symmetric
+    @giac_matrix P[n, n]::posdef Q[n, n]::orthogonal W[n, n]::skew
 
 Declare a symbolic matrix `A` (an ordinary `Matrix{GiacExpr}`) whose entries are named with the
 lowercased matrix name and their indices, the usual `aᵢⱼ` convention: `@giac_matrix A[2, 2]`
-gives `A = [a11 a12; a21 a22]` and binds `a11, a12, a21, a22`. With `symmetric`, entry `(j, i)`
-is entry `(i, j)`, so `@giac_matrix P[2, 2] symmetric` gives `[p11 p12; p12 p22]`. Dimensions
-may be integers or ranges, as for [`giac_array`](@ref).
+gives `A = [a11 a12; a21 a22]` and binds `a11, a12, a21, a22`. Dimensions may be integers or
+ranges, as for [`giac_array`](@ref). Several declarations can be given at once.
 
-Several declarations can be given at once. `symmetric` applies to the declaration it follows:
-`@giac_matrix A[2, 2] P[2, 2] symmetric` declares a general `A` and a symmetric `P`;
-`@giac_matrix A[2, 2] symmetric P[2, 2] symmetric` makes both symmetric.
+A tag after `::` (or a tuple of them) shapes the matrix or records what is known about it:
 
-Entries can carry an assumption, as with [`@giac_var`](@ref): `@giac_matrix A[2, 2]::real`.
+- structure: `symmetric`, `skew`, `diagonal`, `upper`, `lower` (see [`giac_array`](@ref));
+  `symmetric` may also follow the declaration as a word, `@giac_matrix P[2, 2] symmetric`;
+- `posdef`, `negdef`: symmetric, with the diagonal entries assumed positive (negative) and each
+  leading principal minor recorded as positive (with alternating signs);
+- `orthogonal`: the relations `QᵀQ = QQᵀ = I` among the entries are recorded;
+- `invertible`: `det A ≠ 0` is recorded;
+- an assumption for every entry, as with [`@giac_var`](@ref): `real`, `positive`, ….
+
+Recorded relations are used by [`Rules.simplest`](@ref) and [`Rules.equivalent`](@ref) (a
+Gröbner reduction modulo them), and recorded signs by the tests `is_positive`, `is_nonzero` and
+the like. A new declaration of the name replaces them.
 """
 macro giac_matrix(args...)
     isempty(args) && throw(ArgumentError("@giac_matrix needs a declaration such as A[2, 2]"))
@@ -243,17 +273,28 @@ macro giac_matrix(args...)
     names = Symbol[]
     i = 1
     while i <= length(args)
-        # `A[2, 2]::real`: entries with an assumption, as for @giac_var
         spec, tag = args[i] isa Expr && args[i].head == :(::) ? (args[i].args[1], args[i].args[2]) : (args[i], nothing)
         (spec isa Expr && spec.head == :ref && spec.args[1] isa Symbol) ||
             throw(ArgumentError("@giac_matrix expects declarations like A[2, 2], got $spec"))
-        symmetric = i < length(args) && args[i+1] === :symmetric
+        word = i < length(args) && args[i+1] === :symmetric
+        # a tuple of names is a list of tags; anything else (`real`, `(0, 1)`) is one
+        tags = tag isa Expr && tag.head === :tuple && all(a -> a isa Symbol, tag.args) ? collect(tag.args) :
+               tag === nothing ? Any[] : Any[tag]
+        word && push!(tags, :symmetric)
+        shapes = filter(t -> t in _STRUCTURES, tags)
+        any(t -> t in (:posdef, :negdef), tags) && !(:symmetric in shapes) && push!(shapes, :symmetric)
+        length(shapes) <= 1 || throw(ArgumentError("@giac_matrix: a matrix has one structure, got $(join(shapes, " and "))"))
+        properties = filter(t -> t in _MATRIX_PROPERTIES, tags)
+        entry_tags = filter(t -> !(t in _STRUCTURES) && !(t in _MATRIX_PROPERTIES), tags)
+        length(entry_tags) <= 1 || throw(ArgumentError("@giac_matrix: one assumption for the entries, got $(join(entry_tags, ", "))"))
         name = spec.args[1]
-        push!(decls, _array_declaration(name, Symbol(lowercase(string(name))), spec.args[2:end]; symmetric))
-        tagex = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) : esc(tag)
+        push!(decls, _array_declaration(name, Symbol(lowercase(string(name))), spec.args[2:end];
+                                        structure = isempty(shapes) ? :general : only(shapes)))
+        tagex = isempty(entry_tags) ? nothing : only(entry_tags) isa Symbol ? QuoteNode(only(entry_tags)) : esc(only(entry_tags))
         push!(decls, :(_declare!($(esc(name)), $tagex)))
+        push!(decls, :(_declare_matrix!($(esc(name)), $(string(name)), $(Tuple(properties)))))
         push!(names, name)
-        i += symmetric ? 2 : 1
+        i += word ? 2 : 1
     end
     return Expr(:block, decls..., Expr(:tuple, map(esc, names)...))
 end

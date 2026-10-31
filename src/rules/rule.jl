@@ -215,7 +215,7 @@ const _PREDICATE_LATEX = Dict(
     :is_positive => a -> a * " > 0", :is_negative => a -> a * " < 0",
     :is_nonnegative => a -> a * " \\ge 0", :is_real => a -> a * " \\in \\mathbb{R}",
     :is_integer => a -> a * " \\in \\mathbb{Z}", :is_integer_valued => a -> a * " \\in \\mathbb{Z}",
-    :is_number => a -> a * " \\text{ a number}")
+    :is_number => a -> a * " \\text{ a number}", :is_nonzero => a -> a * " \\ne 0")
 
 # a condition: comparisons of math typeset, `&&` as "and", `is_free(a, x)` as "a free of x"
 function _condition_latex(c)

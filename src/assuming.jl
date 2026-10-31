@@ -22,7 +22,8 @@ function _declare!(v::GiacExpr, tag)
     tag === nothing || _assume_tag!(v, tag)
     return v
 end
-_declare!(A::AbstractArray, tag) = (foreach(v -> _declare!(v, tag), A); A)
+# every entry that is a variable (not the zeros or negated entries of a structured matrix)
+_declare!(A::AbstractArray, tag) = (foreach(v -> is_identifier(v) && _declare!(v, tag), A); A)
 
 function _assume_tag!(v::GiacExpr, tag)
     if tag isa Tuple
@@ -136,3 +137,58 @@ function _declare_function!(f::GiacExpr, tags)
 end
 
 _function_facts() = lock(() -> copy(_FUNCTION_FACTS), _DECLARED_LOCK)
+
+# ---------------------------------------------------------------------------------------------
+# Properties of matrices, as facts about their entries: `@giac_matrix Q[2, 2]::orthogonal`
+# ---------------------------------------------------------------------------------------------
+
+# name => (relations: polynomials equal to 0, positive: quantities > 0, nonzero: quantities ≠ 0)
+const _MATRIX_FACTS = Dict{String, NamedTuple{(:relations, :positive, :nonzero), NTuple{3, Vector{GiacExpr}}}}()
+
+"""
+Record what the properties `props` (`:orthogonal`, `:posdef`, `:negdef`, `:invertible`) say about
+the entries of the matrix `A` declared as `name`, replacing what was recorded for that name:
+relations among the entries (`QᵀQ = QQᵀ = I`), quantities known positive (the leading principal
+minors of a positive definite matrix, with its diagonal entries assumed positive) and quantities
+known nonzero (a determinant). Used by `@giac_matrix`.
+"""
+function _declare_matrix!(A::AbstractMatrix, name::String, props::Tuple)
+    relations, positive, nonzero = GiacExpr[], GiacExpr[], GiacExpr[]
+    n = size(A, 1)
+    for p in props
+        size(A, 1) == size(A, 2) || throw(ArgumentError("$name is not square, so it cannot be $p"))
+        if p === :orthogonal
+            At = permutedims(A)
+            for M in (At * A, A * At), i in 1:n, j in i:n
+                r = Commands.expand(M[i, j] - (i == j ? 1 : 0))
+                string(r) == "0" || any(isequal(r), relations) || push!(relations, r)
+            end
+        elseif p === :posdef || p === :negdef
+            for k in 1:n
+                minor = Commands.expand(LinearAlgebra.det(A[1:k, 1:k]))
+                push!(positive, p === :posdef || iseven(k) ? minor : -minor)
+            end
+            for i in 1:n
+                is_identifier(A[i, i]) && _declare!(A[i, i], p === :posdef ? :positive : :negative)
+            end
+            push!(nonzero, positive[end])
+        elseif p === :invertible
+            push!(nonzero, Commands.expand(LinearAlgebra.det(A)))
+        else
+            throw(ArgumentError("unknown matrix property `$p`; use orthogonal, posdef, negdef or invertible"))
+        end
+    end
+    lock(_DECLARED_LOCK) do
+        isempty(relations) && isempty(positive) && isempty(nonzero) ? delete!(_MATRIX_FACTS, name) :
+            (_MATRIX_FACTS[name] = (; relations, positive, nonzero))
+    end
+    return A
+end
+
+_facts(field) = lock(_DECLARED_LOCK) do
+    reduce(vcat, (getfield(f, field) for f in values(_MATRIX_FACTS)); init = GiacExpr[])
+end
+"Every recorded relation among matrix entries (polynomials equal to 0)."
+_relations() = _facts(:relations)
+_positive_facts() = _facts(:positive)
+_nonzero_facts() = _facts(:nonzero)

@@ -142,6 +142,22 @@ end
     @test size(jacobian([w1, w2, k * w1], w)) == (3, 2)
 end
 
+@testset "structured matrices" begin
+    @giac_matrix W[3, 3]::skew D[2, 2]::diagonal U[2, 2]::upper L[2, 2]::lower S[2, 2]::symmetric
+    @test string.(W) == ["0" "w12" "w13"; "-w12" "0" "w23"; "-w13" "-w23" "0"]
+    @test string.(D) == ["d11" "0"; "0" "d22"]
+    @test string.(U) == ["u11" "u12"; "0" "u22"] && string.(L) == ["l11" "0"; "l21" "l22"]
+    @test string.(S) == ["s11" "s12"; "s12" "s22"]
+    @test !@isdefined(w21) && !@isdefined(d12)
+    @giac_var z[1:3]
+    @test string(Giac.Commands.normal(z' * W * z)) == "0"
+    @giac_matrix V[2, 2]::(upper, real)
+    @test Giac._declared(v11) === :real && Giac._declared(v12) === :real
+    @giac_matrix V[2, 2]
+    @test_throws ArgumentError Giac.giac_array(:a, 2, 3; structure = :skew)
+    @test_throws ArgumentError Giac.giac_array(:a, 2, 2; structure = :wobbly)
+end
+
 @testset "taylor" begin
     @giac_var q[1:2] u
     S = string

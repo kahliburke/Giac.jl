@@ -60,14 +60,35 @@ _sign(e::GiacExpr) = _key(Giac.invoke_cmd(:sign, e))
     is_real(e)
 
 Whether Giac can show `e` is positive, negative, nonnegative or real, using what is assumed
-about its variables: with `@giac_var k::positive`, `is_positive(k + 1)` is `true`. Without enough
-known they are `false`, so a rule conditioned on them does not apply.
+about its variables (with `@giac_var k::positive`, `is_positive(k + 1)` is `true`) and what is
+recorded about matrices (with `@giac_matrix P[2, 2]::posdef`, `is_positive(det(P))`). Without
+enough known they are `false`, so a rule conditioned on them does not apply.
 """
-is_positive(e) = (n = _number(e)) === nothing ? _sign(e) == "1" : n > 0
+is_positive(e) = (n = _number(e)) === nothing ? _sign(e) == "1" || _known(e, Giac._positive_facts(), >(0)) : n > 0
 "See [`is_positive`](@ref)."
-is_negative(e) = (n = _number(e)) === nothing ? _sign(e) == "-1" : n < 0
+is_negative(e) = (n = _number(e)) === nothing ? _sign(e) == "-1" || _known(e, Giac._positive_facts(), <(0)) : n < 0
 "See [`is_positive`](@ref)."
-is_nonnegative(e) = (n = _number(e)) === nothing ? _key(Giac.invoke_cmd(:abs, e)) == _key(e) : n >= 0
+is_nonnegative(e) = (n = _number(e)) === nothing ? is_positive(e) || _key(Giac.invoke_cmd(:abs, e)) == _key(e) : n >= 0
+
+"""
+    is_nonzero(e)
+
+Whether `e` is known not to be zero: a nonzero number, something [`is_positive`](@ref) or
+[`is_negative`](@ref), or a multiple of a quantity recorded nonzero (the determinant of a matrix
+declared `::invertible`).
+"""
+is_nonzero(e) = (n = _number(e)) === nothing ?
+    is_positive(e) || is_negative(e) || _known(e, Giac._nonzero_facts(), !iszero) : !iszero(n)
+
+# Whether `e` is a constant multiple `c` of one of the recorded quantities `facts` with `test(c)`.
+function _known(e, facts, test)
+    e isa GiacExpr || return false
+    for f in facts
+        c = _number(Giac.Commands.normal(e / f))
+        c === nothing || test(c) && return true
+    end
+    return false
+end
 "See [`is_positive`](@ref)."
 is_real(e) = e isa Real || e isa GiacExpr && (_number(e) !== nothing || _key(Giac.invoke_cmd(:im, e)) == "0")
 

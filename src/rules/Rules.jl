@@ -43,10 +43,10 @@ using ..Giac: Giac, GiacExpr, giac_identifier, iscall, arguments, operation, sym
 
 export @rule, @rules, rewrite
 export is_free, depends_on, of_degree, is_positive, is_negative, is_nonnegative, is_real,
-       is_integer_valued, in_interval, is_number, multiple_of
+       is_integer_valued, in_interval, is_number, multiple_of, is_nonzero
 export @pattern, @match
 export simplest, expression_size, standard_transforms, Transform, goal_cost
-export rule, inverse, equivalent, verify
+export rule, inverse, equivalent, verify, apply_relations
 export identities, IdentityCatalog, function_identities
 export log_expand, log_combine, power_expand, power_combine, exp_expand, exp_combine, trig_simplify
 

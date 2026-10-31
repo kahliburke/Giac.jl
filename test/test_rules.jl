@@ -397,4 +397,24 @@ using Giac.Rules
         @test isempty(function_identities())
         @giac_var n
     end
+
+    @testset "properties of matrices" begin
+        @giac_matrix Q[2, 2]::orthogonal P[2, 2]::posdef N[2, 2]::negdef A[2, 2]::invertible
+        @test equivalent(Q' * Q, I) && equivalent(Q * Q', I)
+        @test apply_relations(LinearAlgebra.det(Q)^2) == 1
+        @test apply_relations(q11^2 + q21^2 + y) == 1 + y
+        @test simplest((q11^2 + q21^2)^2) == 1
+        @test !equivalent(q11, q22)
+        @test is_positive(p11) && is_positive(LinearAlgebra.det(P)) && is_positive(3LinearAlgebra.det(P))
+        @test !is_positive(p12)
+        @test is_negative(n11) && is_positive(LinearAlgebra.det(N))
+        @test is_nonzero(LinearAlgebra.det(A)) && !is_nonzero(a11)
+        @test any(t -> t isa Transform && t.name == "declared relations", standard_transforms())
+        # a new declaration drops what was recorded
+        @giac_matrix Q[2, 2] P[2, 2] N[2, 2] A[2, 2]
+        @test isempty(Giac._relations()) && isempty(Giac._positive_facts()) && isempty(Giac._nonzero_facts())
+        @test !is_positive(p11)
+        @test !any(t -> t isa Transform && t.name == "declared relations", standard_transforms())
+        @test_throws ArgumentError @giac_matrix B[2, 3]::orthogonal
+    end
 end
