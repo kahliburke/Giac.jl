@@ -9,10 +9,15 @@ top level and returns the result, or `nothing` if the rule does not match.
 struct Rule
     lhs::Pattern
     rhs::Function           # bindings -> replacement (or `nothing` to decline the match)
+    cond::Any               # bindings -> Bool, from `where`; or `nothing`
     source::Expr
 end
 
-Rule(lhs_value, slots::Vector, rhs::Function, source::Expr) = Rule(_make_pattern(lhs_value, slots), rhs, source)
+Rule(lhs_value, slots::Vector, rhs::Function, cond, source::Expr) =
+    Rule(_make_pattern(lhs_value, slots), rhs, cond, source)
+
+# the replacement for bindings `b`, or `nothing` if the condition does not hold
+_rhs(r::Rule, b) = r.cond === nothing || r.cond(b) ? r.rhs(b) : nothing
 
 function (r::Rule)(e::GiacExpr)
     p = r.lhs
@@ -42,13 +47,13 @@ function _apply_ac(r::Rule, p::Term, e::GiacExpr)
     end
     # and up to a common factor
     return _match_scaled(p.args, args, (b, k, others) -> begin
-        v = r.rhs(b)
+        v = _rhs(r, b)
         v === nothing ? nothing : _combine("+", vcat(k * convert(GiacExpr, v), others))
     end)
 end
 
 function _replace(r::Rule, b, rest)
-    v = r.rhs(b)
+    v = _rhs(r, b)
     v === nothing && return nothing
     v = convert(GiacExpr, v)
     return isempty(rest) ? v : _combine(r.lhs.head, vcat(v, rest))
@@ -108,19 +113,18 @@ function _rule_expr(ex)
     ex isa Expr && ex.head === :call && ex.args[1] === :(=>) && length(ex.args) == 3 ||
         throw(ArgumentError("a rule is written `lhs => rhs`, got `$ex`"))
     lhs_code, slot_list = _lhs_code(ex.args[2])
+    rhs, cond = _rule_sides(ex)
     b = gensym(:bindings)
-    return :($Rule($lhs_code, $slot_list, $b -> $(_rhs_code(ex, b)), $(QuoteNode(ex))))
+    cond_code = cond === nothing ? nothing : :($b -> $_holds($(_slot_values(cond, b))))
+    return :($Rule($lhs_code, $slot_list, $b -> $(_slot_values(rhs, b)), $cond_code, $(QuoteNode(ex))))
 end
 
-# The right side of `ex` (with its `where` condition) as code computing it from bindings `b`.
-function _rhs_code(ex, b)
-    rhs, cond = _rule_sides(ex)
+# code with each slot replaced by its value in the bindings `b`
+function _slot_values(ex, b)
     value(name, _, kind, _) = kind === :sum ? :(sum($b[$(QuoteNode(name))]; init = 0)) :
                               kind === :product ? :(prod($b[$(QuoteNode(name))]; init = 1)) :
                               :($b[$(QuoteNode(name))])
-    code = _replace_slots(value, rhs)
-    cond === nothing && return code
-    return :($_holds($(_replace_slots(value, cond))) ? $code : nothing)
+    return _replace_slots(value, ex)
 end
 
 # A condition holds if it is `true`, or a comparison Giac evaluates to `true` (`~n > 1` for a

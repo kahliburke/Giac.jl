@@ -184,5 +184,14 @@ function _trace_display(e0, steps; collapse::Bool)
     return RewriteTrace(Giac.Derivation(rows), isempty(steps) ? e0 : first(steps[end]))
 end
 
+# In a `@derivation`, a trace continues the step it is the value of: `lhs = start`, then one row
+# per step.
+function Giac._derivation_rows(left, written, t::RewriteTrace, simplifier)
+    steps = t.steps.rows
+    rows = [(left, join(vcat(written, first(steps[1])), " = "))]
+    append!(rows, (("{}", last(r)) for r in steps))
+    return rows
+end
+
 _label_latex(r::Rule) = _rule_latex(r)
 _label_latex(f) = "\\text{" * string(nameof(f)) * "}"

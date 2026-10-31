@@ -263,4 +263,72 @@ using Giac.Rules
         @test last(simplest(x + y, trig_simplify())) == x + y
         @test_throws ArgumentError simplest(x, 42)
     end
+
+    @testset "rules from identities" begin
+        double = rule(sin(2x) ~ 2sin(x) * cos(x), x)
+        @test double(sin(2y)) == 2sin(y) * cos(y)
+        @test double(sin(2 * (y + 1))) == 2sin(y + 1) * cos(y + 1)
+        @test double(sin(y)) === nothing
+        @test occursin("\\to", sprint(show, MIME("text/latex"), double))
+        back = inverse(double)
+        @test back(2sin(y) * cos(y)) == sin(2y)
+        @test back(sin(y) * cos(y)) == sin(2y) / 2               # up to the coefficient
+        combine = inverse.(log_expand())
+        @giac_var p::positive w::positive
+        @test rewrite(log(p) + log(w), combine) == log(p * w)
+        @giac_var p w
+        @test_throws ArgumentError inverse(@rule ~u * +(~~ts) => sum(~u * t for t in ~~ts))
+        @test_throws ArgumentError inverse(@rule sin(~u) * cos(~v) => sin(~u))       # drops ~v
+        @test_throws ArgumentError rule(x + 1, x)
+    end
+
+    @testset "equivalent and verify" begin
+        @test equivalent(sin(x)^2 + cos(x)^2, 1)
+        @test equivalent((x + 1)^2, x^2 + 2x + 1)
+        @test !equivalent(log(x * y), log(x) + log(y))           # not for negative x and y
+        @test !equivalent(sqrt(x^2), x)
+        @giac_var p::positive w::positive
+        @test equivalent(log(p * w), log(p) + log(w))            # sampled where assumed
+        @giac_var p w
+        @test verify(rule(sin(2x) ~ 2sin(x) * cos(x), x)) === true
+        @test verify(rule(sin(2x) ~ sin(x) * cos(x), x)) === false
+        @test all(verify(trig_simplify()))
+        @test all(verify(log_expand())) && all(verify(power_combine())) && all(verify(exp_combine()))
+    end
+
+    @testset "substituting a relation" begin
+        @giac_var r s
+        @test substitute(x^2 + y^2 + z, x^2 + y^2 => r^2) == r^2 + z
+        @test substitute(2x^2 + 2y^2 + z, x^2 + y^2 => r^2) == 2r^2 + z
+        @test substitute(x^2 + 2y^2, x^2 + y^2 => r^2) == r^2 + y^2
+        @test string(substitute(x^4 + 2x^2 * y^2 + y^4, x^2 + y^2 => r^2)) == "r^4"   # by Gröbner reduction
+        @test substitute(3sin(z)^2 + 3cos(z)^2 + x, sin(z)^2 + cos(z)^2 => 1) == 3 + x
+        @test substitute(x * y + s, x * y => r, s => 2) == r + 2
+    end
+
+    @testset "simplest with the standard transforms" begin
+        @test last(simplest(sin(z)^4 - cos(z)^4)) == -cos(2z)
+        @test string(last(simplest((x^2 - 1) / (x^2 + 2x + 1)))) == "(x-1)/(x+1)"
+        @test last(simplest(exp(2log(x)) + exp(x) * exp(y))) == x^2 + exp(x + y)
+        @test last(simplest(2sin(z) * cos(z) + 3sin(z)^2 + 3cos(z)^2)) == sin(2z) + 3
+        @test last(simplest(sin(z)^3; goal = :trig_linear)) == (3sin(z) - sin(3z)) / 4
+        @test string(last(simplest((x + 1)^2 * (x - 1); goal = :expanded))) == "x^3+x^2-x-1"
+        @test string(last(simplest(x^2 - 1; goal = :factored))) == "(x-1)*(x+1)"
+        @test_throws ArgumentError simplest(x; goal = :prettiest)
+        @test goal_cost(:factored, (x - 1) * (x + 1))[1] == 1
+        # with verify, only steps checked to be equal are taken
+        t = simplest(sin(z)^4 - cos(z)^4; verify = true)
+        @test last(t) == -cos(2z)
+        @test any(x -> x isa Transform, standard_transforms())
+        @test string.(simplest([x^2 - 1, (x + 1)^2 - x^2]; goal = :factored)) == ["(x-1)*(x+1)", "2*x+1"]
+    end
+
+    @testset "traces in derivations" begin
+        d = @derivation begin
+            V = sin(z)^4 - cos(z)^4
+            V ~ simplest(V)
+        end
+        @test length(d.rows) == 3                                # V = e, V = e (start), {} = -cos(2z)
+        @test occursin("\\text{by }", last(d.rows[end]))
+    end
 end

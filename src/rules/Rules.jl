@@ -30,19 +30,22 @@ turns `sin(a)^2 + cos(a)^2 + b` into `b + 1`. A sum matches up to sign and up to
 factor, using a term in part if its coefficient is larger than needed: the same rule turns
 `3sin(a)^2 + 2cos(a)^2` into `2 + sin(a)^2`.
 
-Patterns are also queries ([`@pattern`](@ref), `match`, `occursin`, `findall`, [`@match`](@ref)),
-[`simplest`](@ref) searches rewrites for the shortest form, and rule sets for identities that
-hold under conditions ([`log_expand`](@ref), [`power_expand`](@ref), [`trig_simplify`](@ref), …)
-use declared assumptions.
+Patterns are also queries ([`@pattern`](@ref), `match`, `occursin`, `findall`, [`@match`](@ref)).
+Rules can be written as identities ([`rule`](@ref)), turned around ([`inverse`](@ref)) and
+checked ([`verify`](@ref), [`equivalent`](@ref)). Rule sets for identities that hold under
+conditions ([`log_expand`](@ref), [`power_expand`](@ref), [`trig_simplify`](@ref), …) use
+declared assumptions, and [`simplest`](@ref) searches rewrites by them and by Giac's own
+transformations ([`standard_transforms`](@ref)) for the form that best meets a goal.
 """
 module Rules
 
-using ..Giac: Giac, GiacExpr, giac_identifier, iscall, arguments, operation, symb_funcname, is_integer
+using ..Giac: Giac, GiacExpr, giac_identifier, iscall, arguments, operation, symb_funcname, is_integer, substitute
 
 export @rule, @rules, rewrite
 export is_free, depends_on, of_degree, is_positive, is_negative, is_nonnegative, is_real
 export @pattern, @match
-export simplest, expression_size
+export simplest, expression_size, standard_transforms, Transform, goal_cost
+export rule, inverse, equivalent, verify
 export log_expand, log_combine, power_expand, power_combine, exp_expand, exp_combine, trig_simplify
 
 include("patterns.jl")
@@ -51,7 +54,10 @@ include("rule.jl")
 include("predicates.jl")
 include("rewrite.jl")
 include("queries.jl")
-include("search.jl")
 include("library.jl")
+include("identities.jl")
+include("verify.jl")
+include("transforms.jl")
+include("search.jl")
 
 end # module Rules

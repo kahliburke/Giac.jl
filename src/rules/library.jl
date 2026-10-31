@@ -19,7 +19,6 @@ Logarithms of products split into sums of logarithms, and back: `log(a*b) = log(
 log_expand() = _library(:log_expand) do
     @rules begin
         log(~a * ~b) => log(~a) + log(~b) where is_positive(~a) && is_positive(~b)
-        log(~a^~n) => ~n * log(~a) where is_positive(~a) && is_real(~n)
     end
 end
 

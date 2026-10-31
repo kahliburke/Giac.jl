@@ -178,6 +178,13 @@ _is_docstring(ex) = ex isa Expr && ex.head === :macrocall && ex.args[1] == Globa
 _is_text(ex) = ex isa String || ex isa Expr && (ex.head === :string ||
                                                ex.head === :macrocall && ex.args[1] === Symbol("@raw_str"))
 
+"""
+The rows for one step: the left side as written, the terms written after it, and the value. A
+value with steps of its own (a rewrite's trace) continues as one row per step.
+"""
+_derivation_rows(left, written, value, simplifier) =
+    [(left, join(vcat(written, giac_latex(_shown(simplifier, value))), " = "))]
+
 "Apply a display simplifier to a value, entry by entry for arrays."
 _shown(f, v::AbstractArray) = map(f, v)
 _shown(f, v) = f(v)
@@ -190,9 +197,9 @@ function _derivation(simplifier, block)
     out = Any[:($rows = Tuple{String, String}[])]
     # each row is typeset right after its step runs, so a later reassignment can't change it
     row(lhs, value; written = ()) =
-        :(push!($rows, (written_latex($(QuoteNode(lhs))),
-                        join([$((:(written_latex($(QuoteNode(w)))) for w in written)...),
-                              giac_latex(_shown($simplifier, $value))], " = "))))
+        :(append!($rows, _derivation_rows(written_latex($(QuoteNode(lhs))),
+                                          String[$((:(written_latex($(QuoteNode(w)))) for w in written)...)],
+                                          $value, $simplifier)))
     for st in stmts
         st isa LineNumberNode && (push!(out, st); continue)
         if _is_text(st)

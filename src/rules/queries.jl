@@ -137,7 +137,7 @@ end
 
 function _first_branch(e::GiacExpr, rules)
     for r in rules
-        v = _match(r.lhs, e, Bindings(), r.rhs)
+        v = _match(r.lhs, e, Bindings(), b -> _rhs(r, b))
         v === nothing || return v
     end
     return nothing

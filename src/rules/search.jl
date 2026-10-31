@@ -9,28 +9,38 @@ The number of nodes in the tree of `e`: the default cost for [`simplest`](@ref).
 expression_size(e::GiacExpr) = iscall(e) ? 1 + sum(expression_size, arguments(e); init = 0) : 1
 
 """
-    simplest(e, transforms...; cost = expression_size, depth = 8, width = 16)
+    simplest(e; goal = :compact, verify = false, depth = 6, width = 10)
+    simplest(e, transforms...; cost, goal, verify, depth, width)
 
-Search rewrites of `e` for the one of least `cost`, and return the path to it as a trace (see
-[`rewrite`](@ref); `last(t)` is the result). Each transform is a rule, a vector of rules, or a
-function of a whole expression such as `expand` or `factor`. Each step applies one transform in
-one place; the search keeps the `width` cheapest expressions at each of up to `depth` steps, so
-it can pass through a longer form on the way to a shorter one. Ties in cost go to the shorter
-written form.
+Search rewrites of `e` for the form that best meets `goal`, and return the path to it as a trace
+(see [`rewrite`](@ref); `last(t)` is the result). Without transforms it uses
+[`standard_transforms`](@ref): Giac's normal form, factoring, trigonometric forms and the rule
+sets for identities with conditions. Each transform is a rule, a vector of rules, a
+[`Transform`](@ref), or a function of a whole expression such as `expand`.
+
+Each step applies one transform in one place; the search keeps the `width` best expressions at
+each of up to `depth` steps, so it can pass through a longer form on the way to a shorter one.
+
+- `goal`: `:compact`, `:expanded`, `:factored` or `:trig_linear` (see [`goal_cost`](@ref)); or
+  give `cost`, a function of an expression returning anything comparable.
+- `verify = true` takes only steps that [`equivalent`](@ref) confirms, so a transformation that
+  is wrong for the values in question (under the declared assumptions) is never used.
 
 ```julia
-simplest(e, trig_simplify(), Giac.Commands.expand, Giac.Commands.factor)
+simplest(sin(t)^4 - cos(t)^4)                    # -cos(2t), through factor, sin²+cos² = 1, expand
+simplest(sin(t)^3; goal = :trig_linear)          # 3sin(t)/4 - sin(3t)/4
 ```
 """
-function simplest(e::GiacExpr, transforms...; cost = expression_size, depth::Integer = 8, width::Integer = 16)
+function simplest(e::GiacExpr, transforms...; goal::Symbol = :compact, cost = nothing, verify::Bool = false,
+                  depth::Integer = 6, width::Integer = 10)
     rules, fns = Rule[], Any[]
-    for t in transforms
+    for t in (isempty(transforms) ? standard_transforms() : transforms)
         t isa Rule ? push!(rules, t) :
         t isa AbstractVector{<:Rule} ? append!(rules, t) :
-        applicable(t, e) ? push!(fns, t) :
+        (t isa Transform || applicable(t, e)) ? push!(fns, t) :
         throw(ArgumentError("a transform is a rule, a vector of rules, or a function of an expression; got $t"))
     end
-    score(x) = (cost(x), length(_key(x)))
+    score = cost === nothing ? (x -> (goal_cost(goal, x)..., length(_key(x)))) : (x -> (cost(x), length(_key(x))))
     Path = Vector{Tuple{GiacExpr, Any}}
     best, best_score = (e, Path()), score(e)
     seen = Set([_key(e)])
@@ -41,6 +51,7 @@ function simplest(e::GiacExpr, transforms...; cost = expression_size, depth::Int
             k = _key(y)
             k in seen && continue
             push!(seen, k)
+            verify && !equivalent(x, y) && continue
             push!(next, (y, vcat(path, [(y, label)])))
         end
         isempty(next) && break
@@ -52,11 +63,17 @@ function simplest(e::GiacExpr, transforms...; cost = expression_size, depth::Int
     return _trace_display(e, last(best); collapse = false)
 end
 
+simplest(A::AbstractArray{GiacExpr}, transforms...; kwargs...) = map(e -> last(simplest(e, transforms...; kwargs...)), A)
+
 # every expression one step from `e`: a rule at any place in it, or a function of all of it
 function _successors(e::GiacExpr, rules, fns)
     out = _rule_successors(e, rules)
     for f in fns
-        v = f(e)
+        v = try
+            f(e)
+        catch
+            continue
+        end
         v isa GiacExpr && _key(v) != _key(e) && push!(out, (v, f))
     end
     return out

@@ -41,6 +41,17 @@ function substitute(expr::GiacExpr, dict::AbstractDict{<:GiacExpr})::GiacExpr
     # Handle empty Dict - return original expression unchanged (no GIAC call).
     isempty(dict) && return expr
 
+    # A sum, product or power as a key is a relation to substitute, which Giac's subst does not
+    # do: `x^2 + y^2 => r^2` (see `Rules._substitute_relation`).
+    if any(_is_relation_key, keys(dict))
+        plain = filter(p -> !_is_relation_key(first(p)), dict)
+        expr = substitute(expr, plain)
+        for (k, v) in dict
+            _is_relation_key(k) && (expr = Rules._substitute_relation(expr, k, v))
+        end
+        return expr
+    end
+
     # Collect parallel vectors of GiacExpr keys and untyped values, then
     # delegate to the direct-binding shim. Substitution is applied
     # simultaneously by giac_subst, so e.g. Dict(x => y, y => x) swaps.
@@ -79,6 +90,8 @@ GiacExpr: y+2*x
 """
 substitute(expr::GiacExpr, pairs::Pair{<:GiacExpr}...)::GiacExpr =
     isempty(pairs) ? expr : substitute(expr, Dict(pairs))
+
+_is_relation_key(k::GiacExpr) = iscall(k) && symb_funcname(k) in ("+", "*", "^", "-", "inv")
 
 # ============================================================================
 # GiacMatrix Support: Element-wise Substitution
