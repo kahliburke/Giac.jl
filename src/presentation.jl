@@ -755,10 +755,19 @@ function _tex(n::_PBraKet, c::_Ctx)
         single = all(a -> a isa _PAtom && !_juxtaposed(a.tex) && !occursin(r"[_^]", a.tex), n.args)
         return "\\delta_{" * join(labels, single ? " " : ", ") * "}"
     end
-    inside = join((_tex(a, c) for a in n.args), " \\vert ")
+    inside = join((_label_tex(a, c) for a in n.args), " \\vert ")
     n.kind == "bra" && return "\\langle " * inside * " \\vert"
     n.kind == "ket" && return "\\vert " * inside * " \\rangle"
     return "\\langle " * inside * " \\rangle"
+end
+
+# A label in a bra-ket, with an operator acting on the state written before it: ⟨Ĥ m|n⟩
+function _label_tex(a::_PNode, c::_Ctx)
+    a isa _PProd || return _tex(a, c)
+    operator(f) = f isa _PAtom && startswith(f.tex, "\\hat{")
+    ops, rest = filter(operator, a.factors), filter(!operator, a.factors)
+    (isempty(ops) || isempty(rest)) && return _tex(a, c)
+    return join((_tex(f, c) for f in ops), " ") * " " * _tex(length(rest) == 1 ? rest[1] : _PProd(rest), c)
 end
 
 function _tex(n::_PBar, c::_Ctx)

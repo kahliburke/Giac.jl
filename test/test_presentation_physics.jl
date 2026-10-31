@@ -23,6 +23,10 @@
         @test L(bra(n)) == "\\langle n \\vert" && L(ket(n)) == "\\vert n \\rangle"
         @test L(braket(1, 2)) == "\\langle 1 \\vert 2 \\rangle"
         @test Giac.written_latex(:(braket(n, x̂, n))) == "\\langle n \\vert \\hat{x} \\vert n \\rangle"
+        # an operator acting on a label is written before it, whichever side it acts on
+        @giac_var Ĥ
+        @test L(braket(Ĥ * ii, n)) == "\\langle \\hat{H} \\mathrm{ii} \\vert n \\rangle"
+        @test L(braket(ii, Ĥ * n)) == "\\langle \\mathrm{ii} \\vert \\hat{H} n \\rangle"
         @giac_var p q
         @test L(kronecker_delta(p, q)) == "\\delta_{p q}"
         @test string(kronecker_delta(2, 2)) == "1" && string(kronecker_delta(2, 3)) == "0" && string(kronecker_delta(p, p)) == "1"
