@@ -8,9 +8,12 @@ expanded `e`, as `monomial => coefficient`; the term free of `vars` is under `1`
 depends on `vars` without being a power of one (`sin(x1)`) is part of the monomial. Coefficients
 are normalised, and monomials whose coefficient is zero are left out.
 
+Not exported, as other algebra packages export a `coefficients` of their own:
+`using Giac: coefficients`, or `Giac.coefficients(…)`.
+
 ```julia
 @giac_var x[1:2] a b
-c = coefficients(a * x1^2 + b * x1 * x2 + 2a * x1^2 + 3, x)
+c = Giac.coefficients(a * x1^2 + b * x1 * x2 + 2a * x1^2 + 3, x)
 c[x1^2]          # 3*a
 c[x1 * x2]       # b
 c[1]             # 3

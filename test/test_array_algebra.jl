@@ -157,7 +157,7 @@ end
 @testset "collect_terms" begin
     @giac_var q[1:2] a b
     S = string
-    c = coefficients(a * q1^2 + b * q1 * q2 + 2a * q1^2 + 3, q)
+    c = Giac.coefficients(a * q1^2 + b * q1 * q2 + 2a * q1^2 + 3, q)
     @test S(c[q1^2]) == "3*a"
     @test S(c[q1 * q2]) == "b"
     @test S(c[one(GiacExpr)]) == "3"

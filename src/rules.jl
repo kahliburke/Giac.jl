@@ -231,7 +231,24 @@ end
 
 _plain(ex) = _replace_slots((name, _, kind) -> kind === :slot || kind === :segment ? name :
                                                Expr(:call, kind === :sum ? :sum : :product, name), ex)
-_side_latex(ex) = _is_math(_plain(ex)) ? Giac.written_latex(_plain(ex)) : _code_latex(_plain(ex))
+function _side_latex(ex)
+    p = _plain(ex)
+    _is_math(p) && return Giac.written_latex(p)
+    g = _generator_latex(p)
+    return g === nothing ? _code_latex(p) : g
+end
+
+# `sum(u * t for t in ts)` as a sum over `t ∈ ts` (and `prod` as a product), or `nothing`
+function _generator_latex(ex)
+    ex isa Expr && ex.head === :call && ex.args[1] in (:sum, :prod) && length(ex.args) == 2 || return nothing
+    g = ex.args[2]
+    g isa Expr && g.head === :generator && length(g.args) == 2 || return nothing
+    body, it = g.args
+    it isa Expr && it.head === :(=) && it.args[1] isa Symbol && _is_math(body) && _is_math(it.args[2]) || return nothing
+    op = ex.args[1] === :sum ? "\\sum" : "\\prod"
+    return op * "_{" * Giac.written_latex(it.args[1]) * " \\in " * Giac.written_latex(it.args[2]) * "} " *
+           Giac.written_latex(body)
+end
 _code_latex(ex) = "\\texttt{" * replace(_code_string(ex), r"([_{}&%#$])" => s"\\\1") * "}"
 
 const _RELATIONS = Dict(:< => "<", :> => ">", :<= => "\\le", :>= => "\\ge", :(==) => "=", :!= => "\\ne")
