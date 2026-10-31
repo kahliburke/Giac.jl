@@ -373,7 +373,7 @@ end
 # in its coefficient is written over the whole term, A⁻¹uvᵀA⁻¹ over 1 + vᵀA⁻¹u.
 function _term_latex(w::Word, c::GiacExpr)
     word = isempty(w) ? "I" : join(map(_factor_latex, w), " ")
-    style = _TYPESET[]
+    style = _current_style()
     root = _pnode(c)
     ctx = _Ctx(style, _variables(root, style), false)
     p = _split(root)

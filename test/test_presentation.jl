@@ -67,6 +67,15 @@
         @test f(s + 1) isa Giac.Typeset
     end
 
+    @testset "a style in one task does not leak into another" begin
+        global_style = Giac._current_style()
+        results = fetch.([Threads.@spawn(typeset(() -> L(m * v^2 / 2); fractions = (isodd(i) ? :front : :stacked)))
+                          for i in 1:40])
+        @test all(results[i] == (isodd(i) ? "\\frac{1}{2} m v^{2}" : "\\frac{m v^{2}}{2}") for i in 1:40)
+        fetch.([Threads.@spawn(Giac.written_latex(:(x + 1))) for _ in 1:40])
+        @test Giac._current_style() === global_style                 # the global style, untouched
+    end
+
     @testset "in derivations and matrices" begin
         d = @derivation typeset(fractions = :front) begin
             E = m * v^2 / 2

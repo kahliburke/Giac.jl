@@ -31,7 +31,12 @@ const _TYPESET_OPTIONS = Dict(
     :products => (:conventional, :as_is),
     :trig_powers => (:superscript, :parenthesized))
 
+# The default style, set by `typeset!`; a style for a block of code or one value is the running
+# task's own (in its task-local storage), so concurrent tasks never see each other's.
 const _TYPESET = Ref(TypesetStyle())
+const _STYLE_KEY = :giac_typeset_style
+_current_style() = get(task_local_storage(), _STYLE_KEY, _TYPESET[])::TypesetStyle
+_in_style(f, style::TypesetStyle) = task_local_storage(f, _STYLE_KEY, style)
 
 _names(v::Union{GiacExpr, Symbol, AbstractString}) = [v isa GiacExpr && iscall(v) && symb_funcname(v) == "of" ?
                                                        string(first(arguments(v))) : string(v)]
@@ -93,31 +98,14 @@ array, a symbolic matrix). Without an expression, a function that does that, for
 `@derivation typeset(by = s) begin … end`. With a function first (`typeset(by = x) do … end`), the
 options hold while it runs.
 """
-typeset(e; kwargs...) = Typeset(e, _with(_TYPESET[]; kwargs...))
-typeset(; kwargs...) = (s = _with(_TYPESET[]; kwargs...); e -> Typeset(e, s))
-function typeset(f::Function; kwargs...)
-    old = _TYPESET[]
-    _TYPESET[] = _with(old; kwargs...)
-    try
-        return f()
-    finally
-        _TYPESET[] = old
-    end
-end
+typeset(e; kwargs...) = Typeset(e, _with(_current_style(); kwargs...))
+typeset(; kwargs...) = (s = _with(_current_style(); kwargs...); e -> Typeset(e, s))
+typeset(f::Function; kwargs...) = _in_style(f, _with(_current_style(); kwargs...))
 
 "A value with the style it is written in; see [`typeset`](@ref)."
 struct Typeset
     value::Any
     style::TypesetStyle
-end
-function _in_style(f, style::TypesetStyle)
-    old = _TYPESET[]
-    _TYPESET[] = style
-    try
-        return f()
-    finally
-        _TYPESET[] = old
-    end
 end
 giac_latex(t::Typeset) = _in_style(() -> giac_latex(t.value), t.style)
 _entry_latex(t::Typeset) = _in_style(() -> _entry_latex(t.value), t.style)
@@ -348,7 +336,7 @@ _in_exponent(c::_Ctx) = _Ctx(c.style, c.vars, true)
 
 "LaTeX for one expression, written in the current style; Giac's own LaTeX where this has no rule."
 function _present_latex(e::GiacExpr)
-    style = _TYPESET[]
+    style = _current_style()
     root = _pnode(e)
     return _tex(root, _Ctx(style, _variables(root, style), false))
 end

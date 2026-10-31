@@ -125,7 +125,7 @@ end
 "LaTeX for written Julia code, typeset without evaluating it, in the order it was written."
 function written_latex(ex)
     src = string(_to_giac_syntax(ex))
-    as_written = _with(_TYPESET[]; order = :as_is, lead = :as_is, products = :as_is)
+    as_written = _with(_current_style(); order = :as_is, lead = :as_is, products = :as_is)
     return _in_style(() -> _entry_latex(giac_eval("'" * src * "'")), as_written)
 end
 
