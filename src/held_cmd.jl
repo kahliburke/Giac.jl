@@ -63,18 +63,14 @@ end
 
 Convert a single argument to its LaTeX representation for use in HeldCmd display.
 
-For GiacExpr, delegates to GIAC's `latex()` command. For other types, produces
+For GiacExpr, the expression as [`giac_latex`](@ref) writes it. For other types, produces
 a simple string representation suitable for LaTeX.
 """
-function _arg_to_latex(arg::GiacExpr)::String
-    latex_result = invoke_cmd(:latex, arg)
-    latex_str = string(latex_result)
-    # GIAC's latex() returns strings with surrounding quotes — strip them
-    if length(latex_str) > 2 && latex_str[1] == '"' && latex_str[end] == '"'
-        return latex_str[2:end-1]
-    end
-    return string(arg)
-end
+_arg_to_latex(arg::GiacExpr)::String = giac_latex(arg)
+
+# an integrand or operand: a sum in parentheses
+_operand_latex(arg::GiacExpr) = (iscall(arg) && symb_funcname(arg) == "+") ? "\\left(" * giac_latex(arg) * "\\right)" : giac_latex(arg)
+_operand_latex(arg) = _arg_to_latex(arg)
 
 function _arg_to_latex(arg::Symbol)::String
     return string(arg)
@@ -116,15 +112,15 @@ end
 function _latex_integrate(io::IO, args::Tuple)
     if length(args) >= 4
         # Definite integral: integrate(expr, var, lower, upper)
-        expr_latex = _arg_to_latex(args[1])
+        expr_latex = _operand_latex(args[1])
         var_latex = _arg_to_latex(args[2])
         lower_latex = _arg_to_latex(args[3])
         upper_latex = _arg_to_latex(args[4])
-        print(io, "\\int_{", lower_latex, "}^{", upper_latex, "} ", expr_latex, " \\, d", var_latex)
+        print(io, "\\int_{", lower_latex, "}^{", upper_latex, "} ", expr_latex, " \\, \\mathrm{d}", var_latex)
     elseif length(args) >= 2
-        expr_latex = _arg_to_latex(args[1])
+        expr_latex = _operand_latex(args[1])
         var_latex = _arg_to_latex(args[2])
-        print(io, "\\int ", expr_latex, " \\, d", var_latex)
+        print(io, "\\int ", expr_latex, " \\, \\mathrm{d}", var_latex)
     elseif length(args) == 1
         expr_latex = _arg_to_latex(args[1])
         print(io, "\\int ", expr_latex)
@@ -289,8 +285,15 @@ end
 # Display Methods
 # ============================================================================
 
-function Base.show(io::IO, ::MIME"text/latex", held::HeldCmd)
-    print(io, "\$\$")
+Base.show(io::IO, ::MIME"text/latex", held::HeldCmd) = print(io, "\$\$", _held_latex(held), "\$\$")
+
+# a held command as a value of `@derivation` or an entry of an array
+giac_latex(held::HeldCmd) = _held_latex(held)
+_entry_latex(held::HeldCmd) = _held_latex(held)
+
+_held_latex(held::HeldCmd) = sprint(_print_held_latex, held)
+
+function _print_held_latex(io::IO, held::HeldCmd)
     if held.cmd === :integrate
         _latex_integrate(io, held.args)
     elseif held.cmd === :diff
@@ -314,7 +317,6 @@ function Base.show(io::IO, ::MIME"text/latex", held::HeldCmd)
     else
         _latex_generic(io, held)
     end
-    print(io, "\$\$")
 end
 
 function Base.show(io::IO, held::HeldCmd)

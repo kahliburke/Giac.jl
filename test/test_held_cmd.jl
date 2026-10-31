@@ -56,14 +56,14 @@
         h = hold_cmd(:integrate, f, x)
         latex = sprint(show, MIME("text/latex"), h)
         @test occursin("\\int", latex)
-        @test occursin("dx", latex)
+        @test occursin("\\mathrm{d}x", latex)
 
         # Definite integral with bounds
         h_def = hold_cmd(:integrate, f, x, 0, 1)
         latex_def = sprint(show, MIME("text/latex"), h_def)
         @test occursin("\\int_{", latex_def)
         @test occursin("}^{", latex_def)
-        @test occursin("dx", latex_def)
+        @test occursin("\\mathrm{d}x", latex_def)
     end
 
     @testset "LaTeX: diff" begin
