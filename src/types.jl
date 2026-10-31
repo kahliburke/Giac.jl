@@ -90,7 +90,9 @@ function _handle(e::GiacExpr)
     return with_giac_lock() do
         p = getfield(e, :ptr)
         p != C_NULL && return p
-        p = _giac_eval_string(_str(n), getfield(DEFAULT_CONTEXT[], :ptr))
+        # a symbol is made as the identifier itself, not evaluated (it may name a stored value)
+        p = n isa SymNode ? _make_gen_ptr(GiacCxxBindings.make_identifier(n.name)) :
+                            _giac_eval_string(_str(n), getfield(DEFAULT_CONTEXT[], :ptr))
         setfield!(e, :ptr, p)
         finalizer(_finalize_giacexpr, e)
         p

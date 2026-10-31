@@ -161,8 +161,16 @@ The symbolic identifier (or unevaluated call, e.g. `"u(t)"`) `name`, created wit
 it. Evaluating a bare name returns whatever value a Giac context has assigned to it, so a
 "variable" made that way can silently be a stored value instead.
 """
-giac_identifier(name::AbstractString) =
-    giac_eval("'" * replace(name, GIAC_RESERVED_LETTERS...) * "'")
+function giac_identifier(name::AbstractString)
+    giac_name = replace(name, GIAC_RESERVED_LETTERS...)
+    _plain_name(giac_name) && return GiacExpr(SymNode(giac_name))
+    return giac_eval("'" * giac_name * "'")
+end
+
+# A name that is only a name to GIAC: no call or operator in it, not a constant or a command
+const _GIAC_NAMED_VALUES = Set(["e", "i", "pi", "infinity", "inf", "undef", "euler_gamma", "true", "false"])
+_plain_name(s::AbstractString) = occursin(r"^[^\s()\[\]{},;+\-*/^=<>!'\"&|%@#:.]+$", s) &&
+                                 !(s in _GIAC_NAMED_VALUES) && !is_valid_command(s)
 
 # Letters Giac's parser reserves (Δ and Σ are set operators), spelled out instead. Giac typesets
 # the spelled-out names as the letters again: `Delta` renders as \Delta.
