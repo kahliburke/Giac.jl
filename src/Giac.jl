@@ -110,6 +110,7 @@ include("collect.jl")
 include("matrix_symbols.jl")
 include("presentation.jl")
 include("rules/Rules.jl")      # after the symbolic matrices it also simplifies
+include("in_form.jl")
 
 # Types
 export GiacExpr, GiacContext, GiacMatrix, GiacError, HelpResult, GiacInput
@@ -130,7 +131,7 @@ export giac_eval, to_julia, list_commands, help_count
 # giac_latex, written_latex, tidy_latex and Derivation are unexported: Giac.giac_array, …)
 export @giac_var, @giac_several_vars, @giac_matrix, express, ∇, jacobian, hessian, @derivation, assuming
 export lhs, rhs, isolate, @giac_function, taylor, collect_terms, periodic, inverse_of
-export @matsym, MatExpr, quadratic_form, typeset, typeset!
+export @matsym, MatExpr, quadratic_form, typeset, typeset!, in_form
 
 # Command invocation (009-commands-submodule)
 # invoke_cmd replaces giac_cmd - available from main module and Giac.Commands
