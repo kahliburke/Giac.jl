@@ -381,6 +381,7 @@ function _factor_rank(f::_PNode, vars)
     b = f isa _PPow ? f.base : f
     if b isa _PAtom
         b.constant && return (1, 0, 0, b.name)
+        _is_differential(b.name) && return (7, 0, 0, b.name)          # dx last, as in an integrand
         i = findfirst(==(b.name), vars)
         greek = first(b.name) in 'α':'ω' || first(b.name) in 'Α':'Ω'
         i === nothing ? (return (2, Int(greek), _declared_order(b.name), b.name)) : (return (3, 0, i, b.name))
@@ -399,8 +400,18 @@ function _derivative_order(t::_PNode)
     for f in _split(t).num
         b = f isa _PPow ? f.base : f
         b isa Union{_PDeriv, _PDerivOf} && (k = max(k, length(b.wrt)))
+        b isa _PDerivAt && (k = max(k, length(b.idx)))
     end
     return k
+end
+
+# The name of a differential (dx) among a term's factors, or nothing
+function _differential_in(t::_PNode)
+    for f in _split(t).num
+        b = f isa _PPow ? f.base : f
+        b isa _PAtom && _is_differential(b.name) && return b.name
+    end
+    return nothing
 end
 
 # A term's powers of the variables, in priority order.
@@ -410,7 +421,11 @@ function _order_terms(terms::Vector{_PNode}, style::TypesetStyle, vars)
     order = style.order
     series = any(t -> _split(t).order !== nothing, terms)
     order === :auto && (order = series ? :ascending : :descending)
-    if order !== :as_is
+    differentials = map(_differential_in, terms)
+    if order !== :as_is && all(!isnothing, differentials)
+        # a differential form, ∂f/∂x dx + ∂f/∂y dy, in the order of its differentials
+        terms = terms[sortperm(map(_differential_order, differentials); alg = Base.Sort.DEFAULT_STABLE)]
+    elseif order !== :as_is
         keys = [vcat(_derivative_order(t), _powers(t, vars)) for t in terms]      # each computed once
         if all(k -> all(iszero, k), keys)
             # nothing to order by: as given, with numbers last

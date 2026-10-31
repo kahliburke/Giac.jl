@@ -103,6 +103,7 @@ _greek_or(c::Char) = get(_GREEK_TEX, c, string(c))
 # a differential: `d` before a single symbol with its marks, subscripts and primes (dx, dq̇, dθ₁,
 # dx_ref, dH), not a word (dist)
 const _DIFFERENTIAL = r"^d(\p{L}[\p{Mn}\p{No}\d′″‴]*(?:_\w+)*)$"
+_is_differential(name::AbstractString) = occursin(_DIFFERENTIAL, Base.Unicode.normalize(name, :NFD))
 
 # the main symbol: letters side by side, a run of plain Latin letters as an upright word
 function _core_tex(core)

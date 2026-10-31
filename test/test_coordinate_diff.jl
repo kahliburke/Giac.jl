@@ -40,6 +40,27 @@
         @test L(δL) == "\\frac{\\partial F}{\\partial q} \\eta + \\frac{\\partial F}{\\partial \\dot{q}} \\dot{\\eta}"
     end
 
+    @testset "differentials" begin
+        @giac_var p ṗ x y
+        Lq = F(x, y, t)
+        dH = differential(p * y - Lq, x, y, p, t)
+        @test string(differential(p)) == "dp" && string(differential(q̇)) == "dq̇"
+        @test string(diff(dH, differential(p))) == "y"
+        # in the order the variables were given, each differential after its coefficient
+        @test L(dH) == "-\\frac{\\partial F}{\\partial x} \\mathrm{d}x + \\left(p - \\frac{\\partial F}{\\partial y}\\right) \\mathrm{d}y + y \\mathrm{d}p - \\frac{\\partial F}{\\partial t} \\mathrm{d}t"
+        @test L(differential(q^2 * q̇, q, q̇)) == "2 q \\dot{q} \\mathrm{d}q + q^{2} \\mathrm{d}\\dot{q}"
+    end
+
+    @testset "held integrals in a derivation" begin
+        δL = substitute(diff(substitute(F(q, q̇, t), q => q + ε * η), ε), ε => 0)
+        d = @derivation begin
+            δS = Giac.Commands.hold_cmd(:integrate, δL, t, 0, h)
+        end
+        @test d.rows[1][2] == "\\int_{0}^{h} \\left(\\frac{\\partial F}{\\partial q} \\eta + \\frac{\\partial F}{\\partial \\dot{q}} \\dot{\\eta}\\right) \\, \\mathrm{d}t"
+        @test L(diff(substitute(F(q, q̇, t), q => q + ε * η), ε)) ==
+              "\\partial_{1} F\\left(q + \\varepsilon \\eta, \\dot{q} + \\varepsilon \\dot{\\eta}, t\\right) \\eta + \\partial_{2} F\\left(q + \\varepsilon \\eta, \\dot{q} + \\varepsilon \\dot{\\eta}, t\\right) \\dot{\\eta}"
+    end
+
     @testset "a function of several arguments rebuilt from its tree" begin
         n = Giac._node(F(q, q̇, t))
         @test string(Giac.invoke_cmd(:eval, GiacExpr(Giac.CallNode(n.f, n.args)))) == "F(q(t),diff(q(t),t),t)"
