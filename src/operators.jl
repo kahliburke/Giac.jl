@@ -18,7 +18,7 @@ function Base.:+(a::GiacExpr, b::GiacExpr)::GiacExpr
         end
         return GiacExpr(ptr)
     end
-    return _both_sides(+, a, b, r)
+    return _arith_result(+, a, b, r)
 end
 
 """
@@ -34,7 +34,7 @@ function Base.:-(a::GiacExpr, b::GiacExpr)::GiacExpr
         end
         return GiacExpr(ptr)
     end
-    return _both_sides(-, a, b, r)
+    return _arith_result(-, a, b, r)
 end
 
 """
@@ -50,7 +50,7 @@ function Base.:-(a::GiacExpr)::GiacExpr
         end
         return GiacExpr(ptr)
     end
-    return _both_sides(-, a, r)
+    return _arith_result(-, a, r)
 end
 
 """
@@ -66,7 +66,7 @@ function Base.:*(a::GiacExpr, b::GiacExpr)::GiacExpr
         end
         return GiacExpr(ptr)
     end
-    return _both_sides(*, a, b, r)
+    return _arith_result(*, a, b, r)
 end
 
 """
@@ -82,7 +82,7 @@ function Base.:/(a::GiacExpr, b::GiacExpr)::GiacExpr
         end
         return GiacExpr(ptr)
     end
-    return _both_sides(/, a, b, r)
+    return _arith_result(/, a, b, r)
 end
 
 """
@@ -98,7 +98,7 @@ function Base.:^(a::GiacExpr, b::GiacExpr)::GiacExpr
         end
         return GiacExpr(ptr)
     end
-    return _both_sides(^, a, b, r)
+    return _arith_result(^, a, b, r)
 end
 
 """

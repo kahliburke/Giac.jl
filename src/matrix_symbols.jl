@@ -394,7 +394,10 @@ const _ATOM_BY_KEY = Dict{String, String}()
 const _ATOMS_LOCK = ReentrantLock()
 
 function _atom(kind::Symbol, payload, plain::String, tex::String)
-    key = string(kind) * ":" * plain
+    # the printed form does not show sizes or properties, and a name can be declared again with
+    # others: they are part of what the atom stands for
+    key = string(kind) * ":" * plain * "|" * join(sort!([string(s.name, ":", s.rows, "×", s.cols, ":", join(s.properties, ","))
+                                                          for s in _symbols_in(payload)]), ";")
     name = lock(_ATOMS_LOCK) do
         get!(_ATOM_BY_KEY, key) do
             n = "mxat" * string(length(_ATOMS) + 1)
@@ -405,8 +408,14 @@ function _atom(kind::Symbol, payload, plain::String, tex::String)
     return giac_identifier(name)
 end
 
-_trace_atom(w::Word) = _atom(:tr, w, "tr(" * join(map(_plain_factor, w), "*") * ")",
-                             "\\operatorname{tr}\\left(" * join(map(_factor_latex, w), " ") * "\\right)")
+# A product that is 1×1 (vᵀA⁻¹u) is its own trace and is written as itself.
+function _trace_atom(w::Word)
+    scalar = _rows(first(w)) == 1 && _cols(last(w)) == 1
+    plain = join(map(_plain_factor, w), "*")
+    tex = join(map(_factor_latex, w), " ")
+    return _atom(:tr, w, scalar ? "(" * plain * ")" : "tr(" * plain * ")",
+                 scalar ? "\\left(" * tex * "\\right)" : "\\operatorname{tr}\\left(" * tex * "\\right)")
+end
 _det_atom(b::MatrixSymbol) = _atom(:det, b, "det(" * string(b.name) * ")", "\\det " * _symbol_latex(b))
 _det_atom(M::MatExpr) = _atom(:det, M, "det(" * _plain(M) * ")", "\\det\\left(" * _matexpr_latex(M) * "\\right)")
 
@@ -448,6 +457,9 @@ function _trace_word(w::Word, n::Dim)
     return sign == 1 ? v : -v
 end
 
+# shorter first, then a rotation that is 1×1 (a scalar product, vᵀA⁻¹u), then by the word's order
+_trace_rank(w::Word) = (length(w), _rows(first(w)) == 1 && _cols(last(w)) == 1 ? 0 : 1, _word_rank(w))
+
 # The rotation of `w` (or of its transpose) that comes first, with its sign; rotating can bring
 # a factor next to its inverse, so this repeats until the word stops getting shorter. Sign 0 if the
 # word equals minus itself.
@@ -463,7 +475,7 @@ function _cyclic_canonical(w::Word)
             for (cs, cw) in ((sign * s, r), (sign * s * ts, tr_))
                 key = _word_key(cw)
                 signs[key] = haskey(signs, key) && signs[key] != cs ? 0 : cs
-                _word_rank(cw) < _word_rank(best[2]) && (best = (cs, cw))
+                _trace_rank(cw) < _trace_rank(best[2]) && (best = (cs, cw))
             end
         end
         signs[_word_key(best[2])] == 0 && return (0, best[2])
@@ -810,3 +822,11 @@ function giac_latex(X::AbstractVecOrMat{MatExpr})
     return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
 end
 Base.show(io::IO, ::MIME"text/latex", X::AbstractVecOrMat{MatExpr}) = print(io, "\$\$", giac_latex(X), "\$\$")
+
+"`A` with `f` applied to each coefficient (to simplify them, say), terms combined again."
+map_coefficients(f, A::MatExpr) = _matexpr(A.rows, A.cols, [w => convert(GiacExpr, f(c)) for (w, c) in A.terms])
+
+# the matrix symbols in an atom's payload: a symbol, a word, or an expression
+_symbols_in(s::MatrixSymbol) = [s]
+_symbols_in(w::Word) = unique(s -> s.name, reduce(vcat, (_symbols_in(f.base) for f in w); init = MatrixSymbol[]))
+_symbols_in(M::MatExpr) = unique(s -> s.name, reduce(vcat, (_symbols_in(w) for (w, _) in M.terms); init = MatrixSymbol[]))

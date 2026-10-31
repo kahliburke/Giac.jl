@@ -115,7 +115,7 @@ using Giac.Rules
         trunc3 = @rule ~v^~n => 0 where ~n > 3
         @test rewrite(1 + x + x^2 + x^3 + x^4 + x^5, trunc3) == 1 + x + x^2 + x^3
         square = @rule ~a * ~v^2 + ~b * ~v + ~~rest => ~a * (~v + ~b / (2 * ~a))^2 - ~b^2 / (4 * ~a) + +(~~rest) where is_free(~a, ~v) && is_free(~b, ~v)
-        @test R(2x^2 + 3x + 7, square) == "2*(x+3/4)^2-9/8+7"
+        @test R(2x^2 + 3x + 7, square) == "2*(x+3/4)^2+47/8"        # -9/8 + 7 combine
         @test square(x * x^2 + 3x) === nothing                # a coefficient that depends on x
         @test is_free(a * y, x) && !is_free(a * x, [x, y])
         tex = sprint(show, MIME("text/latex"), trunc3)

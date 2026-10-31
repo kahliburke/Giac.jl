@@ -102,13 +102,13 @@ include("Constants.jl")
 include("array_algebra.jl")
 include("rewrite.jl")
 include("derivation.jl")
-include("rules/Rules.jl")
 include("codegen.jl")
 include("assuming.jl")
 include("equations.jl")
 include("functions.jl")
 include("collect.jl")
 include("matrix_symbols.jl")
+include("rules/Rules.jl")      # after the symbolic matrices it also simplifies
 
 # Types
 export GiacExpr, GiacContext, GiacMatrix, GiacError, HelpResult, GiacInput

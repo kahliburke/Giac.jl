@@ -28,12 +28,29 @@ _not_an_equation(e) = throw(ArgumentError("$e is not an equation; write one as `
 # A side of an operand: an equation's side, or the operand itself.
 _side(f, e) = _is_equation(e) ? f(e) : e
 
-# Arithmetic with an equation applies to both sides: `(a ~ b) - c` is `a - c ~ b - c`, and
-# `(a ~ b) + (c ~ d)` is `a + c ~ b + d`. Each side is computed by the ordinary operation, so it
-# is simplified as any other result is. `r` is the result Giac gave, an equation exactly when an
-# operand was one; checking it keeps the extra cost off ordinary arithmetic.
-_both_sides(op, a, b, r) = _is_equation(r) ? op(_side(lhs, a), _side(lhs, b)) ~ op(_side(rhs, a), _side(rhs, b)) : r
-_both_sides(op, a, r) = _is_equation(r) ? op(lhs(a)) ~ op(rhs(a)) : r
+# The result of arithmetic, `r` as Giac's operation built it, settled:
+# - With an equation, the operation applies to both sides: `(a ~ b) - c` is `a - c ~ b - c`, and
+#   `(a ~ b) + (c ~ d)` is `a + c ~ b + d`, each side computed by the ordinary operation. `r` is
+#   an equation exactly when an operand was one.
+# - A sum or product has its like terms collected (`regroup`): Giac's operations build it as
+#   written, so `z + z` would stay two terms and `z * z` would not be `z^2`. Nothing is expanded,
+#   and where nothing combines, the terms keep the order they were written in.
+function _arith_result(op, a, b, r)
+    h = _arith_head(r)
+    h == "=" && return op(_side(lhs, a), _side(lhs, b)) ~ op(_side(rhs, a), _side(rhs, b))
+    return h == "+" || h == "*" ? _collect_like(r, h) : r
+end
+function _arith_result(op, a, r)
+    h = _arith_head(r)
+    h == "=" && return op(lhs(a)) ~ op(rhs(a))
+    return h == "+" || h == "*" ? _collect_like(r, h) : r
+end
+function _collect_like(r::GiacExpr, h)
+    g = invoke_cmd(:regroup, r)
+    combined = !(iscall(g) && symb_funcname(g) == h && length(arguments(g)) == length(arguments(r)))
+    return combined ? g : r
+end
+_arith_head(r::GiacExpr) = giac_type(r) == SYMB ? symb_funcname(r) : ""
 
 """
     isolate(eq, x)

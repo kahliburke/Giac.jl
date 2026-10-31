@@ -49,7 +49,9 @@ standard_transforms() = vcat(Any[
     _giac(:trigsin, "in sin"), _giac(:trigcos, "in cos"), _giac(:trigtan, "in tan"),
     _giac(:exp2pow, "exp to powers"),
     identities(), log_expand(), power_expand(), function_identities()],
-    isempty(Giac._relations()) ? Any[] : Any[Transform("declared relations", apply_relations)])
+    isempty(Giac._relations()) ? Any[] : Any[Transform("declared relations", apply_relations)],
+    # determinants of symbolic matrices: Sylvester's identity and the determinant lemma
+    isempty(Giac._ATOMS) ? Any[] : Any[Transform(id.name, e -> id(e)) for id in matrix_identities() if id.scalar])
 
 # ---------------------------------------------------------------------------------------------
 # Goals: what "simplest" means

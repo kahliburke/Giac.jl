@@ -1,7 +1,7 @@
 # Symbolic matrices (@matsym): products that do not commute, kept in a canonical form
 
 using LinearAlgebra
-using Giac.Rules: is_positive
+using Giac.Rules: is_positive, simplest, rewrite, equivalent, matrix_identities, verify, MatrixIdentity
 
 @testset "Matrix symbols" begin
     @matsym A[n, n] B[n, n] C[n, n] D[n, n] P[n, n]::posdef Q[n, n]::orthogonal W[n, n]::skew x[n] b[n] K[m, n]
@@ -74,6 +74,35 @@ using Giac.Rules: is_positive
         @test occursin("tr(A*B)", sprint(show, tr(A * B)))
         @test_throws ArgumentError Giac._declare_matsym(:Z, :n, :m, (:symmetric,))
         @test_throws ArgumentError Giac._declare_matsym(:Z, :n, :n, (:bouncy,))
+    end
+    @testset "simplifying and comparing" begin
+        @giac_var t
+        @test simplest((sin(t)^2 + cos(t)^2) * A + 2sin(t) * cos(t) * B) == A + sin(2t) * B
+        @test equivalent((sin(t)^2 + cos(t)^2) * A, A) && !equivalent(A, B)
+        @test simplest(inv(inv(A) + inv(B))) == A * inv(A + B) * B
+        @test S(rewrite(inv(I + A * B) * A, matrix_identities()...)) == "A*inv((I + B*A))"
+    end
+
+    @testset "matrix identities" begin
+        ids = matrix_identities()
+        @test length(ids) == 8 && all(i -> i isa MatrixIdentity, ids)
+        @test all(verify, ids)                       # each on random numeric matrices
+        @matsym u[n] v[n] M3[3, 2] N3[2, 3]
+        sm = only(filter(i -> i.name == "Sherman–Morrison", ids))
+        @test sm(A) === nothing
+        @test occursin("(v'*inv(A)*u)", sprint(show, only(filter(i -> i.name == "determinant lemma", ids))(det(A + u * v'))))
+        sylvester = only(filter(i -> i.name == "Sylvester", ids))
+        @test sprint(show, sylvester(det(I + M3 * N3))) == "det(I + N3*M3)"
+        @test sylvester(det(I + N3 * M3)) === nothing          # already the smaller side
+        @test occursin("Woodbury", sprint(show, MIME("text/latex"), ids))
+    end
+
+    @testset "a trace or determinant follows its symbols' sizes" begin
+        @matsym F[n, m] G[m, n]
+        d1 = det(I + F * G)
+        @matsym F[3, 2] G[2, 3]
+        d2 = det(I + F * G)
+        @test string(d1) != string(d2)
     end
     @matsym P[n, n] Q[n, n]          # drop what was recorded about them
 end
