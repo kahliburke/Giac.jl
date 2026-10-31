@@ -157,6 +157,11 @@ const _CALL_TEX = Dict(
 const _TRIG = ("sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth")
 
 function _pnode(e::GiacExpr)
+    # numbers, names, sums and products are read off the tree directly
+    n = getfield(e, :node)
+    if n !== nothing && (getfield(e, :native) || !(n isa GenNode || n isa CallNode))
+        n isa CallNode || n isa GenNode || return _pnode(n)
+    end
     if !iscall(e)
         t = giac_type(e)
         (t == INT || t == ZINT || t == FRAC || t == DOUBLE || t == REAL) && return _PNum(to_julia(e))
@@ -216,6 +221,25 @@ function _pnode(e::GiacExpr)
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
     return _PRaw(tidy_latex(_giac_tex(e)))
 end
+
+_pnode(n::NumNode) = n.v isa Real ? _PNum(n.v) : _PRaw(tidy_latex(_giac_tex(GiacExpr(n))))
+function _pnode(n::SymNode)
+    s = n.name
+    s == "pi" && return _PAtom("\\pi", s, true)
+    s == "infinity" && return _PAtom("\\infty", s, true)
+    haskey(_ATOMS, s) && return _PAtom("{" * _ATOMS[s][4] * "}", s, false)
+    return _PAtom(_tex_name(s), s, false)
+end
+_pnode(n::AddNode) = _PSum(_PNode[_pnode(_scale(m, c)) for (m, c) in n.terms])
+function _pnode(n::MulNode)
+    fs = _PNode[]
+    _isone_exact(n.coef) || push!(fs, _PNum(n.coef))
+    for (b, e) in n.factors
+        push!(fs, isequal(e, _ONE) ? _pnode(b) : _PPow(_pnode(b), _pnode(e)))
+    end
+    return length(fs) == 1 ? fs[1] : _PProd(fs)
+end
+_pnode(n::Union{CallNode, GenNode}) = _pnode(GiacExpr(n))
 
 # ---------------------------------------------------------------------------------------------
 # Products: sign, numeric coefficient, and the factors above and below the line
