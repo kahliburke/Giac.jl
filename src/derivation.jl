@@ -154,7 +154,9 @@ function _written_partial(name::AbstractString, x::AbstractString)
     v = get(get(task_local_storage(), _WRITTEN_KEY, Dict{String, GiacExpr}()), name, nothing)
     v === nothing && return false
     coordinates = [GiacExpr(c) for c in _coordinates!(Node[], _node(v))]
-    vars = Set{String}(something(_wrt_name(c), "") for c in coordinates)
+    # a function of `x` itself (φ(x) in x) is not a variable besides `x`
+    along(c) = (n = _node(c); (_is_trajectory(n) ? n : n.args[1]).args[2] == SymNode(x))
+    vars = Set{String}(something(_wrt_name(c), "") for c in coordinates if !along(c))
     functions = Set(string(_function_name(c)) for c in coordinates if _is_trajectory(_node(c)))
     parameter(s) = s == _current_style().time || s in functions || lock(() -> haskey(_DECLARED, s), _DECLARED_LOCK)
     foreach(s -> parameter(s) || push!(vars, s), (string(s) for s in free_symbols(v)))
@@ -343,9 +345,13 @@ function _declare_conditions!(conds)
         if c[1] === :tag
             c[3] === :nonzero && continue
             tag = c[3]
-            tag in (:integer, :real) ?
-                Commands.invoke_cmd(first_ ? :assume : :additionally, v, giac_eval(string(tag))) :
-                (first_ ? _declare!(v, tag) : _assume_more!(v, tag))
+            if first_
+                _declare!(v, tag)                 # recorded, as `@giac_var n::integer` would
+            elseif tag in (:integer, :real)
+                Commands.invoke_cmd(:additionally, v, giac_eval(string(tag)))
+            else
+                _assume_more!(v, tag)
+            end
         else
             op, rhs = c[2], c[4]
             op in (:!=, :≠) && continue

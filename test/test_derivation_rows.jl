@@ -29,8 +29,8 @@
         @test r[1] == "\\varphi\\left(x\\right) = A \\cos\\left(k x\\right) + B \\sin\\left(k x\\right)"
         @test r[2] == "\\varphi\\left(0\\right) = A = 0"                       # its own result: stated once
         @test r[3] == "\\varphi\\left(x\\right) = B \\sin\\left(k x\\right)"    # A = 0 applied to φ
-        @test r[4] == "\\varphi\\left(a\\right) = B \\sin\\left(k a\\right) = 0 \\quad\\Rightarrow\\quad k = \\frac{\\pi n}{a}, \\quad n \\in \\mathbb{Z}, n \\ne 0"
-        @test r[5] == "E = \\frac{\\pi^{2} n^{2} \\hbar^{2}}{2 a^{2} m}"       # k = nπ/a applied
+        @test r[4] == "\\varphi\\left(a\\right) = B \\sin\\left(k a\\right) = 0 \\quad\\Rightarrow\\quad k = \\frac{n \\pi}{a}, \\quad n \\in \\mathbb{Z}, n \\ne 0"
+        @test r[5] == "E = \\frac{n^{2} \\pi^{2} \\hbar^{2}}{2 a^{2} m}"       # k = nπ/a applied
     end
 
     @testset "equations as values" begin
@@ -56,7 +56,7 @@
         d = @derivation begin
             k^2 ~ a^2 => k ~ a * n, n::integer, n != 0
         end
-        @test endswith(rows(d)[1], "k = a n, \\quad n \\in \\mathbb{Z}, n \\ne 0")
+        @test endswith(rows(d)[1], "k = n a, \\quad n \\in \\mathbb{Z}, n \\ne 0")
     end
 
     @testset "solving the condition for a name" begin
@@ -67,6 +67,23 @@
         end
         @test endswith(rows(d)[1], "\\quad\\Rightarrow\\quad b = \\frac{\\sqrt{2}}{\\sqrt{a}}")
         @test rows(d)[2] == "b^{2} = \\frac{2}{a}"                  # applied from here on
+    end
+
+    @testset "the particle in a box" begin
+        d = let
+            @giac_var x k::positive a::positive A B::positive E n φ(x) c_0 c_1
+            @derivation begin
+                diff(φ, x, 2) ~ -k^2 * φ
+                φ(x) = substitute(Giac.Commands.desolve(diff(φ, x, 2) + k^2 * φ ~ 0, φ), c_0 => A, c_1 => B)
+                φ(0) ~ 0 => A
+                φ(a) ~ 0 => k ~ n * π / a, n::integer, n != 0
+                Giac.Commands.integrate(φ(x)^2, x, 0, a) ~ 1 => B
+            end
+        end
+        r = rows(d)
+        @test startswith(r[1], "\\frac{\\mathrm{d}^{2} \\varphi}{\\mathrm{d} x^{2}} = ")   # φ(x) in x: not a partial
+        @test occursin("k = \\frac{n \\pi}{a}", r[4])                                    # an integer before π
+        @test endswith(r[5], "B = \\frac{\\sqrt{2}}{\\sqrt{a}}")
     end
 
     @testset "conditions in brackets, and tags" begin

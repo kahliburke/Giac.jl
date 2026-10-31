@@ -404,14 +404,18 @@ function _variables(root::_PNode, style::TypesetStyle)
 end
 
 _declared_order(name::AbstractString) = lock(() -> get(_DECLARATION_ORDER, name, typemax(Int)), _DECLARED_LOCK)
+_is_integer_name(name::AbstractString) = lock(() -> get(_DECLARED, name, nothing) === :integer, _DECLARED_LOCK)
 
 # The place of a factor in a product: numbers, constants, parameters (as declared), variables (by
 # priority), exponentials, other functions, sums.
 function _factor_rank(f::_PNode, vars)
     b = f isa _PPow ? f.base : f
+    b isa _PNum && return (0, 0, 0, "")                                # √2 with the numbers
     if b isa _PAtom
         b.constant && return (1, 0, 0, b.name)
         _is_differential(b.name) && return (7, 0, 0, b.name)          # dx last, as in an integrand
+        _is_integer_name(b.name) && return (1, -1, 0, b.name)         # an integer like a number: nπ
+
         i = findfirst(==(b.name), vars)
         greek = first(b.name) in 'α':'ω' || first(b.name) in 'Α':'Ω'
         i === nothing ? (return (2, Int(greek), _declared_order(b.name), b.name)) : (return (3, 0, i, b.name))
