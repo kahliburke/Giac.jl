@@ -49,6 +49,7 @@
         # in the order the variables were given, each differential after its coefficient
         @test L(dH) == "-\\frac{\\partial F}{\\partial x} \\mathrm{d}x + \\left(p - \\frac{\\partial F}{\\partial y}\\right) \\mathrm{d}y + y \\mathrm{d}p - \\frac{\\partial F}{\\partial t} \\mathrm{d}t"
         @test L(differential(q^2 * q̇, q, q̇)) == "2 q \\dot{q} \\mathrm{d}q + q^{2} \\mathrm{d}\\dot{q}"
+        @test L(differential(p^2 / (2m), p)) == "\\frac{p}{m} \\mathrm{d}p"           # after the fraction
     end
 
     @testset "explicit dependence on time" begin
@@ -64,7 +65,7 @@
     @testset "a velocity at a point" begin
         @giac_var ω::positive q₀ v₀ q̈
         @test string(q̇(0)) == "q'(0)" && string(q̈(1)) == "q''(1)"
-        @test string(desolve([q̈ + ω^2 * q ~ 0, q(0) ~ q₀, q̇(0) ~ v₀], q)) == "q₀*cos(ω*t)+v₀/ω*sin(ω*t)"
+        @test string(Giac.Commands.desolve([q̈ + ω^2 * q ~ 0, q(0) ~ q₀, q̇(0) ~ v₀], q)) == "q₀*cos(ω*t)+v₀/ω*sin(ω*t)"
     end
 
     @testset "held integrals in a derivation" begin

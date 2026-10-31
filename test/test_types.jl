@@ -146,9 +146,9 @@
             @giac_var t u(t)
             du = invoke_cmd(:diff, u, t)
             du_at_0 = du(0)
-            @test du_at_0 isa GiacExpr
+            @test string(du_at_0) == "u'(0)"
             eq = du_at_0 ~ 1
-            @test eq isa GiacExpr
+            @test string(Giac.Commands.desolve([diff(u, t, 2) + u ~ 0, u(0) ~ 0, eq], u)) == "sin(t)"
         end
 
         # T016: Test diff(u, t, 2)(0) ~ 0 n-th derivative condition
@@ -156,7 +156,7 @@
             @giac_var t u(t)
             d2u = invoke_cmd(:diff, u, t, 2)
             d2u_at_0 = d2u(0)
-            @test d2u_at_0 isa GiacExpr
+            @test string(d2u_at_0) == "u''(0)"
         end
 
         # T017: Integration test with desolve
@@ -243,9 +243,7 @@
             @giac_var t u(t)
             du = invoke_cmd(:diff, u, t)
             result = du(0)
-            @test result isa GiacExpr
-            result_str = string(result)
-            @test occursin("0", result_str)
+            @test string(result) == "u'(0)"
         end
 
         @testset "calling plain identifier GiacExpr" begin

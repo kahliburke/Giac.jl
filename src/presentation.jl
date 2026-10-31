@@ -508,6 +508,14 @@ end
 
 function _unsigned_product(p, c::_Ctx)
     num, den = _sorted(p.num, c), _sorted(p.den, c)
+    # differentials stand after a fraction, not in it: p/m dp
+    if !isempty(den) || !(p.coef isa Integer)
+        d = findall(f -> f isa _PAtom && _is_differential(f.name), num)
+        if !isempty(d) && length(d) < length(num) + (isone(p.coef) ? 0 : 1)
+            rest = (; p..., num = num[setdiff(eachindex(num), d)])
+            return _unsigned_product(rest, c) * " " * join((_tex(num[i], c) for i in d), " ")
+        end
+    end
     coef = p.coef
     q = coef isa Rational ? denominator(coef) : 1
     pn = coef isa Rational ? numerator(coef) : coef
