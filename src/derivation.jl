@@ -92,8 +92,12 @@ const _NOTE_SPACER = " \\\\ \\rule{0pt}{1em} \\\\ "
 
 "An aligned block of steps; `pad` widens every left side to a common width (see `show`)."
 function _aligned(rows, pad = "")
-    lines = (isempty(pad) ? "$l &= $r" : "$pad\\mathllap{$l} &= $r" for (l, r) in rows)
-    return "\\begin{aligned}" * join(lines, _STEP_SPACER) * "\\end{aligned}"
+    lines = join(("$l &= $r" for (l, r) in rows), _STEP_SPACER)
+    # The pad sits alone in a first row whose height the negative gap takes back (an empty row is
+    # about 1.5em): it sets the width of the left column, which aligns its entries to the right.
+    # (Beside each left side, under `\mathllap`, a pad taller than one line moves that side down.)
+    isempty(pad) || (lines = "$pad & \\\\[-1.5em] " * lines)
+    return "\\begin{aligned}" * lines * "\\end{aligned}"
 end
 
 "A note as a text row: `&`, `%` and `#` are escaped; `\$…\$` inside it is math."
