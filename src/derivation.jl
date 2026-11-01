@@ -80,7 +80,8 @@ function _segment_pad(rows, k)
     stop = something(findnext(_is_realign, rows, k), length(rows) + 1) - 1
     lefts = [l for (l, _) in rows[k:stop] if !isempty(l)]
     isempty(lefts) && return ""
-    return "\\hphantom{\\begin{matrix}" * join(lefts, " \\\\ ") * "\\end{matrix}}"
+    # (a matrix sets its cells in text style, smaller than the steps' display style)
+    return "\\hphantom{\\begin{matrix}" * join(("\\displaystyle " * l for l in lefts), " \\\\ ") * "\\end{matrix}}"
 end
 
 # Vertical space comes from empty rows. KaTeX treats a positive `\\[gap]` as a minimum depth for
