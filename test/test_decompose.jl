@@ -56,3 +56,12 @@ using JuMP, HiGHS
     @test iszero(C.expand(c.multipliers[1] * (x + y) + c.multipliers[2] * x * y - (x^3 + y^3)))
     @test certify(d; positive = (x, y), signs = (1, 1)) === nothing          # no member has both ≥ 0
 end
+
+@testset "a search over products of building blocks" begin
+    @giac_var x y
+    # (x + y)(x - y)² from the blocks x, y, (x - y)²: the products with nonnegative weights
+    d = decompose(x^3 - x^2 * y - x * y^2 + y^3, [:x => x, :y => y, :s => (x - y)^2]; products = 3, degree = 0)
+    @test length(d.blocks) == 19 && !isempty(d.directions)
+    c = certify(d; positive = (x, y), block_signs = (1, 1, 1))
+    @test Dict(n => string(m) for (n, m) in zip(d.names, c.multipliers) if !iszero(m)) == Dict("x·s" => "1", "y·s" => "1")
+end

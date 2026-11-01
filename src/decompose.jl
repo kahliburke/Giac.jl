@@ -7,7 +7,8 @@
 
 The result of [`decompose`](@ref): `target = Σ multipliers[k] * blocks[k]`, with `directions`
 the free directions of the solution family: adding `λ * directions[j][k]` to every
-`multipliers[k]` keeps the identity, for any `λ`.
+`multipliers[k]` keeps the identity, for any `λ`. `factors[k]` lists the building blocks, by
+position, that `blocks[k]` is the product of.
 """
 struct Decomposition
     target::GiacExpr
@@ -15,6 +16,7 @@ struct Decomposition
     names::Vector{Union{String, Nothing}}     # a block's name, if it was given one
     multipliers::Vector{GiacExpr}
     directions::Vector{Vector{GiacExpr}}
+    factors::Vector{Vector{Int}}
 end
 
 """
@@ -59,6 +61,8 @@ unknown rational coefficients, solved exactly by matching coefficients. Needs Ne
 - `degree`: the total degree of each multiplier in `vars`, one number or one per block; by
   default the target's degree less the block's.
 - `param`: substitutions applied first, for relations among the variables (`l′ => t₂/g`).
+- `products = n`: use as blocks every product of up to `n` of the given ones (repeats allowed),
+  each named by its factors, so that the search finds which products the target is made of.
 
 Rational functions are cleared of denominators first. Returns a [`Decomposition`](@ref), whose
 `directions` give the whole family of solutions, or `nothing` when there is none of these
@@ -78,7 +82,9 @@ function decompose end
 
 A member of the solution family of `d` whose multipliers each have one sign, certified by
 coefficient signs under the ordering, as in [`positivity`](@ref). `signs` gives the sign wanted
-for each multiplier (one number for all). The weights of the free directions are found by a
+for each multiplier (one number for all). Alternatively `block_signs` gives the known sign of each
+building block and `target_sign` the sign to prove: each multiplier then takes the sign that
+makes its term agree with the target, through the product of its block's factors' signs. The weights of the free directions are found by a
 linear program (JuMP with HiGHS), made rational, and checked exactly in Nemo. Needs
 `using JuMP, HiGHS, Nemo`.
 

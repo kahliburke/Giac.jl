@@ -660,8 +660,14 @@ end
 # decompose: target = Σ Mₖ Bₖ with unknown multipliers, by exact coefficient matching
 # ===========================================================================
 
-function Giac.decompose(target, blocks; vars = nothing, degree = nothing, param = ())
+function Giac.decompose(target, blocks; vars = nothing, degree = nothing, param = (), products = 1)
     pairs = [b isa Pair ? (string(first(b)), convert(GiacExpr, last(b))) : (nothing, convert(GiacExpr, b)) for b in blocks]
+    factors = [[k] for k in eachindex(pairs)]
+    if products > 1
+        factors = [f for n in 1:products for f in _multisets(length(pairs), n)]
+        label(i) = Giac._block_text(pairs[i]...)
+        pairs = [(length(f) == 1 ? pairs[only(f)][1] : join(label.(f), "·"), prod(pairs[i][2] for i in f)) for f in factors]
+    end
     exprs = GiacExpr[convert(GiacExpr, target); last.(pairs)]
     isempty(param) || (exprs = [substitute(e, param...) for e in exprs])
     T, Bs = _cleared(Giac.to_nemo(exprs))
@@ -694,7 +700,7 @@ function Giac.decompose(target, blocks; vars = nothing, degree = nothing, param 
     multipliers(v) = [Giac.to_giac(_polynomial(R, [(v[j], unknowns[j][2]) for j in eachindex(unknowns) if unknowns[j][1] == k]))
                       for k in eachindex(Bs)]
     directions = [multipliers(K[:, j]) for j in axes(K, 2)]
-    return Giac.Decomposition(exprs[1], exprs[2:end], names, multipliers(x), directions)
+    return Giac.Decomposition(exprs[1], exprs[2:end], names, multipliers(x), directions, factors)
 end
 
 # The solutions of A x = b, A given by its entries (row, column, value): a particular solution
@@ -751,6 +757,12 @@ function _solve_sparse(entries, rhs, nrows, nunknowns)
         end
     end
     return x, K
+end
+
+# the multisets of size k of 1:n, as sorted vectors
+function _multisets(n, k)
+    k == 0 && return [Int[]]
+    return [vcat(m, j) for m in _multisets(n, k - 1) for j in (isempty(m) ? 1 : last(m)):n]
 end
 
 # polynomials with the denominators cleared: each of T, Bₖ times the lcm of the denominators

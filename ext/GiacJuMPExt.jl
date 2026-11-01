@@ -15,9 +15,11 @@ using Nemo
 using JuMP
 import HiGHS
 
-function Giac.certify(d::Giac.Decomposition; order = (), positive = (), param = (), signs = 1, bound = 1.0e6)
+function Giac.certify(d::Giac.Decomposition; order = (), positive = (), param = (), signs = 1,
+                      block_signs = nothing, target_sign = 1, bound = 1.0e6)
     nb, nd = length(d.blocks), length(d.directions)
-    s = signs isa Number ? fill(Int(signs), nb) : collect(Int, signs)
+    s = block_signs !== nothing ? [target_sign * prod(Int(block_signs[i]) for i in f) for f in d.factors] :
+        signs isa Number ? fill(Int(signs), nb) : collect(Int, signs)
     length(s) == nb || throw(ArgumentError("certify: one sign per block"))
     wanted = copy(s)
     gaps, known = Giac._gap_substitution(order, positive)
