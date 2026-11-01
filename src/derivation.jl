@@ -356,7 +356,10 @@ _tag_latex(name, tag::Symbol) = haskey(_TAG_LATEX, tag) ? name * " " * _TAG_LATE
 
 # Declare what GIAC can assume: the first condition on a name replaces what was assumed about it,
 # the others add to it. A name not yet a variable is made one. `≠` is shown but not assumed.
-function _declare_conditions!(conds)
+# (Under the GIAC lock, so no other thread sees the assumptions half made; see `_declare!`.)
+_declare_conditions!(conds) = with_giac_lock(() -> _declare_each_condition!(conds))
+
+function _declare_each_condition!(conds)
     seen = Set{String}()
     for c in conds
         v = c[1] === :tag ? c[2] : c[3]

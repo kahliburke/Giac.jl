@@ -20,12 +20,16 @@ const _DECLARATION_ORDER = Dict{String, Int}()
 _note_declared(name::AbstractString) = lock(() -> (_DECLARATION_ORDER[name] = length(_DECLARATION_ORDER) + 1 +
                                                    maximum(values(_DECLARATION_ORDER); init = 0)), _DECLARED_LOCK)
 
+# Under the GIAC lock, so code evaluating on another thread (a notebook runs cells in parallel)
+# never sees the name between losing its assumption and getting it back.
 function _declare!(v::GiacExpr, tag)
-    _forget!(v)
-    name = string(v)
-    _note_declared(name)
-    lock(() -> (tag === nothing ? delete!(_DECLARED, name) : (_DECLARED[name] = tag)), _DECLARED_LOCK)
-    tag === nothing || _assume_tag!(v, tag)
+    with_giac_lock() do
+        _forget!(v)
+        name = string(v)
+        _note_declared(name)
+        lock(() -> (tag === nothing ? delete!(_DECLARED, name) : (_DECLARED[name] = tag)), _DECLARED_LOCK)
+        tag === nothing || _assume_tag!(v, tag)
+    end
     return v
 end
 # every entry that is a variable (not the zeros or negated entries of a structured matrix)

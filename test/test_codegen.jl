@@ -115,3 +115,9 @@ end
     @test_throws ArgumentError Giac._declare!(z, :wobbly)
     @test_throws ArgumentError Giac._process_giac_var_arg(:(u(t)::positive))   # functions take none
 end
+
+@testset "a complex name keeps its conjugate" begin
+    @giac_var conj_c::complex
+    @test string(conj(conj_c)) == "conj(conj_c)"
+    @test Giac._declared(conj_c) === :complex
+end
