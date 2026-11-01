@@ -90,7 +90,17 @@ function with_giac_lock(f)
     _giac_task()
     reply = _reply_channel()
     put!(_GIAC_INBOX, (f, _current_frame(), reply))
-    ok, r = take!(reply)
+    ok, r = try
+        take!(reply)
+    catch e
+        # an interrupt of the waiting task (Ctrl-C, a cancelled job) stops the GIAC computation
+        # too, which otherwise runs on and keeps the GIAC thread
+        e isa InterruptException || rethrow()
+        interrupt()
+        take!(reply)
+        _clear_interrupt()
+        rethrow()
+    end
     ok || throw(r)
     return r
 end

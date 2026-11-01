@@ -25,6 +25,18 @@
                                   C.invoke_cmd(:gbasis, GiacExpr[v - n for (n, v) in zip([L, p, r], vals)], order, giac_eval("plex")), order)
             @test_throws Giac.GiacTimeout Giac.with_timeout(slow, 1)
             @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"            # GIAC works again after
+            # interrupting the waiting task, as Ctrl-C does, stops the computation too
+            if Giac._giac_threaded()
+                job = Threads.@spawn try
+                    slow()
+                catch e
+                    e
+                end
+                sleep(1)
+                schedule(job, InterruptException(); error = true)
+                @test fetch(job) isa InterruptException
+                @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"
+            end
         end
         @test Giac.with_timeout(() -> C.expand((a + b)^2), 10) == C.expand((a + b)^2)
     end
