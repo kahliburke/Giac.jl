@@ -886,13 +886,14 @@ _gen_from_node(n::SymNode) = n.name in _GIAC_NAMED_VALUES ? GiacCxxBindings.giac
                              GiacCxxBindings.make_identifier(n.name)
 _gen_from_node(n::GenNode) = _get_gen(n.expr.ptr)
 
-function _gen_from_node(n::AddNode)
-    g = nothing
-    for (m, c) in n.terms
-        t = _gen_from_node(_scale(m, c))
-        g = g === nothing ? t : g + t
-    end
-    return g
+_gen_from_node(n::AddNode) = _gen_sum([_gen_from_node(_scale(m, c)) for (m, c) in n.terms])
+
+# GIAC copies a sum's terms into each new sum, so the terms are added in a balanced tree rather
+# than one at a time; the sums are flattened, giving the same terms in the same order
+function _gen_sum(ts, lo = 1, hi = length(ts))
+    lo >= hi && return lo == hi ? ts[lo] : nothing
+    mid = (lo + hi) >>> 1
+    return _gen_sum(ts, lo, mid) + _gen_sum(ts, mid + 1, hi)
 end
 
 # a product as numerator / denominator, which GIAC keeps as a product with `inv`
