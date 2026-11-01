@@ -179,7 +179,7 @@ function _written_partial(name::AbstractString, x::AbstractString)
     along(c) = (n = _node(c); (_is_trajectory(n) ? n : n.args[1]).args[2] == SymNode(x))
     vars = Set{String}(something(_wrt_name(c), "") for c in coordinates if !along(c))
     functions = Set(string(_function_name(c)) for c in coordinates if _is_trajectory(_node(c)))
-    parameter(s) = s == _current_style().time || s in functions || lock(() -> haskey(_DECLARED, s), _DECLARED_LOCK)
+    parameter(s) = s == _current_style().time || s in functions || _declared_tag(s) !== nothing
     foreach(s -> parameter(s) || push!(vars, s), (string(s) for s in free_symbols(v)))
     push!(vars, x)
     return length(vars) > 1

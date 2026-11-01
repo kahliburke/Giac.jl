@@ -453,7 +453,7 @@ function _variables(root::_PNode, style::TypesetStyle)
 end
 
 _declared_order(name::AbstractString) = lock(() -> get(_DECLARATION_ORDER, name, typemax(Int)), _DECLARED_LOCK)
-_is_integer_name(name::AbstractString) = lock(() -> get(_DECLARED, name, nothing) === :integer, _DECLARED_LOCK)
+_is_integer_name(name::AbstractString) = _declared_tag(name) === :integer
 
 # The place of a factor in a product: numbers, constants, parameters (as declared), variables (by
 # priority), exponentials, other functions, sums.

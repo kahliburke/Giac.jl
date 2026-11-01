@@ -265,6 +265,10 @@ function _array_declaration(name::Symbol, base::Symbol, dims; structure::Symbol 
     return Expr(:block, decl, bindings...)
 end
 
+# Code for where a declaration's binding `name` lives, `:global` or `:local` (see `_binding_scope`):
+# a declaration in a function or `let` belongs to the task that runs it
+_scope_code(mod::Module, name::Symbol) = :(_binding_scope($mod, $(QuoteNode(name)), $(esc(name))))
+
 # matrix properties recorded as facts about the entries (see `_declare_matrix!`); `posdef` and
 # `negdef` also make the matrix symmetric
 const _MATRIX_PROPERTIES = (:orthogonal, :posdef, :negdef, :invertible)
@@ -317,7 +321,7 @@ macro giac_matrix(args...)
         push!(decls, _array_declaration(name, Symbol(lowercase(string(name))), spec.args[2:end];
                                         structure = isempty(shapes) ? :general : only(shapes)))
         tagex = isempty(entry_tags) ? nothing : only(entry_tags) isa Symbol ? QuoteNode(only(entry_tags)) : esc(only(entry_tags))
-        push!(decls, :(_declare!($(esc(name)), $tagex)))
+        push!(decls, :(_declare!($(esc(name)), $tagex; scope = $(_scope_code(__module__, name)))))
         push!(decls, :(_declare_matrix!($(esc(name)), $(string(name)), $(Tuple(properties)))))
         push!(names, name)
         i += word ? 2 : 1
@@ -467,7 +471,7 @@ macro giac_var(args...)
             push!(exprs, :($(esc(decl)) = _dotted_variable($(string(decl)), $(esc(:(@isdefined $base))) ? $(esc(base)) : nothing, $(last(dotted)))))
             push!(varnames, decl)
             tagex = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) : esc(tag)
-            push!(exprs, :(is_identifier($(esc(decl))) && _declare!($(esc(decl)), $tagex)))
+            push!(exprs, :(is_identifier($(esc(decl))) && _declare!($(esc(decl)), $tagex; scope = $(_scope_code(__module__, decl)))))
             continue
         end
         if decl isa Expr && decl.head == :ref && decl.args[1] isa Symbol
@@ -492,7 +496,7 @@ macro giac_var(args...)
         end
         # every declaration starts the name afresh, without assumptions from earlier code
         tagex = tag === nothing ? nothing : tag isa Symbol ? QuoteNode(tag) : esc(tag)
-        push!(exprs, :(_declare!($(esc(varnames[end])), $tagex)))
+        push!(exprs, :(_declare!($(esc(varnames[end])), $tagex; scope = $(_scope_code(__module__, varnames[end])))))
     end
 
     # Return tuple of created variables

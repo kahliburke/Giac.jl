@@ -20,20 +20,42 @@ const _DECLARATION_ORDER = Dict{String, Int}()
 _note_declared(name::AbstractString) = lock(() -> (_DECLARATION_ORDER[name] = length(_DECLARATION_ORDER) + 1 +
                                                    maximum(values(_DECLARATION_ORDER); init = 0)), _DECLARED_LOCK)
 
-# Under the GIAC lock, so code evaluating on another thread (a notebook runs cells in parallel)
-# never sees the name between losing its assumption and getting it back.
-function _declare!(v::GiacExpr, tag)
+# `scope` is `:global`, `:local` (a declaration in a function or `let`, which belongs to the task
+# that ran it; see "Declarations in a local scope" below), or `:auto`: local if this task already
+# holds the name locally, as when `assuming` or a derivation's condition adds to a local
+# declaration. All in one GIAC job, so no other task sees the name half declared.
+function _declare!(v::GiacExpr, tag; scope::Symbol = :auto)
+    name = string(v)
+    f = _current_frame()
+    local_ = scope === :local || (scope === :auto && f !== nothing && haskey(f.tags, name))
+    local_ && (f = _new_frame!())                     # in the calling task, before handing off
     with_giac_lock() do
+        if local_
+            if get(_OWNER, name, nothing) !== f      # the task's first local declaration of the name
+                _GLOBAL_STATE[name] = _giac_state(name)
+                _OWNER[name] = f
+            end
+            f.tags[name] = tag
+        else
+            # a global declaration replaces a local one this task held
+            if f !== nothing && get(_OWNER, name, nothing) === f
+                delete!(_OWNER, name); delete!(_GLOBAL_STATE, name); delete!(f.tags, name)
+            end
+            lock(() -> (tag === nothing ? delete!(_DECLARED, name) : (_DECLARED[name] = tag)), _DECLARED_LOCK)
+        end
         _forget!(v)
-        name = string(v)
         _note_declared(name)
-        lock(() -> (tag === nothing ? delete!(_DECLARED, name) : (_DECLARED[name] = tag)), _DECLARED_LOCK)
         tag === nothing || _assume_tag!(v, tag)
     end
     return v
 end
 # every entry that is a variable (not the zeros or negated entries of a structured matrix)
-_declare!(A::AbstractArray, tag) = (foreach(v -> is_identifier(v) && _declare!(v, tag), A); A)
+_declare!(A::AbstractArray, tag; scope::Symbol = :auto) =
+    (foreach(v -> is_identifier(v) && _declare!(v, tag; scope), A); A)
+
+# Where the macro's binding `s` lives, just after the declaration assigned it `v`: the module's
+# global holds `v` itself only when the declaration ran at top level
+_binding_scope(mod::Module, s::Symbol, v) = isdefined(mod, s) && getglobal(mod, s) === v ? :global : :local
 
 function _assume_tag!(v::GiacExpr, tag)
     if tag isa Tuple
@@ -54,7 +76,81 @@ end
 # Drop whatever Giac assumes about `v` (purging a name it knows nothing about is harmless).
 _forget!(v::GiacExpr) = (try Commands.purge(v) catch; end; nothing)
 
-_declared(v::GiacExpr) = lock(() -> get(_DECLARED, string(v), nothing), _DECLARED_LOCK)
+# The assumption a name was declared with: this task's local declaration of it, else the global one
+function _declared_tag(name::AbstractString)
+    f = _current_frame()
+    f !== nothing && haskey(f.tags, name) && return f.tags[name]
+    return lock(() -> get(_DECLARED, name, nothing), _DECLARED_LOCK)
+end
+_declared(v::GiacExpr) = _declared_tag(string(v))
+
+# ---------------------------------------------------------------------------------------------
+# Declarations in a local scope
+# ---------------------------------------------------------------------------------------------
+# GIAC keeps one state per name: `assume(a > 0)` holds for every caller. A declaration in a function
+# or `let` belongs to the task that ran it instead, so code on another thread (a notebook runs cells
+# in parallel) neither sees it nor disturbs it, the way a Julia local isn't another task's business.
+# A task keeps its local names in a frame. When a task takes the GIAC lock, GIAC's state for those
+# names is made its own: a name another task's frame holds is saved into that frame and the global
+# state put back, and this task's own names are put in place. While one task works alone nothing
+# moves. A saved state is whatever GIAC holds for the name (`about`), so conditions added to a local
+# declaration, by `assuming` or a derivation, travel with it.
+
+mutable struct _Frame
+    tags::Dict{String, Any}           # the task's local declarations, for Julia-side code
+    saved::Dict{String, GiacExpr}     # GIAC's state for a local name while another task holds it
+end
+
+const _OWNER = Dict{String, _Frame}()            # names whose GIAC state is a frame's, not the global one
+const _GLOBAL_STATE = Dict{String, GiacExpr}()   # the global state of those names, to put back
+
+# The calling task's frame. On the GIAC thread, that of the task whose job is running.
+function _current_frame()
+    _on_giac_thread() && return _ACTIVE_FRAME[]::Union{Nothing, _Frame}
+    s = current_task().storage
+    s === nothing && return nothing
+    return get(s, :giac_frame, nothing)::Union{Nothing, _Frame}
+end
+_empty_frame() = _Frame(Dict{String, Any}(), Dict{String, GiacExpr}())
+# The calling task's frame, made if it has none. On the GIAC thread, the running job's.
+function _new_frame!()
+    _on_giac_thread() || return get!(_empty_frame, task_local_storage(), :giac_frame)::_Frame
+    _ACTIVE_FRAME[] === nothing && (_ACTIVE_FRAME[] = _empty_frame())
+    return _ACTIVE_FRAME[]::_Frame
+end
+
+# GIAC's state for a name: its assumption (or value), or the name itself when it has neither
+_giac_state(name::AbstractString) = Commands.invoke_cmd(:about, giac_identifier(name))
+function _set_giac_state!(name::AbstractString, s::GiacExpr)
+    v = giac_identifier(name)
+    _forget!(v)
+    isequal(_node(s), _node(v)) || Commands.invoke_cmd(:sto, s, v)
+    return nothing
+end
+
+# Make GIAC's state for local names this task's. Run by the outermost `with_giac_lock`, so the
+# lock is held.
+function _sync_local_names!()
+    f = _current_frame()
+    isempty(_OWNER) && (f === nothing || isempty(f.tags)) && return nothing
+    release = String[]
+    for (name, g) in _OWNER
+        g === f || push!(release, name)
+    end
+    for name in release
+        _OWNER[name].saved[name] = _giac_state(name)
+        _set_giac_state!(name, pop!(_GLOBAL_STATE, name))
+        delete!(_OWNER, name)
+    end
+    f === nothing && return nothing
+    for name in keys(f.tags)
+        get(_OWNER, name, nothing) === f && continue
+        _GLOBAL_STATE[name] = _giac_state(name)
+        _set_giac_state!(name, f.saved[name])
+        _OWNER[name] = f
+    end
+    return nothing
+end
 
 """
     assuming(f, conditions...)

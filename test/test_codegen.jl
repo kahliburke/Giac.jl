@@ -121,3 +121,39 @@ end
     @test string(conj(conj_c)) == "conj(conj_c)"
     @test Giac._declared(conj_c) === :complex
 end
+
+# A global declaration, made from any thread, is seen from every thread: GIAC keeps its state per
+# OS thread, and its calls all run on one (see `with_giac_lock`)
+@testset "a global declaration is seen from every thread" begin
+    v = Giac.giac_identifier("gl_everywhere")
+    fetch(Threads.@spawn Giac._declare!(v, :positive; scope = :global))
+    seen = [fetch(Threads.@spawn string(Giac.giac_eval("about(gl_everywhere)"))) for _ in 1:8]
+    @test all(==("assume[[],[line[0,+infinity]],[0]]"), seen)
+    Giac._declare!(v, nothing; scope = :global)
+end
+
+# Declarations in a local scope belong to the task that ran them
+@testset "local declarations are the declaring task's own" begin
+    probe(x) = (string(sqrt(x^2)), string(Giac.giac_eval("about($x)")))
+    to_a, to_b, log = Channel{Nothing}(1), Channel{Nothing}(1), Channel{Any}(4)
+    ta = Threads.@spawn begin
+        @giac_var lo_a::positive
+        put!(log, (:a, probe(lo_a))); put!(to_b, nothing); take!(to_a)
+        put!(log, (:a_again, probe(lo_a)))
+    end
+    tb = Threads.@spawn begin
+        take!(to_b)
+        @giac_var lo_a::negative
+        put!(log, (:b, probe(lo_a))); put!(to_a, nothing)
+    end
+    wait(ta); wait(tb); close(log)
+    r = Dict(collect(log))
+    pos, neg = "assume[[],[line[0,+infinity]],[0]]", "assume[[],[line[-infinity,0]],[0]]"
+    @test r[:a] == ("lo_a", pos)
+    @test r[:b] == ("-lo_a", neg)
+    @test r[:a_again] == ("lo_a", pos)             # B's declaration didn't reach A's
+    # neither is the global state of the name, which has no assumption
+    @test string(Giac.giac_eval("about(lo_a)")) == "lo_a" && Giac._declared_tag("lo_a") === nothing
+    # a declaration at top level is global, and one in a function or `let` local
+    @test Giac._binding_scope(@__MODULE__, :never_declared_here, 1) === :local
+end

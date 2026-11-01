@@ -322,7 +322,7 @@ _known_nonnegative(n::Node) = false
 _known_nonnegative(n::NumNode) = n.v isa Real && n.v >= 0
 function _known_nonnegative(n::SymNode)
     n.name == "pi" && return true
-    tag = lock(() -> get(_DECLARED, n.name, nothing), _DECLARED_LOCK)
+    tag = _declared_tag(n.name)
     return tag === :positive || tag === :nonnegative || (tag isa Tuple && length(tag) == 2 && tag[1] isa Real && tag[1] >= 0)
 end
 _known_nonnegative(n::MulNode) = n.coef isa Real && n.coef >= 0 &&
@@ -330,7 +330,7 @@ _known_nonnegative(n::MulNode) = n.coef isa Real && n.coef >= 0 &&
 _known_nonnegative(n::AddNode) = all(((m, c),) -> c isa Real && c >= 0 && (m isa NumNode || _known_nonnegative(m)), n.terms)
 _known_nonnegative(n::CallNode) = n.f == "exp" && length(n.args) == 1 && _known_real(n.args[1])
 _known_real(n::Node) = _known_nonnegative(n) || (n isa NumNode && n.v isa Real) ||
-                       (n isa SymNode && lock(() -> get(_DECLARED, n.name, nothing), _DECLARED_LOCK) in (:real, :integer, :negative, :nonpositive))
+                       (n isa SymNode && _declared_tag(n.name) in (:real, :integer, :negative, :nonpositive))
 
 # b^e for numbers with a fractional exponent: computed for floats, exact for perfect powers
 function _numeric_root(b, e)
