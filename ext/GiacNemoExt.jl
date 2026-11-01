@@ -665,6 +665,138 @@ function _declared_positive(name, strict_only = false)
            (tag isa Tuple && length(tag) == 2 && tag[1] isa Real && (tag[1] > 0 || !strict_only && tag[1] >= 0))
 end
 
+# ===========================================================================
+# decompose: target = Σ Mₖ Bₖ with unknown multipliers, by exact coefficient matching
+# ===========================================================================
+
+function Giac.decompose(target, blocks; vars = nothing, degree = nothing, param = ())
+    pairs = [b isa Pair ? (string(first(b)), convert(GiacExpr, last(b))) : (nothing, convert(GiacExpr, b)) for b in blocks]
+    exprs = GiacExpr[convert(GiacExpr, target); last.(pairs)]
+    isempty(param) || (exprs = [substitute(e, param...) for e in exprs])
+    T, Bs = _cleared(Giac.to_nemo(exprs))
+    R = parent(T)
+    names = Union{String, Nothing}[n for n in first.(pairs)]
+    allowed = vars === nothing ? collect(1:nvars(R)) :
+              [findfirst(==(Symbol(string(v))), symbols(R)) for v in vars]
+    any(isnothing, allowed) && throw(ArgumentError("decompose: a variable in `vars` does not occur in the target or blocks"))
+    degrees = degree === nothing ? [total_degree(T) - total_degree(B) for B in Bs] :
+              degree isa Integer ? fill(degree, length(Bs)) : collect(degree)
+    length(degrees) == length(Bs) || throw(ArgumentError("decompose: one degree per block"))
+
+    # the unknowns: one coefficient per (block, monomial of the multiplier)
+    unknowns = Tuple{Int, Vector{Int}}[]
+    for (k, d) in enumerate(degrees), ev in _exponents(nvars(R), allowed, d)
+        push!(unknowns, (k, ev))
+    end
+    rows = Dict{Vector{Int}, Int}()
+    row(ev) = get!(rows, ev, length(rows) + 1)
+    entries = Tuple{Int, Int, QQFieldElem}[]
+    for (j, (k, ev)) in enumerate(unknowns)
+        for (c, e) in zip(coefficients(Bs[k]), exponent_vectors(Bs[k]))
+            push!(entries, (row(e .+ ev), j, QQ(c)))
+        end
+    end
+    rhs = [(row(e), QQ(c)) for (c, e) in zip(coefficients(T), exponent_vectors(T))]
+    solved = _solve_sparse(entries, rhs, length(rows), length(unknowns))
+    solved === nothing && return nothing
+    x, K = solved
+    multipliers(v) = [Giac.to_giac(_polynomial(R, [(v[j], unknowns[j][2]) for j in eachindex(unknowns) if unknowns[j][1] == k]))
+                      for k in eachindex(Bs)]
+    directions = [multipliers(K[:, j]) for j in axes(K, 2)]
+    return Giac.Decomposition(exprs[1], exprs[2:end], names, multipliers(x), directions)
+end
+
+# The solutions of A x = b, A given by its entries (row, column, value): a particular solution
+# and a basis of the kernel, as columns. Rows with a single unknown fix it first, which removes
+# most unknowns of a coefficient-matching system (a product monomial that nothing else can
+# cancel); the rest is solved densely. `nothing` if there is no solution.
+function _solve_sparse(entries, rhs, nrows, nunknowns)
+    colentries = [Dict{Int, QQFieldElem}() for _ in 1:nunknowns]
+    rowcols = [Set{Int}() for _ in 1:nrows]
+    for (i, j, c) in entries
+        colentries[j][i] = get(colentries[j], i, QQ(0)) + c
+    end
+    for j in 1:nunknowns, (i, c) in collect(colentries[j])
+        iszero(c) ? delete!(colentries[j], i) : push!(rowcols[i], j)
+    end
+    b = [QQ(0) for _ in 1:nrows]
+    for (i, c) in rhs
+        b[i] += c
+    end
+    value = Dict{Int, QQFieldElem}()
+    queue = [i for i in 1:nrows if length(rowcols[i]) == 1]
+    while !isempty(queue)
+        i = pop!(queue)
+        length(rowcols[i]) == 1 || continue
+        j = only(rowcols[i])
+        v = b[i] // colentries[j][i]
+        value[j] = v
+        for (r, c) in colentries[j]
+            b[r] -= c * v
+            delete!(rowcols[r], j)
+            length(rowcols[r]) == 1 && push!(queue, r)
+        end
+    end
+    any(i -> isempty(rowcols[i]) && !iszero(b[i]), 1:nrows) && return nothing
+    free = [j for j in 1:nunknowns if !haskey(value, j)]
+    live = [i for i in 1:nrows if !isempty(rowcols[i])]
+    x = [get(value, j, QQ(0)) for j in 1:nunknowns]
+    K = Matrix{QQFieldElem}(undef, nunknowns, 0)
+    if !isempty(free)
+        index = Dict(j => k for (k, j) in enumerate(free))
+        A = zero_matrix(QQ, length(live), length(free))
+        for (r, i) in enumerate(live), j in rowcols[i]
+            A[r, index[j]] = colentries[j][i]
+        end
+        B = matrix(QQ, length(live), 1, [b[i] for i in live])
+        ok, y, N = can_solve_with_solution_and_kernel(A, B; side = :right)
+        ok || return nothing
+        for (k, j) in enumerate(free)
+            x[j] = y[k, 1]
+        end
+        K = [QQ(0) for _ in 1:nunknowns, _ in 1:ncols(N)]
+        for (k, j) in enumerate(free), c in 1:ncols(N)
+            K[j, c] = N[k, c]
+        end
+    end
+    return x, K
+end
+
+# polynomials with the denominators cleared: each of T, Bₖ times the lcm of the denominators
+function _cleared(values)
+    first(values) isa FracElem || return first(values), values[2:end]
+    L = reduce(lcm, (denominator(v) for v in values))
+    polys = [divexact(numerator(v) * L, denominator(v)) for v in values]
+    return first(polys), polys[2:end]
+end
+
+# the exponent vectors of total degree ≤ d in the variables `allowed`
+function _exponents(n, allowed, d)
+    d < 0 && return Vector{Int}[]
+    out = Vector{Int}[]
+    function walk(i, left, ev)
+        if i > length(allowed)
+            push!(out, copy(ev))
+            return
+        end
+        for k in 0:left
+            ev[allowed[i]] = k
+            walk(i + 1, left - k, ev)
+        end
+        ev[allowed[i]] = 0
+    end
+    walk(1, d, zeros(Int, n))
+    return out
+end
+
+function _polynomial(R, terms)
+    ctx = MPolyBuildCtx(R)
+    for (c, ev) in terms
+        iszero(c) || push_term!(ctx, c, ev)
+    end
+    return finish(ctx)
+end
+
 export to_giac, to_nemo
 
 end # module GiacNemoExt

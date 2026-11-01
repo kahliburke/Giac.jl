@@ -231,6 +231,7 @@ using LinearAlgebra
     include("test_nemo_conversion.jl")
     include("test_nemo_multivariate.jl")
     include("test_positivity.jl")
+    include("test_decompose.jl")
 
     # ============================================================================
     # Doctests

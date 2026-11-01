@@ -1,0 +1,46 @@
+# decompose: a target as a combination of blocks with unknown multipliers, solved exactly in Nemo
+
+using Nemo
+
+@testset "decompose" begin
+    C = Giac.Commands
+    @giac_var p r L x y
+
+    @testset "a constant multiplier" begin
+        target = (p * (L - r) + (L - p) * r)^2 - (p - r)^2 * L^2
+        d = decompose(target, [:Q => p * (L - p) * r * (L - r)])
+        @test string(only(d.multipliers)) == "4" && isempty(d.directions)
+        @test occursin("(4) · Q", sprint(show, MIME("text/plain"), d))
+    end
+
+    @testset "a family of solutions" begin
+        d = decompose(x^3 + y^3, [x + y, x * y]; degree = [2, 1])
+        @test length(d.directions) == 1
+        for λ in (0, 1, -3 // 2)
+            M = Giac.combination(d, [λ])
+            @test iszero(C.expand(M[1] * (x + y) + M[2] * x * y - (x^3 + y^3)))
+        end
+        @test decompose(x^3 + y^3, [x * y]; degree = 1) === nothing              # none of this degree
+    end
+
+    @testset "rational functions" begin
+        d = decompose(1 / (x * (x + 1)), [1 / x, 1 / (x + 1)]; degree = 0)
+        @test string.(d.multipliers) == ["1", "-1"]
+    end
+
+    @testset "a relation by a parametrization: the star identity" begin
+        @giac_var τ u u′ l′ l″ t₁ t₂ t₃ A A′ A₃ g
+        P, Q, e, dd = (τ - u) * (u′ - τ), (l′ - τ) * (l″ - τ), l″ - l′, u′ - u
+        α = A′ * (t₃ - t₁) * (t₂ - τ) + A₃ * (t₂ - t₁) * (t₃ - τ) - A * (t₃ - t₂) * (τ - t₁)
+        β = A * A′ * (t₂ - t₁) * (t₃ - τ) - A′ * A₃ * (t₃ - t₂) * (τ - t₁) + A * A₃ * (t₃ - t₁) * (t₂ - τ)
+        δ₊, δ₋ = u′ - t₂, t₂ - l′
+        T = A′ * e * α * P + dd * β * Q
+        W = A′ * α * (τ - u) * ((t₂ - τ) * δ₋ + e * δ₊)
+        V = β * (l″ - τ) * δ₊ * (τ - u / g)
+        d = decompose(T, [:S => (t₂ - τ)^2, :W => W, :V => V]; degree = [5, 0, 0], param = (l′ => t₂ / g, u′ => t₂ * g))
+        @test isempty(d.directions) && string.(d.multipliers[2:3]) == ["1", "-1"]
+        M = d.multipliers[1]
+        @test Bool(positivity(substitute(M, τ => t₁); order = (u, t₁, t₂, t₃, l″), positive = (A, A′, A₃)))
+        @test Bool(positivity(substitute(M, τ => t₃); order = (u, t₁, t₂, t₃, l″), positive = (A, A′, A₃)))
+    end
+end

@@ -115,6 +115,7 @@ include("collect.jl")
 include("integration.jl")
 include("interrupt.jl")
 include("positivity.jl")
+include("decompose.jl")
 include("trig_simplify.jl")
 include("exact_literals.jl")
 include("matrix_symbols.jl")
@@ -199,7 +200,7 @@ export solve
 
 # Conversion functions (extended by GiacSymbolicsExt, GiacMathJSONExt, GiacSymPyExt, and GiacNemoExt)
 export to_giac, to_symbolics, to_mathjson, to_sympy, to_nemo
-export positivity
+export positivity, decompose
 
 # MCP server entry point (extended by GiacMCPExt when ModelContextProtocol is loaded)
 export giac_mcp_server
