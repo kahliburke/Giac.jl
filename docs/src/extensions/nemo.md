@@ -60,6 +60,35 @@ Coefficients of the destination polynomial are converted recursively into the ba
 | `AbsSimpleNumFieldElem` | polynomial in the generator symbol, **already reduced** mod the defining polynomial |
 | `ZZMatrix` / `QQMatrix` | `GiacMatrix` of converted entries |
 
+## Several variables
+
+Polynomials in several variables go into a Nemo polynomial ring, and rational functions into
+its fraction field. A variable is the generator of the same name, in both directions. The
+conversion reads Giac's expression tree directly, so large polynomials cross quickly.
+
+```julia
+using Giac, Nemo
+@giac_var x y
+R, (X, Y) = polynomial_ring(QQ, [:x, :y])
+to_nemo((x + y)^2 / 2, R)               # 1//2*x^2 + x*y + 1//2*y^2
+to_nemo(1 / (x - y), fraction_field(R))
+to_giac(X^2 - Y)                        # x^2-y, a GiacExpr
+```
+
+Without a ring, `to_nemo(e)` makes one from the variables of `e`, in the order they were
+declared: the polynomial ring over `QQ`, or its fraction field when `e` has a denominator.
+Several expressions given together go into one ring, so they can be compared, divided and
+factored together:
+
+```julia
+@giac_var a b
+p, q = to_nemo((a^2 - b^2, a + b))
+divexact(p, q)                          # a - b
+factor(p)
+```
+
+`base = ZZ` gives integer coefficients, for factoring over the integers.
+
 ## Round-trip fidelity
 
 Round trips are compared **by value**, never by `string`: Nemo polynomials are canonical (expanded, ring-sorted), so a Giac factored form `factor(x^2-1)` arrives in Nemo expanded as `x^2-1`, and the printed term order can differ. The variable **name** survives both crossings; the ordering does not.
@@ -80,7 +109,7 @@ Both directions refuse everything that is not algebraic over the supported rings
 - the constants `pi` and `e` (transcendental, no element in an algebraic ring)
 - real and complex values (`DOUBLE`, `REAL`, `CPLX`) — see *Reals* below
 - a non-integer rational into `ZZ`
-- multivariate polynomials (more than one free variable)
+- a negative power into a polynomial ring (use its fraction field)
 
 **Outward (`to_giac`)** refuses:
 - real balls (`ArbFieldElem` / `RealFieldElem`)
@@ -96,7 +125,6 @@ Neither direction may go through a printed decimal chosen by a printer: a Giac `
 - **Factored structure is not preserved** Giac → Nemo: `factor(x^2-1)` becomes `x^2-1` (expanded) in Nemo.
 - **`GF(p^n)` extension degree** is not auto-inferred: the caller must pass the `FqField`. A `GiacExpr` does not carry the extension degree.
 - **Number-field / finite-field embeddings** are one-way: a Nemo element reduced mod its defining polynomial loses the embedding information when round-tripped.
-- **Multivariate polynomials** are not supported in v1.
 - **Algebraic closure of QQ** (`algebraic_closure(QQ)` elements) and **Cauchy/real-complex balls** are refused (carry root indices / radii that Giac's flat `Gen` tree cannot faithfully represent).
 - **Compat:** the bridge depends on Nemo 0.56 API surfaces (`AbsSimpleNumFieldElem`, `FqFieldElem`, `Nemo._coeff`, `Nemo.coeff`, `coefficients`, `defining_polynomial`, `matrix_space`). Nemo has historically renamed types between minor versions; the compat is pinned to `"0.56"` and should be re-validated on bumps.
 

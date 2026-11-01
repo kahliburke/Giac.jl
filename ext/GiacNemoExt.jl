@@ -23,11 +23,13 @@
 #
 # v1 scope — see docs/src/extensions/nemo.md for the full refusal list and
 # limitations. In short:
-#   * supported outward: ZZRingElem, QQFieldElem, univariate polys over
-#     ZZ/QQ, FqFieldElem (prime & non-prime), AbsSimpleNumFieldElem,
-#     ZZMatrix/QQMatrix.
-#   * supported inward parent: ZZ, QQ, a univariate polynomial ring over
-#     ZZ/QQ, an AbsSimpleNumField, an FqField, a ZZ/QQ MatSpace.
+#   * supported outward: ZZRingElem, QQFieldElem, polynomials in one or
+#     several variables over ZZ/QQ and their quotients, FqFieldElem (prime &
+#     non-prime), AbsSimpleNumFieldElem, ZZMatrix/QQMatrix.
+#   * supported inward parent: ZZ, QQ, a polynomial ring in one or several
+#     variables over ZZ/QQ or its fraction field, an AbsSimpleNumField, an
+#     FqField, a ZZ/QQ MatSpace; or none, for a ring made from the
+#     expression's own variables.
 #   * refused (both directions): transcendental functions (sin, cos, exp,
 #     ln, sqrt, log10, ...), the constants pi/e, real/complex balls
 #     (ArbFieldElem/AcbFieldElem), p-adics (PadicFieldElem). Reals are
@@ -45,10 +47,10 @@ import Nemo: PolyRing, MatSpace, PolyRingElem, MatElem
 using CxxWrap: StdVector
 
 const OUTWARD_SUPPORTED =
-    "ZZRingElem, QQFieldElem, univariate polys over ZZ/QQ, FqFieldElem, " *
+    "ZZRingElem, QQFieldElem, polynomials over ZZ/QQ and their quotients, FqFieldElem, " *
     "AbsSimpleNumFieldElem, ZZMatrix/QQMatrix"
 const INWARD_SUPPORTED =
-    "parent ring ZZ, QQ, a univariate polynomial ring over ZZ/QQ, an " *
+    "parent ring ZZ, QQ, a polynomial ring over ZZ/QQ or its fraction field, an " *
     "AbsSimpleNumField, an FqField, or a ZZ/QQ MatSpace"
 
 # Allowed GIAC operators inside an expression destined for an algebraic
@@ -367,8 +369,8 @@ function Giac.to_nemo(expr::GiacExpr, R::PolyRing)
         coeffs = [to_nemo(Giac.Commands.coeff(expr, v, k), B) for k in 0:d]
         return R(coeffs)
     else
-        error("to_nemo: multivariate polynomials are not supported in v1 " *
-              "(got $nvars free variables). Supported: $INWARD_SUPPORTED")
+        error("to_nemo: a univariate polynomial ring was given, and the expression has " *
+              "$nvars variables; use a polynomial ring in several variables")
     end
 end
 
@@ -444,6 +446,165 @@ function Giac.to_nemo(expr::GiacExpr, M::MatSpace)
     end
     return matrix(B, nr, nc, elems)
 end
+
+# ===========================================================================
+# Multivariate: polynomial rings and their fraction fields, names preserved
+# ===========================================================================
+#
+# Both directions go through Giac's expression tree, not through printing: a sum of monomials
+# becomes a polynomial built term by term, and a polynomial comes back as a tree of the same
+# names. Into a polynomial ring, a power must be a whole nonnegative number; into a fraction
+# field, any whole power.
+
+import Nemo: MPolyRing, MPolyRingElem, FracField, FracElem
+
+const _Node = Giac.Node
+
+# the generators of a ring by name, as elements of `F` (the ring itself or its fraction field)
+function _gens_by_name(R, F)
+    return Dict(string(s) => F(g) for (s, g) in zip(symbols(R), gens(R)))
+end
+
+_qq(v::Integer) = QQ(BigInt(v))
+_qq(v::Rational) = QQ(BigInt(numerator(v)), BigInt(denominator(v)))
+_qq(v) = error("to_nemo: the number $v is not an integer or a rational; floating-point and " *
+               "complex numbers have no exact element here")
+
+# a number in the polynomial ring R, or in its coefficient ring
+_coerce(R, v) = R(_scalar(R, v))
+function _scalar(R, v)
+    base_ring(R) isa ZZRing || return base_ring(R)(_qq(v))
+    v isa Integer || error("to_nemo: $v is not an integer, and the ring is over ZZ")
+    return ZZ(BigInt(v))
+end
+
+# The value of a tree in `F`: a polynomial ring or a fraction field, with `vars` its generators
+_value(n::Giac.NumNode, F, vars) = _constant(F, n.v)
+function _value(n::Giac.SymNode, F, vars)
+    v = get(vars, n.name, nothing)
+    v === nothing && error("to_nemo: $(n.name) is not a variable of the ring (its variables are " *
+                           join(sort!(collect(keys(vars))), ", ") * ")")
+    return v
+end
+function _value(n::Giac.AddNode, F, vars)
+    F isa MPolyRing && all(t -> _is_monomial(first(t)), n.terms) && return _built(n, F, vars)
+    acc = zero(F)
+    for (m, c) in n.terms
+        acc += _constant(F, c) * _value(m, F, vars)
+    end
+    return acc
+end
+function _value(n::Giac.MulNode, F, vars)
+    acc = _constant(F, n.coef)
+    for (b, e) in n.factors
+        k = _whole_power(e, F)
+        acc *= k >= 0 ? _value(b, F, vars)^k : inv(_value(b, F, vars))^(-k)
+    end
+    return acc
+end
+_value(n::Giac.CallNode, F, vars) =
+    error("to_nemo: $(n.f)(…) is not a polynomial or rational function of the ring's variables")
+_value(n::Giac.GenNode, F, vars) = error("to_nemo: $(n.key) has no element in $(F)")
+
+_constant(F, v) = F isa FracField ? F(_coerce(base_ring(F), v)) : _coerce(F, v)
+
+function _whole_power(e, F)
+    (e isa Giac.NumNode && e.v isa Integer) ||
+        error("to_nemo: the power $(Giac._str(e)) is not a whole number")
+    e.v < 0 && !(F isa FracField) &&
+        error("to_nemo: a negative power has no value in a polynomial ring; use its fraction field")
+    return Int(e.v)
+end
+
+# a product of variables to whole nonnegative powers, with coefficient 1
+_is_monomial(m::_Node) = m === Giac._UNIT || isequal(m, Giac._UNIT) || m isa Giac.SymNode ||
+    (m isa Giac.MulNode && isone(m.coef) &&
+     all(((b, e),) -> b isa Giac.SymNode && e isa Giac.NumNode && e.v isa Integer && e.v >= 0, m.factors))
+
+# a sum of monomials, built term by term
+function _built(n::Giac.AddNode, R, vars)
+    index = Dict(string(s) => i for (i, s) in enumerate(symbols(R)))
+    ctx = MPolyBuildCtx(R)
+    for (m, c) in n.terms
+        ev = zeros(Int, length(index))
+        for (b, e) in (m isa Giac.MulNode ? m.factors : m isa Giac.SymNode ? [m => Giac._ONE] : Pair{_Node, _Node}[])
+            i = get(index, b.name, nothing)
+            i === nothing && _value(b, R, vars)       # the error naming the variable
+            ev[i] += Int(e.v)
+        end
+        push_term!(ctx, _scalar(R, c), ev)
+    end
+    return finish(ctx)
+end
+
+"""
+    to_nemo(e::GiacExpr, R::MPolyRing)
+    to_nemo(e::GiacExpr, F::FracField)
+
+`e` as a polynomial of `R`, or a rational function of the fraction field `F` of a polynomial
+ring. A variable of `e` is the generator of the same name. The coefficients are integers or
+rationals; functions such as `sin`, and floating-point numbers, are refused.
+
+```julia
+using Nemo
+@giac_var x y
+R, (X, Y) = polynomial_ring(QQ, [:x, :y])
+to_nemo((x + y)^2 / 2, R)                     # 1//2*x^2 + x*y + 1//2*y^2
+to_nemo(1 / (x - y), fraction_field(R))
+```
+"""
+Giac.to_nemo(e::GiacExpr, R::MPolyRing) = _value(Giac._node(e), R, _gens_by_name(R, R))
+Giac.to_nemo(e::GiacExpr, F::FracField) = _value(Giac._node(e), F, _gens_by_name(base_ring(F), F))
+
+"""
+    to_nemo(e::GiacExpr; base = QQ)
+    to_nemo(es; base = QQ)
+
+`e` in a ring made from its own variables: the polynomial ring over `base` in them, or its
+fraction field when `e` has a variable or a sum in a denominator. Several expressions, as a
+tuple or vector, go into one ring. The variables are ordered as they were declared.
+
+```julia
+@giac_var a b
+p, q = to_nemo((a^2 - b^2, a + b))
+divexact(p, q)                                # a - b
+```
+"""
+Giac.to_nemo(e::GiacExpr; base = QQ) = only(Giac.to_nemo((e,); base))
+function Giac.to_nemo(es::Union{Tuple, AbstractVector}; base = QQ)
+    nodes = [Giac._node(e isa GiacExpr ? e : convert(GiacExpr, e)) for e in es]
+    names = sort!(collect(union((Giac._symbol_names(n) for n in nodes)...)); by = s -> (Giac._declared_order(s), s))
+    R, _ = polynomial_ring(base, Symbol.(names))
+    F = any(_has_fraction, nodes) ? fraction_field(R) : R
+    vars = _gens_by_name(R, F)
+    return map(n -> _value(n, F, vars), nodes)
+end
+
+_has_fraction(n::_Node) = false
+_has_fraction(n::Giac.AddNode) = any(t -> _has_fraction(first(t)), n.terms)
+_has_fraction(n::Giac.MulNode) =
+    any(((b, e),) -> (e isa Giac.NumNode && e.v isa Real && e.v < 0) || _has_fraction(b), n.factors)
+
+"""
+    to_giac(p::MPolyRingElem)
+    to_giac(f::FracElem)
+
+A polynomial of several variables, or a quotient of them, as a `GiacExpr` in the same names.
+"""
+function Giac.to_giac(p::MPolyRingElem)
+    names = [Giac.SymNode(string(s)) for s in symbols(parent(p))]
+    terms = Giac.Node[]
+    for (c, ev) in zip(coefficients(p), exponent_vectors(p))
+        factors = Giac.Node[Giac._pow(names[i], Giac.NumNode(k)) for (i, k) in enumerate(ev) if k > 0]
+        push!(terms, Giac._mul(_node_number(c), factors...))
+    end
+    return GiacExpr(isempty(terms) ? Giac._ZERO : Giac._add(terms...))
+end
+Giac.to_giac(f::FracElem) = Giac.to_giac(numerator(f)) / Giac.to_giac(denominator(f))
+
+_node_number(c::ZZRingElem) = Giac.NumNode(BigInt(c))
+_node_number(c::QQFieldElem) = Giac.NumNode(Rational{BigInt}(c))
+_node_number(c) = Giac._node(Giac.to_giac(c))
 
 export to_giac, to_nemo
 

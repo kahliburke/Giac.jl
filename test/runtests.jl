@@ -228,6 +228,7 @@ using LinearAlgebra
     # to_nemo(::GiacExpr, parent), with the documented refusal list.
     # ============================================================================
     include("test_nemo_conversion.jl")
+    include("test_nemo_multivariate.jl")
 
     # ============================================================================
     # Doctests

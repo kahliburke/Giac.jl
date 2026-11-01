@@ -239,15 +239,15 @@ function to_sympy end
 
 """
     to_nemo(expr::GiacExpr, parent)
+    to_nemo(expr::GiacExpr; base = QQ)
+    to_nemo(exprs; base = QQ)
 
 Convert a GiacExpr into a Nemo.jl element of the given parent ring
-(`ZZ`, `QQ`, a univariate polynomial ring, an `AbsSimpleNumField`, an
-`FqField`, or a `MatSpace`). Extended by `GiacNemoExt` when `Nemo` is
-loaded.
-
-The parent ring is required because Nemo elements are parent-typed while a
-`GiacExpr` is an untyped symbolic tree. Calling this without first loading
-`Nemo` raises a `MethodError`.
+(`ZZ`, `QQ`, a polynomial ring in one or several variables or its fraction
+field, an `AbsSimpleNumField`, an `FqField`, or a `MatSpace`). Without a
+parent, the ring is made from the expression's variables (several
+expressions go into one ring). Extended by `GiacNemoExt` when `Nemo` is
+loaded; calling this without first loading `Nemo` raises a `MethodError`.
 """
 function to_nemo end
 
