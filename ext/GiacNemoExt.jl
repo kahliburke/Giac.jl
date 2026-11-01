@@ -615,9 +615,10 @@ function Giac.positivity(e; order = (), positive = (), param = (), strict = true
     isempty(param) || (e = substitute(e, param...))
     gaps, known = Giac._gap_substitution(order, positive)
     isempty(gaps) || (e = substitute(e, gaps...))
-    rational = Giac.Commands.normal(e)
-    num, den = Giac.Commands.numer(rational), Giac.Commands.denom(rational)
-    N, D = Giac.to_nemo((num, den))
+    # expanded and put over a common denominator in Nemo, which is much faster than GIAC's
+    # normal on large expressions
+    v = only(Giac.to_nemo((e,)))
+    N, D = v isa FracElem ? (numerator(v), denominator(v)) : (v, one(v))
     rn, rd = _sign_report(N, known, strict), _sign_report(D, known, strict)
     return Giac.Positivity(rn.sign * rd.sign, rn.strict && rd.strict, rn, rd, gaps)
 end
