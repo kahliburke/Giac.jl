@@ -230,6 +230,7 @@ using LinearAlgebra
     # ============================================================================
     include("test_nemo_conversion.jl")
     include("test_nemo_multivariate.jl")
+    include("test_positivity.jl")
 
     # ============================================================================
     # Doctests

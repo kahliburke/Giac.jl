@@ -606,6 +606,65 @@ _node_number(c::ZZRingElem) = Giac.NumNode(BigInt(c))
 _node_number(c::QQFieldElem) = Giac.NumNode(Rational{BigInt}(c))
 _node_number(c) = Giac._node(Giac.to_giac(c))
 
+# ===========================================================================
+# positivity: coefficient signs after writing an ordering as positive gaps
+# ===========================================================================
+
+_chains(order) = isempty(order) ? Any[] :
+    (order isa Tuple && !(first(order) isa Union{Tuple, AbstractVector})) ? Any[order] : collect(Any, order)
+
+function Giac.positivity(e; order = (), positive = (), param = (), strict = true)
+    e = convert(GiacExpr, e)
+    isempty(param) || (e = substitute(e, param...))
+    gaps = Pair{GiacExpr, GiacExpr}[]
+    known = Set{String}(string.(positive))         # variables known positive (or ≥ 0 if not strict)
+    for chain in _chains(order)
+        items = collect(Any, chain)
+        start = popfirst!(items)
+        acc = convert(GiacExpr, start)
+        if start isa Number && iszero(start) && !isempty(items)
+            # 0 < v: v itself is the first gap
+            v = popfirst!(items)
+            push!(known, string(v))
+            acc = convert(GiacExpr, v)
+        end
+        for v in items
+            Δ = Giac.giac_identifier("Δ" * string(v))
+            push!(known, string(Δ))
+            acc = acc + Δ
+            push!(gaps, convert(GiacExpr, v) => acc)
+        end
+    end
+    isempty(gaps) || (e = substitute(e, gaps...))
+    rational = Giac.Commands.normal(e)
+    num, den = Giac.Commands.numer(rational), Giac.Commands.denom(rational)
+    N, D = Giac.to_nemo((num, den))
+    rn, rd = _sign_report(N, known, strict), _sign_report(D, known, strict)
+    return Giac.Positivity(rn.sign * rd.sign, rn.strict && rd.strict, rn, rd, gaps)
+end
+
+function _sign_report(P, known, strict)
+    vars = [string(s) for (s, g) in zip(symbols(parent(P)), gens(parent(P))) if degree(P, g) > 0]
+    free = [Giac.giac_identifier(v) for v in vars if !(v in known) && !_declared_positive(v)]
+    cs = collect(coefficients(P))
+    pos, neg = count(>(0), cs), count(<(0), cs)
+    sign = !isempty(free) || iszero(P) ? 0 : neg == 0 ? 1 : pos == 0 ? -1 : 0
+    majority = pos >= neg ? 1 : -1
+    against = [Giac.to_giac(c * m) for (c, m) in zip(coefficients(P), monomials(P)) if sign == 0 && Base.sign(c) == -majority]
+    # strictly positive variables and a nonzero polynomial give a strict sign; with ≤ chains
+    # (strict = false) a constant term is needed
+    strict_sign = sign != 0 && (strict ? all(v -> v in known || _declared_positive(v, true), vars) : !iszero(constant_coefficient(P)))
+    return Giac.SignReport(sign, strict_sign, Giac.to_giac(P), against, free)
+end
+
+# whether a name was declared positive (`@giac_var A::positive`), or with `strict_only = false`
+# nonnegative
+function _declared_positive(name, strict_only = false)
+    tag = lock(() -> get(Giac._DECLARED, name, nothing), Giac._DECLARED_LOCK)
+    return tag === :positive || (!strict_only && tag === :nonnegative) ||
+           (tag isa Tuple && length(tag) == 2 && tag[1] isa Real && (tag[1] > 0 || !strict_only && tag[1] >= 0))
+end
+
 export to_giac, to_nemo
 
 end # module GiacNemoExt
