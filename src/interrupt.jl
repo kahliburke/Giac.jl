@@ -3,15 +3,18 @@
 # it is set. A computation runs inside a C++ call, where Julia's own interrupts do not reach, so
 # the flag is set from another thread.
 #
-# Limitation: the wrapper does not mark GIAC's computations safe for Julia's garbage collector, so
-# while one runs, any thread that needs to collect waits for it. A timeout or cancel check that is
-# due while such a wait is on acts only when the computation returns.
+# A wrapper that runs GIAC's computations in GC-safe regions (with `giac_interrupt`) lets the
+# other threads collect garbage meanwhile. With an older one, a thread that needs to collect
+# waits for the computation, and a timeout or cancel check due then acts only when it returns.
 
 using Libdl
 
+# whether the wrapper sets GIAC's flags itself, and runs computations GC-safe
+_wrapper_interrupts() = isdefined(GiacCxxBindings, :giac_interrupt)
+
 const _GIAC_FLAGS = Ref{Tuple{Ptr{UInt8}, Ptr{UInt8}}}((C_NULL, C_NULL))
 
-# GIAC's `ctrl_c` and `interrupted` flags, looked up in the loaded libgiac
+# GIAC's `ctrl_c` and `interrupted` flags, looked up in the loaded libgiac (older wrappers)
 function _giac_flags()
     flags = _GIAC_FLAGS[]
     flags[1] == C_NULL || return flags
@@ -30,9 +33,15 @@ Stop the GIAC computation running now; it throws a `GiacError` saying it was sto
 interruption. Call it from another task on another thread: the computation itself holds its
 thread until it returns. See [`Giac.with_timeout`](@ref) to stop one after a time.
 """
-interrupt() = (unsafe_store!(_giac_flags()[1], 0x01); nothing)
+function interrupt()
+    _wrapper_interrupts() ? GiacCxxBindings.giac_interrupt() : unsafe_store!(_giac_flags()[1], 0x01)
+    return nothing
+end
 
-_clear_interrupt() = (foreach(p -> unsafe_store!(p, 0x00), _giac_flags()); nothing)
+function _clear_interrupt()
+    _wrapper_interrupts() ? GiacCxxBindings.giac_clear_interrupt() : foreach(p -> unsafe_store!(p, 0x00), _giac_flags())
+    return nothing
+end
 
 """
     GiacTimeout(seconds)
@@ -49,8 +58,8 @@ Base.showerror(io::IO, e::GiacTimeout) = print(io, "GiacTimeout: the GIAC comput
 
 Run `f()`, stopping a GIAC computation in it that is still running after `seconds`, with a
 [`GiacTimeout`](@ref). Only this task's calls are stopped. Needs Julia started with more than one
-thread (`julia -t 2`), as the timer runs beside the computation. Julia cannot collect garbage
-while GIAC computes, so if a collection is pending the stop waits for the computation.
+thread (`julia -t 2`), as the timer runs beside the computation. With a wrapper older than the
+one running GIAC GC-safe, a pending garbage collection makes the stop wait for the computation.
 
 ```julia
 Giac.with_timeout(30) do
@@ -60,15 +69,14 @@ end
 """
 function with_timeout(f, seconds::Real)
     Threads.nthreads() > 1 || @warn "with_timeout needs Julia started with more than one thread; the computation runs without a limit" maxlog = 1
-    expired = Threads.Atomic{Bool}(false)
-    timer = Timer(_ -> (expired[] = true), seconds)
+    # a deadline the cancel watcher compares with the clock: Julia's timers need its event loop,
+    # which may not be run while every other thread is idle
+    deadline = time() + seconds
     try
-        return task_local_storage(f, :giac_cancel, expired)
+        return task_local_storage(f, :giac_cancel, deadline)
     catch e
-        expired[] && e isa InterruptException && throw(GiacTimeout(Float64(seconds)))
+        time() >= deadline && e isa InterruptException && throw(GiacTimeout(Float64(seconds)))
         rethrow()
-    finally
-        close(timer)
     end
 end
 
@@ -100,7 +108,7 @@ function _cancel_predicate()
     own = get(task_local_storage(), :giac_cancel, nothing)       # with_timeout's
     own === nothing && isempty(cancel_checks) && return nothing
     preds = Any[p for p in (c() for c in cancel_checks) if p !== nothing]
-    own === nothing || push!(preds, () -> own[])
+    own === nothing || push!(preds, () -> time() >= own)
     isempty(preds) && return nothing
     _start_cancel_watcher()
     return () -> any(p -> p(), preds)
@@ -120,7 +128,7 @@ const _RUN_LOCK = ReentrantLock()
 
 # the job starts: false if it was cancelled before it could
 function _start_job(job::_GiacJob)
-    job.check !== nothing && (try job.check() catch; false end) && (@atomic job.cancelled = true)
+    job.check !== nothing && (try Base.invokelatest(job.check) catch; false end) && (@atomic job.cancelled = true)
     @atomic(job.cancelled) && return false
     lock(_RUN_LOCK) do
         _clear_interrupt()
@@ -149,16 +157,29 @@ end
 const _WATCHER = Ref{Union{Nothing, Task}}(nothing)
 const _WATCHER_LOCK = ReentrantLock()
 
-# a task that polls the running job's cancel check, started the first time a check is in use
+# A tenth of a second's wait that needs neither Julia's event loop, which may not be run while
+# every other thread is idle and GIAC computes, nor holds up a garbage collection
+function _nap()
+    @static if VERSION >= v"1.12"
+        @ccall gc_safe = true usleep(100_000::Cuint)::Cint
+        yield()
+    else
+        sleep(0.1)
+    end
+    return nothing
+end
+
+# a task that polls the running job's cancel check, in the latest world: a check may be a closure
+# defined after the task started, started the first time a check is in use
 function _start_cancel_watcher()
     _WATCHER[] === nothing || return
     lock(_WATCHER_LOCK) do
         _WATCHER[] === nothing || return
         _WATCHER[] = Threads.@spawn while true
-            sleep(0.1)
+            _nap()
             job = _RUNNING[]
             (job === nothing || job.check === nothing || @atomic(job.cancelled)) && continue
-            (try job.check() catch; false end) && _cancel_job!(job)
+            (try Base.invokelatest(job.check) catch; false end) && _cancel_job!(job)
         end
     end
     return

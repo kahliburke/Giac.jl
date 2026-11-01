@@ -49,6 +49,32 @@
                 @test fetch(waiting) isa InterruptException
                 @test (try fetch(running) catch e; e.task.exception end) isa Giac.GiacTimeout
                 @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"
+                if Giac._wrapper_interrupts()
+                    # GIAC computes GC-safe: other threads collect garbage meanwhile, and a
+                    # registered cancel check stops the work of the task it belongs to
+                    running = Threads.@spawn Giac.with_timeout(slow, 4)
+                    sleep(0.5)
+                    @test (@elapsed GC.gc()) < 1
+                    @test (try fetch(running) catch e; e.task.exception end) isa Giac.GiacTimeout
+                    cancelled = Ref(false)
+                    check = () -> (local f = get(task_local_storage(), :test_cancel, nothing); f === nothing ? nothing : () -> f[])
+                    push!(Giac.cancel_checks, check)
+                    try
+                        job = Threads.@spawn task_local_storage(:test_cancel, cancelled) do
+                            try
+                                slow()
+                            catch e
+                                e
+                            end
+                        end
+                        sleep(1)
+                        cancelled[] = true
+                        @test fetch(job) isa InterruptException
+                    finally
+                        filter!(c -> c !== check, Giac.cancel_checks)
+                    end
+                    @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"
+                end
             end
         end
         @test Giac.with_timeout(() -> C.expand((a + b)^2), 10) == C.expand((a + b)^2)
