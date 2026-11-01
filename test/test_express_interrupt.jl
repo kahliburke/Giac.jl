@@ -36,6 +36,19 @@
                 schedule(job, InterruptException(); error = true)
                 @test fetch(job) isa InterruptException
                 @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"
+                # a call interrupted while it waits is skipped, and the running one goes on
+                running = Threads.@spawn Giac.with_timeout(slow, 3)
+                sleep(0.5)
+                waiting = Threads.@spawn try
+                    C.factor(x1^2 - 1)
+                catch e
+                    e
+                end
+                sleep(0.2)
+                schedule(waiting, InterruptException(); error = true)
+                @test fetch(waiting) isa InterruptException
+                @test (try fetch(running) catch e; e.task.exception end) isa Giac.GiacTimeout
+                @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"
             end
         end
         @test Giac.with_timeout(() -> C.expand((a + b)^2), 10) == C.expand((a + b)^2)
