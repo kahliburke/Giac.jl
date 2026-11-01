@@ -98,6 +98,24 @@
         @test string(f(3)) == "9/2*pi^2"
     end
 
+    @testset "the parts of a derivation, for a renderer" begin
+        d = Core.eval(@__MODULE__, Meta.parse("""
+        let
+        @giac_var k a
+        @derivation begin
+            raw"Square it, **twice** if \$k\$ is real:"
+            k2 := k^2
+            k4 := k2^2
+            @realign
+            a + 1
+        end
+        end"""))
+        p = Giac.derivation_parts(d)
+        @test p[1] == (note = "Square it, **twice** if \$k\$ is real:",)
+        @test length(p[2].steps) == 2 && p[2].segment == 1
+        @test p[3].segment == 2
+    end
+
     @testset "conditions in brackets, and tags" begin
         imp = Giac._implication(Giac._rejoin_conditions(:(k ~ 0 => k ~ n where [n::integer, n::nonzero])))
         @test Giac._conditions(imp[2])[2] == Any[:(n::integer), :(n::nonzero)]

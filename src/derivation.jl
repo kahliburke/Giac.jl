@@ -49,20 +49,36 @@ For renderers without KaTeX's layout commands (a PDF through Typst, say); it can
 pages where a single block can't.
 """
 function Base.show(io::IO, ::MIME"text/markdown", d::Derivation)
-    run = Tuple{String, String}[]
-    flush() = isempty(run) ||
-        (print(io, "\$\$\\begin{aligned}", join(("$l &= $r" for (l, r) in run), " \\\\ "), "\\end{aligned}\$\$\n\n"); empty!(run))
+    for p in derivation_parts(d)
+        haskey(p, :note) ? print(io, p.note, "\n\n") :
+            print(io, "\$\$\\begin{aligned}", join(("$l &= $r" for (l, r) in p.steps), " \\\\ "), "\\end{aligned}\$\$\n\n")
+    end
+end
+
+"""
+    derivation_parts(d::Derivation)
+
+The derivation's notes and runs of steps, in order, for a renderer of its own. Each part is
+`(note = text,)`, the note as markdown with its `\$…\$` math, or `(steps = rows, segment = k)`, the
+`(left, right)` LaTeX pairs of a run of steps. Runs in the same `segment` (the rows between
+`@realign` markers) are meant to have their `=` signs line up with each other.
+"""
+function derivation_parts(d::Derivation)
+    parts, run, segment = NamedTuple[], Tuple{String, String}[], 1
+    flush() = isempty(run) || (push!(parts, (steps = copy(run), segment)); empty!(run))
     for row in d.rows
         if _is_realign(row)
             flush()
+            segment += 1
         elseif _is_note(row)
             flush()
-            print(io, _note_text(last(row)), "\n\n")
+            push!(parts, (note = _note_text(last(row)),))
         else
             push!(run, row)
         end
     end
     flush()
+    return parts
 end
 
 # a note row's `\text{…}` back as markdown text (its `$…$` math stays math)
