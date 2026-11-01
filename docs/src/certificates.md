@@ -78,6 +78,42 @@ c = certify(d; positive = (x, y), block_signs = (1, 1, 1))
 
 `c.checks` holds the [`positivity`](@ref) report of each signed multiplier.
 
+## Sums of squares
+
+`sos_decomposition(p)` writes a polynomial as a weighted sum of squares, which proves it is
+nonnegative everywhere, including where coefficient signs decide nothing. A semidefinite program
+(Clarabel, through JuMP) proposes a Gram matrix; it is rounded to rationals, moved exactly onto
+the polynomial's coefficients, and factored over the rationals.
+
+```julia
+using JuMP, Clarabel, Nemo
+@giac_var x y
+sos_decomposition(x^2 - 2x*y + 2y^2)
+# Sum of squares, 2 squares:
+#   x^2-2*x*y+2*y^2 = (x-y)²
+#     + (y)²
+```
+
+It returns `nothing` when it finds no certificate: the polynomial may take negative values, or
+be nonnegative without being a sum of squares (Motzkin's `x⁴y² + x²y⁴ − 3x²y² + 1`).
+
+## Lyapunov functions
+
+`lyapunov(f, x; degree)` looks for a polynomial `V` for `ẋ = f(x)` with `V − ε|x|²` and
+`−V̇ − δ|x|²` both sums of squares, and certifies both exactly:
+
+```julia
+@giac_var x₁ x₂
+L = lyapunov([-x₁ - x₁*x₂^2, -x₂ + x₁^2*x₂], [x₁, x₂])
+# Lyapunov function, global asymptotic stability:
+#   V  = …
+#   V̇  = …
+L.positive, L.decreasing        # the two certificates
+```
+
+`strict = false` asks only for `V̇ ≤ 0` (stability). A higher `degree` searches more
+functions.
+
 ## Stopping a long computation
 
 GIAC checks an interruption flag in its long loops. `Giac.with_timeout(f, seconds)` stops a GIAC
@@ -95,6 +131,10 @@ decompose
 Giac.Decomposition
 Giac.combination
 certify
+sos_decomposition
+Giac.SOSCertificate
+lyapunov
+Giac.LyapunovCertificate
 Giac.with_timeout
 Giac.interrupt
 ```

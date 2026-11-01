@@ -233,6 +233,7 @@ using LinearAlgebra
     include("test_positivity.jl")
     include("test_decompose.jl")
     include("test_polynomial_systems.jl")
+    include("test_sos.jl")
 
     # ============================================================================
     # Doctests
