@@ -25,7 +25,9 @@ were declared. AlgebraicSolving's own functions take Giac expressions:
 | `dimension(eqs, vars)` | the dimension of the complex solutions: `0` finitely many, `-1` none |
 | `real_root_classification(eqs, vars; params)` | how the number of real solutions depends on parameters |
 
-The first three need finitely many complex solutions.
+The first three need finitely many complex solutions. Symbolics, Nemo and other packages export
+some of the same names (`groebner_basis`, `eliminate`, `normal_form`); with them loaded too,
+qualify the call: `AlgebraicSolving.eliminate(...)`.
 
 ## Real solutions
 
