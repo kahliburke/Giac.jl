@@ -651,7 +651,7 @@ _monomial(R, e) = (ctx = MPolyBuildCtx(R); push_term!(ctx, one(base_ring(R)), e)
 # whether a name was declared positive (`@giac_var A::positive`), or with `strict_only = false`
 # nonnegative
 function _declared_positive(name, strict_only = false)
-    tag = lock(() -> get(Giac._DECLARED, name, nothing), Giac._DECLARED_LOCK)
+    tag = Giac._declared_tag(name)
     return tag === :positive || (!strict_only && tag === :nonnegative) ||
            (tag isa Tuple && length(tag) == 2 && tag[1] isa Real && (tag[1] > 0 || !strict_only && tag[1] >= 0))
 end
