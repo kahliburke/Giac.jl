@@ -1,0 +1,100 @@
+# Exact certificates: positivity and decompositions
+
+Giac is where an expression is written, rewritten and typeset. Some questions about it are better
+answered by a specialist engine and then checked exactly: whether an expression is positive under
+an ordering of its variables, and how to write it as a combination of given pieces. These tools do
+the algebra in [Nemo](https://nemocas.github.io/Nemo.jl/) (FLINT), and the choice among solutions
+with a linear program in JuMP and HiGHS. Every answer they return has been checked exactly over the
+rationals; a floating-point solve only proposes.
+
+```julia
+using Giac, Nemo            # positivity, decompose
+using JuMP, HiGHS           # certify
+```
+
+Polynomials and rational functions in any number of variables cross to Nemo by name; see
+[Nemo.jl](extensions/nemo.md).
+
+## Positivity under an ordering
+
+`positivity(e; order, positive, param)` writes each variable of an ordering as the one before it
+plus a positive gap, and reads the sign off the coefficients: a polynomial in positive variables
+whose coefficients are all positive is positive.
+
+```julia
+@giac_var u t₁ t₂ t₃ l″ A A′ A₃
+M = (t₃ - t₁) * (A′ + A₃) * (A * (t₂ - u) * (l″ - t₁) + A′ * (l″ - t₂) * (t₁ - u))
+positivity(M; order = (u, t₁, t₂, t₃, l″), positive = (A, A′, A₃))
+# Positivity: positive
+#   numerator: positive; 28 terms (28 positive, 0 negative), degree 5
+#   gaps: t₁ = u+Δt₁, t₂ = u+Δt₁+Δt₂, …
+```
+
+- `order` is a chain `(u, t₁, t₂)` for `u < t₁ < t₂`, or a vector of chains. A chain may start at
+  a number: `(0, A, A₃)` is `0 < A < A₃`, `(1, g)` is `g > 1`.
+- `positive` lists variables that are positive and in no chain.
+- `param` substitutes first, for relations a chain cannot state: with `t₂² = l′u′`, write
+  `param = (l′ => t₂/g, u′ => t₂*g)` and put `g` in a chain `(1, g)`.
+- A rational function is put over a common denominator, and numerator and denominator are
+  reported separately.
+
+When the signs are mixed, the report says how many terms are against the majority, which variables
+they contain and how often, and shows the largest. `Giac.group_terms(r.numerator.against, vars)`
+groups them by their part in chosen variables. Mixed signs do not mean the expression changes
+sign: `x² − 2xy + y²` is not decided by coefficients, though it is a square.
+
+## Decompositions
+
+`decompose(target, blocks; degree, vars, param, products)` writes `target = Σ Mₖ Bₖ` with
+unknown polynomial multipliers `Mₖ`, by matching coefficients exactly. The result holds one
+solution and the free directions of the whole family.
+
+```julia
+@giac_var p r L
+decompose((p*(L - r) + (L - p)*r)^2 - (p - r)^2 * L^2, [:Q => p*(L - p)*r*(L - r)])
+# (4) · Q, unique
+```
+
+Each multiplier has total degree `degree` in `vars`, by default the target's degree less the
+block's. Rows of the coefficient system with a single unknown are solved first, which removes
+most unknowns of such systems, and the rest is solved densely over the rationals.
+
+With `products = n`, every product of up to `n` blocks is a block, named by its factors, so the
+search finds which products the target is made of.
+
+## Choosing a certified member
+
+`certify(d; order, positive, param, signs)` looks for a member of the family whose multipliers
+each have the sign wanted, under the ordering. A linear program over the free directions proposes
+weights, which are made rational and checked exactly. With `block_signs`, each multiplier takes
+the sign that makes its term agree with the target:
+
+```julia
+@giac_var x y
+d = decompose(x^3 - x^2*y - x*y^2 + y^3, [:x => x, :y => y, :s => (x - y)^2]; products = 3, degree = 0)
+c = certify(d; positive = (x, y), block_signs = (1, 1, 1))
+# x³ − x²y − xy² + y³ = x·s + y·s
+```
+
+`c.checks` holds the [`positivity`](@ref) report of each signed multiplier.
+
+## Stopping a long computation
+
+GIAC checks an interruption flag in its long loops. `Giac.with_timeout(f, seconds)` stops a GIAC
+computation in `f` that runs longer, with a `GiacTimeout`; `Giac.interrupt()` stops the one
+running now, from another task. Both need Julia started with more than one thread.
+
+## API
+
+```@docs
+positivity
+Giac.Positivity
+Giac.SignReport
+Giac.group_terms
+decompose
+Giac.Decomposition
+Giac.combination
+certify
+Giac.with_timeout
+Giac.interrupt
+```

@@ -38,6 +38,7 @@ _pages = [
         "Commands submodule" => "api/commands_submodule.md",
     ],
     "Held Commands" => "held_commands.md",
+    "Exact Certificates" => "certificates.md",
     "Tables.jl Compatibility" => "tables.md",
     "Migration" => [
         "D → Differential" => "migration/d_to_differential.md",
