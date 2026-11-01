@@ -58,6 +58,10 @@ sos_decomposition(x^2 - 2x*y + 2y^2)
 """
 function sos_decomposition end
 
+# A sum-of-squares certificate for a Nemo polynomial, or nothing; the Clarabel extension adds
+# its method, which declines (nothing) when the semidefinite program would be too large
+function _sos_certificate end
+
 """
     LyapunovCertificate
 

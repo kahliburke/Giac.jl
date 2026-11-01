@@ -610,7 +610,7 @@ _node_number(c) = Giac._node(Giac.to_giac(c))
 # positivity: coefficient signs after writing an ordering as positive gaps
 # ===========================================================================
 
-function Giac.positivity(e; order = (), positive = (), param = (), strict = true)
+function Giac.positivity(e; order = (), positive = (), param = (), strict = true, sos = true)
     e = convert(GiacExpr, e)
     isempty(param) || (e = substitute(e, param...))
     gaps, known = Giac._gap_substitution(order, positive)
@@ -619,16 +619,34 @@ function Giac.positivity(e; order = (), positive = (), param = (), strict = true
     # normal on large expressions
     v = only(Giac.to_nemo((e,)))
     N, D = v isa FracElem ? (numerator(v), denominator(v)) : (v, one(v))
-    rn, rd = _sign_report(N, known, strict), _sign_report(D, known, strict)
+    rn, rd = _sign_report(N, known, strict, sos), _sign_report(D, known, strict, sos)
     return Giac.Positivity(rn.sign * rd.sign, rn.strict && rd.strict, rn, rd, gaps)
 end
 
-function _sign_report(P, known, strict)
+# The sign of P from a sum of squares, when the Clarabel extension is loaded: P, or -P, with
+# each variable known to be nonnegative written as a square, is a sum of squares
+function _sos_sign(P, known)
+    isempty(methods(Giac._sos_certificate)) && return nothing
+    R = parent(P)
+    Ps = evaluate(P, [(string(s) in known || _declared_positive(string(s))) ? g^2 : g for (s, g) in zip(symbols(R), gens(R))])
+    for s in (1, -1)
+        c = Giac._sos_certificate(s * Ps)
+        c === nothing || return s, c
+    end
+    return nothing
+end
+
+function _sign_report(P, known, strict, sos = true)
     vars = [string(s) for (s, g) in zip(symbols(parent(P)), gens(parent(P))) if degree(P, g) > 0]
     free = [Giac.giac_identifier(v) for v in vars if !(v in known) && !_declared_positive(v)]
     cs = collect(coefficients(P))
     pos, neg = count(>(0), cs), count(<(0), cs)
     sign = !isempty(free) || iszero(P) ? 0 : neg == 0 ? 1 : pos == 0 ? -1 : 0
+    certificate = nothing
+    if sign == 0 && sos && !iszero(P) && (pos > 0 && neg > 0 || !isempty(free))
+        found = _sos_sign(P, known)
+        found === nothing || ((sign, certificate) = found)
+    end
     majority = pos >= neg ? 1 : -1
     degrees = iszero(P) ? (0:0) : (minimum(sum, exponent_vectors(P)):maximum(sum, exponent_vectors(P)))
     # the terms against the majority sign, largest coefficient first, and the variables in them
@@ -642,8 +660,10 @@ function _sign_report(P, known, strict)
     against = [Giac.to_giac(c * _monomial(R, e)) for (c, e) in opposing]
     # strictly positive variables and a nonzero polynomial give a strict sign; with ≤ chains
     # (strict = false) a constant term is needed
-    strict_sign = sign != 0 && (strict ? all(v -> v in known || _declared_positive(v, true), vars) : !iszero(constant_coefficient(P)))
-    return Giac.SignReport(sign, strict_sign, Giac.to_giac(P), against, free, (pos, neg), degrees, in_against)
+    # a sum of squares may vanish somewhere, so its sign is not strict
+    strict_sign = sign != 0 && certificate === nothing &&
+                  (strict ? all(v -> v in known || _declared_positive(v, true), vars) : !iszero(constant_coefficient(P)))
+    return Giac.SignReport(sign, strict_sign, Giac.to_giac(P), against, free, (pos, neg), degrees, in_against, certificate)
 end
 
 _monomial(R, e) = (ctx = MPolyBuildCtx(R); push_term!(ctx, one(base_ring(R)), e); finish(ctx))

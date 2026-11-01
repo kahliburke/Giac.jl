@@ -31,6 +31,24 @@ using JuMP, Clarabel
         @test_throws ArgumentError sos_decomposition(1 / (x^2 + 1))
     end
 
+    @testset "positivity decided by a sum of squares" begin
+        @giac_var a b τ
+        # mixed coefficient signs: nonnegative, not strictly
+        r = positivity(a^2 - 2a * b + b^2; positive = (a, b))
+        @test r.sign == 1 && !r.strict && r.numerator.sos !== nothing
+        @test isempty(r.numerator.against)
+        @test occursin("a sum of", sprint(show, MIME"text/plain"(), r))
+        # a variable of unknown sign is allowed: τ² - 2τ + 2 = (τ - 1)² + 1
+        @test positivity(τ^2 - 2τ + 2).sign == 1
+        # the negative of a sum of squares
+        @test positivity(-(a - b)^2; positive = (a, b)).sign == -1
+        # with a, b written as squares: a⁴ - a²b² + b⁴ is a sum of squares
+        @test positivity(a^2 - a * b + b^2; positive = (a, b)).sign == 1
+        # indefinite: still not decided
+        @test positivity(a^2 - 3a * b + b^2; positive = (a, b)).sign == 0
+        @test positivity(a^2 - 2a * b + b^2; positive = (a, b), sos = false).sign == 0
+    end
+
     @testset "Lyapunov functions" begin
         # V = x₁² + x₂² works: V̇ = -2x₁² - 2x₂²
         f = [-x₁ - x₁ * x₂^2, -x₂ + x₁^2 * x₂]

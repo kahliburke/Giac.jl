@@ -14,7 +14,10 @@ The sign of one polynomial (a numerator or a denominator) after the gap substitu
 - `free`: variables whose sign is not known, which stop a certificate when they appear;
 - `terms`: the numbers of positive and of negative terms;
 - `degrees`: the range of the terms' total degrees;
-- `opposing`: each variable occurring in the terms against, with how many of them it is in.
+- `opposing`: each variable occurring in the terms against, with how many of them it is in;
+- `sos`: when the coefficient signs are mixed, a [`SOSCertificate`](@ref Giac.SOSCertificate)
+  that decided the sign instead: the polynomial (or its negative), with each variable known to
+  be positive replaced by its square, as a sum of squares.
 
 [`group_terms`](@ref Giac.group_terms) sorts the terms against by the variables chosen.
 """
@@ -27,6 +30,7 @@ struct SignReport
     terms::Tuple{Int, Int}
     degrees::UnitRange{Int}
     opposing::Vector{Pair{String, Int}}
+    sos::Union{Nothing, SOSCertificate}
 end
 
 """
@@ -70,13 +74,17 @@ function _summary(io::IO, r::SignReport; indent = "  ")
     pos, neg = r.terms
     println(io, _sign_word(r.sign, r.strict), "; ", pos + neg, pos + neg == 1 ? " term" : " terms",
             " (", pos, " positive, ", neg, " negative), degree ", first(r.degrees) == last(r.degrees) ? first(r.degrees) : r.degrees)
-    isempty(r.free) || println(io, indent, "unknown sign: ", join(_gap_text.(r.free), ", "))
+    r.sos === nothing || println(io, indent, "a sum of ", length(r.sos.squares), " squares",
+                                 r.sign < 0 ? " (its negative)" : "", ", the positive variables squared")
+    r.sos === nothing && !isempty(r.free) && println(io, indent, "unknown sign: ", join(_gap_text.(r.free), ", "))
     isempty(r.against) && return
     n = length(r.against)
     println(io, indent, n, n == 1 ? " term" : " terms", " against, in: ",
             join((_gap_text(v) * " ×" * string(k) for (v, k) in first(r.opposing, 8)), ", "), length(r.opposing) > 8 ? ", …" : "")
     println(io, indent, "largest: ", join(_gap_text.(first(r.against, 3)), ", "), n > 3 ? ", …" : "")
-    r.sign == 0 && isempty(r.free) && println(io, indent, "(a sum-of-squares certificate may still exist)")
+    r.sign == 0 && isempty(r.free) &&
+        println(io, indent, "(a sum-of-squares certificate may still exist",
+                isempty(methods(_sos_certificate)) ? "; load JuMP and Clarabel to look for one)" : ")")
 end
 
 Base.show(io::IO, ::MIME"text/plain", r::SignReport) = (print(io, "SignReport: "); _summary(io, r))
@@ -84,7 +92,7 @@ Base.show(io::IO, r::SignReport) = print(io, "SignReport(", _sign_word(r.sign, r
 Base.show(io::IO, p::Positivity) = print(io, "Positivity(", _sign_word(p.sign, p.strict), ")")
 
 """
-    positivity(e; order = (), positive = (), param = (), strict = true)
+    positivity(e; order = (), positive = (), param = (), strict = true, sos = true)
 
 Whether `e` is positive given an ordering of its variables, certified exactly by coefficient
 signs. Needs Nemo to be loaded (`using Nemo`).
@@ -96,18 +104,22 @@ signs. Needs Nemo to be loaded (`using Nemo`).
 - `param`: substitutions applied first, for relations the chains cannot state: with
   `t₂² = l′u′`, `param = (l′ => t₂/g, u′ => t₂*g)` and `g > 1` in `order`.
 - `strict = false` reads each chain as `≤`.
+- `sos = false` skips the search for a sum of squares described below.
 
 A rational function is put over a common denominator, and the numerator and denominator are
 checked separately. When every coefficient of a polynomial in the gaps and positive variables
 is positive, so is the polynomial; when the signs are mixed, the result lists the terms against
-the majority sign. Returns a [`Positivity`](@ref); `Bool(result)` is `true` for a certified
-strict positive.
+the majority sign. Then, with JuMP and Clarabel loaded, a sum of squares is sought for the
+polynomial (or its negative) with each nonnegative variable replaced by its square, which
+decides a nonnegative sign (not a strict one) and allows variables of unknown sign; see
+[`sos_decomposition`](@ref). Returns a [`Positivity`](@ref); `Bool(result)` is `true` for a
+certified strict positive.
 
 ```julia
 using Nemo
 @giac_var u t₁ t₂ A B
 positivity((t₂ - u) * (t₁ - u) * A; order = (u, t₁, t₂), positive = (A,))   # positive
-positivity(A^2 - 2A*B + B^2; positive = (A, B))                          # not decided: -2AB
+positivity(A^2 - 2A*B + B^2; positive = (A, B))   # not decided: -2AB; nonnegative with Clarabel
 ```
 """
 function positivity end

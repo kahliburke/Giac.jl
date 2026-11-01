@@ -168,11 +168,12 @@ function _gram(coeffs, basis)
     return value.(Q)
 end
 
-function _sos(P, label; bits = 48)
+function _sos(P, label; bits = 48, maxbasis = typemax(Int))
     iszero(P) && return Giac.SOSCertificate(label, Rational{BigInt}[], GiacExpr[])
     support = [collect(e) for e in exponent_vectors(P)]
     isodd(maximum(sum, support)) && return nothing
     basis = _half_basis(support, nvars(parent(P)))
+    length(basis) > maxbasis && return nothing
     Qf = _gram(_coeffs(P), basis)
     Qf === nothing && return nothing
     return _certificate(P, basis, _classes(basis), Qf, bits, label)
@@ -193,6 +194,9 @@ function Giac.sos_decomposition(p; vars = nothing, bits = 48)
     P = _nemo_polynomial(p, vars)
     return _sos(P, Giac.to_giac(P); bits)
 end
+
+# for positivity: declines a semidefinite program over more than `maxbasis` monomials
+Giac._sos_certificate(P::QQMPolyRingElem; maxbasis = 120) = _sos(P, Giac.to_giac(P); maxbasis)
 
 # ---------------------------------------------------------------------------------------------
 # Lyapunov functions
