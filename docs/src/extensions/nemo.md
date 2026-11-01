@@ -126,7 +126,7 @@ Neither direction may go through a printed decimal chosen by a printer: a Giac `
 - **`GF(p^n)` extension degree** is not auto-inferred: the caller must pass the `FqField`. A `GiacExpr` does not carry the extension degree.
 - **Number-field / finite-field embeddings** are one-way: a Nemo element reduced mod its defining polynomial loses the embedding information when round-tripped.
 - **Algebraic closure of QQ** (`algebraic_closure(QQ)` elements) and **Cauchy/real-complex balls** are refused (carry root indices / radii that Giac's flat `Gen` tree cannot faithfully represent).
-- **Compat:** the bridge depends on Nemo 0.56 API surfaces (`AbsSimpleNumFieldElem`, `FqFieldElem`, `Nemo._coeff`, `Nemo.coeff`, `coefficients`, `defining_polynomial`, `matrix_space`). Nemo has historically renamed types between minor versions; the compat is pinned to `"0.56"` and should be re-validated on bumps.
+- **Compat:** the bridge depends on Nemo 0.56 API surfaces (`AbsSimpleNumFieldElem`, `FqFieldElem`, `Nemo._coeff`, `Nemo.coeff`, `coefficients`, `defining_polynomial`, `matrix_space`). Nemo has historically renamed types between minor versions; the compat covers `"0.56, 0.57"` and should be re-validated on bumps.
 
 ## API Reference
 
