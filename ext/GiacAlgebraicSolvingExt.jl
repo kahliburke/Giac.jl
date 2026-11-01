@@ -99,7 +99,7 @@ exactly by msolve: a vector of [`Giac.RealSolution`](@ref)s, each variable in an
 rational ends about `2^-precision` wide that is guaranteed to contain it. `eqs` holds
 polynomials (each `= 0`) or equations `a ~ b`, with rational coefficients; `vars` the variables,
 by default all of them in the order declared. Other keywords go to AlgebraicSolving
-(`nr_thrds`, `info_level`, ...).
+(`info_level`, ...).
 
 ```julia
 using Giac, AlgebraicSolving
