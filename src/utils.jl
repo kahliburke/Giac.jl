@@ -87,7 +87,8 @@ function with_giac_lock(f)
             _INLINE_DEPTH[] += 1
             try
                 _free_doomed!()
-                _INLINE_DEPTH[] == 1 && _sync_local_names!()
+                # an interruption meant for an earlier call does not stop this one
+                _INLINE_DEPTH[] == 1 && (_sync_local_names!(); _clear_interrupt())
                 f()
             finally
                 _INLINE_DEPTH[] -= 1

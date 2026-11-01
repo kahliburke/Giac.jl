@@ -754,6 +754,114 @@ end
 # ---------------------------------------------------------------------------------------------
 
 # The GIAC object for a tree (with the GIAC lock held)
+# A wrapper with `gen_import` builds the GIAC object from a program written here, in one call. The
+# program mirrors `_gen_from_node`, operation for operation, so the object is the same.
+_has_import() = isdefined(GiacCxxBindings, :gen_import)
+
+function _gen_import(n::Node)
+    B = GiacCxxBindings
+    io = IOBuffer()
+    opaque = B.CxxWrap.StdVector{B.Gen}()
+    _program!(io, n, opaque)
+    return B.gen_import(String(take!(io)), opaque)
+end
+
+_put!(io, tag::UInt8) = write(io, tag)
+_put_str!(io, s::AbstractString) = (write(io, htol(UInt32(ncodeunits(s)))); write(io, s))
+function _put_opaque!(io, gen, opaque)
+    push!(opaque, gen)
+    write(io, 0x09, htol(UInt32(length(opaque) - 1)))
+end
+
+function _program!(io, n::NumNode, opaque)
+    v = n.v
+    if v isa Integer
+        if typemin(Int64) <= v <= typemax(Int64) && typemin(Int32) <= v <= typemax(Int32)
+            write(io, 0x01, htol(Int64(v)))
+        else
+            m = abs(big(v))
+            bytes = UInt8[]
+            while m > 0
+                pushfirst!(bytes, UInt8(m & 0xff))
+                m >>= 8
+            end
+            write(io, 0x02, htol(Int32(sign(v))), htol(UInt32(length(bytes))), bytes)
+        end
+    elseif v isa Rational
+        _put!(io, 0x05)
+        _program!(io, NumNode(numerator(v)), opaque)
+        _program!(io, NumNode(denominator(v)), opaque)
+    elseif v isa AbstractFloat
+        write(io, 0x03, htol(Float64(v)))
+    else
+        _put!(io, 0x06)
+        _program!(io, NumNode(real(v)), opaque)
+        _program!(io, NumNode(imag(v)), opaque)
+    end
+    return io
+end
+
+_program!(io, n::SymNode, opaque) = (_put!(io, n.name in _GIAC_NAMED_VALUES ? 0x0a : 0x04); _put_str!(io, n.name); io)
+_program!(io, n::GenNode, opaque) = (_put_opaque!(io, _get_gen(n.expr.ptr), opaque); io)
+
+function _program!(io, n::AddNode, opaque)
+    write(io, 0x0b, htol(UInt32(length(n.terms))))
+    foreach(((m, c),) -> _program!(io, _scale(m, c), opaque), n.terms)
+    return io
+end
+
+# a product as numerator / denominator, as `_gen_from_node` builds it: factors multiplied left to
+# right, the coefficient in front, the denominator divided last
+function _program!(io, n::MulNode, opaque)
+    num, den = Vector{UInt8}[], Vector{UInt8}[]
+    for (b, e) in n.factors
+        below = e isa NumNode && _negative(e.v)
+        x = below ? NumNode(-e.v) : e
+        f = IOBuffer()
+        if isequal(x, _ONE)
+            _program!(f, b, opaque)
+        else
+            _put!(f, 0x0d)
+            _program!(f, b, opaque)
+            _program!(f, x, opaque)
+        end
+        push!(below ? den : num, take!(f))
+    end
+    product(parts) = (b = IOBuffer(); foreach(_ -> _put!(b, 0x0e), 2:length(parts)); foreach(p -> write(b, p), parts); take!(b))
+    numerator_program = isempty(num) ? nothing : product(num)
+    c = n.coef
+    if !_isone_exact(c)
+        coef = take!(_program!(IOBuffer(), NumNode(c), opaque))
+        numerator_program = isone(-c) && numerator_program !== nothing ? vcat(0x10, numerator_program) :
+                            numerator_program === nothing ? coef : vcat(0x0e, coef, numerator_program)
+    end
+    if isempty(den)
+        write(io, numerator_program)
+    else
+        _put!(io, 0x0f)
+        write(io, numerator_program === nothing ? take!(_program!(IOBuffer(), _ONE, opaque)) : numerator_program)
+        write(io, product(den))
+    end
+    return io
+end
+
+function _program!(io, n::CallNode, opaque)
+    n.gen === nothing || return (_put_opaque!(io, n.gen, opaque); io)
+    _put!(io, 0x07)
+    _put_str!(io, n.f == "=" ? "equal" : n.f)
+    if n.f == "of" && length(n.args) > 2
+        # f(a, b) is of(f, seq(a, b))
+        write(io, htol(UInt32(2)))
+        _program!(io, n.args[1], opaque)
+        write(io, 0x11, htol(UInt32(length(n.args) - 1)))
+        foreach(a -> _program!(io, a, opaque), n.args[2:end])
+    else
+        write(io, htol(UInt32(length(n.args))))
+        foreach(a -> _program!(io, a, opaque), n.args)
+    end
+    return io
+end
+
 function _gen_from_node(n::NumNode)
     B = GiacCxxBindings
     v = n.v

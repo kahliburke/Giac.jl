@@ -110,6 +110,9 @@ function _cancel_predicate()
     preds = Any[p for p in (c() for c in cancel_checks) if p !== nothing]
     own === nothing || push!(preds, () -> time() >= own)
     isempty(preds) && return nothing
+    # a job is polled only on the GIAC thread's side; with one thread GIAC runs where it is called
+    # and nothing can poll beside it
+    _giac_threaded() || return nothing
     _start_cancel_watcher()
     return () -> any(p -> p(), preds)
 end
@@ -134,6 +137,7 @@ function _start_job(job::_GiacJob)
         _clear_interrupt()
         _RUNNING[] = job
     end
+    job.check === nothing || lock(() -> notify(_WATCH), _WATCH)
     return true
 end
 
@@ -156,6 +160,7 @@ end
 
 const _WATCHER = Ref{Union{Nothing, Task}}(nothing)
 const _WATCHER_LOCK = ReentrantLock()
+const _WATCH = Threads.Condition()          # notified when a job with a cancel check starts
 
 # A tenth of a second's wait that needs neither Julia's event loop, which may not be run while
 # every other thread is idle and GIAC computes, nor holds up a garbage collection
@@ -169,17 +174,24 @@ function _nap()
     return nothing
 end
 
-# a task that polls the running job's cancel check, in the latest world: a check may be a closure
-# defined after the task started, started the first time a check is in use
+_watched(job) = job !== nothing && job.check !== nothing && !@atomic(job.cancelled)
+
+# A task that polls the running job's cancel check while there is one, and otherwise waits for
+# one to start. Checks run in the latest world: one may be a closure defined after the task
+# started. Started the first time a check is in use.
 function _start_cancel_watcher()
     _WATCHER[] === nothing || return
     lock(_WATCHER_LOCK) do
         _WATCHER[] === nothing || return
         _WATCHER[] = Threads.@spawn while true
+            lock(_WATCH) do
+                while !_watched(_RUNNING[])
+                    wait(_WATCH)
+                end
+            end
             _nap()
             job = _RUNNING[]
-            (job === nothing || job.check === nothing || @atomic(job.cancelled)) && continue
-            (try Base.invokelatest(job.check) catch; false end) && _cancel_job!(job)
+            _watched(job) && (try Base.invokelatest(job.check) catch; false end) && _cancel_job!(job)
         end
     end
     return

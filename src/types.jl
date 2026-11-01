@@ -98,7 +98,7 @@ function _handle(e::GiacExpr)
         # built with GIAC's operators; a symbol is the identifier itself, not evaluated (it may
         # name a stored value). Printing and parsing is the fallback.
         gen = try
-            _gen_from_node(n)
+            _has_import() ? _gen_import(n) : _gen_from_node(n)
         catch
             nothing
         end
