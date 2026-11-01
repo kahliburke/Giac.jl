@@ -67,6 +67,24 @@ using AlgebraicSolving
         @test dimension([x^2 + 1, x]) == -1
     end
 
+    @testset "real root classification" begin
+        @giac_var a b
+        # the cusp: three equilibria inside 4a³ = 27b², one outside
+        rc = real_root_classification([x^3 - a * x + b], [x]; params = [a, b])
+        @test string.(rc.params) == ["a", "b"]
+        @test string.(rc.excluded) == ["4*a^3-27*b^2"]
+        @test sort([c.count for c in rc.cases]) == [1, 1, 3]
+        for c in rc.cases
+            # the count at the witness point agrees with solving there
+            at = substitute(x^3 - a * x + b, c.witness...)
+            @test length(real_solutions([at], [x])) == c.count
+        end
+        @test occursin("3 real solutions", sprint(show, MIME"text/plain"(), rc))
+        # only the positive solutions
+        rp = real_root_classification([x^2 - a], [x]; params = [a], positive = [x])
+        @test Set((c.count, Giac.to_julia(last(only(c.witness))) > 0) for c in rp.cases) == Set([(0, false), (1, true)])
+    end
+
     @testset "errors" begin
         @test_throws ArgumentError real_solutions([x^2 + y^2 - 1])          # infinitely many
         @test_throws ArgumentError real_solutions([x / y - 1, y - 2])        # not a polynomial

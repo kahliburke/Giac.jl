@@ -23,6 +23,7 @@ were declared. AlgebraicSolving's own functions take Giac expressions:
 | `eliminate(eqs, xs; vars)` | the relations among the other variables, `xs` eliminated |
 | `normal_form(e, eqs, vars)` | `e` reduced modulo `eqs` |
 | `dimension(eqs, vars)` | the dimension of the complex solutions: `0` finitely many, `-1` none |
+| `real_root_classification(eqs, vars; params)` | how the number of real solutions depends on parameters |
 
 The first three need finitely many complex solutions.
 
@@ -56,6 +57,25 @@ p = rational_parametrization([x^2 + y^2 - 1, y - x^2])
 #   y = (2+10*T-2*T^2-2*T^3)/(6-6*T^2+4*T^3)
 ```
 
+## How many real solutions, by parameter
+
+`real_root_classification` divides the parameters' space by the signs of a few polynomials in
+them, so that the number of real solutions is the same throughout each part. For the equilibria
+of `ẋ = x³ − a x + b`:
+
+```julia
+@giac_var x a b
+real_root_classification([x^3 - a*x + b], [x]; params = [a, b])
+# Real root classification in a, b, where 4*a^3-27*b^2 ≠ 0
+#   6*a < 0, 4*a^3-27*b^2 < 0: 1 real solution  (e.g. a = -1, b = 0)
+#   6*a > 0, 4*a^3-27*b^2 < 0: 1 real solution  (e.g. a = 1, b = -2)
+#   6*a > 0, 4*a^3-27*b^2 > 0: 3 real solutions  (e.g. a = 1, b = 0)
+```
+
+Three equilibria inside the cusp `4a³ = 27b²`, one outside. With `positive = [x]` only the
+solutions with `x > 0` are counted. The classification holds off the polynomials listed after
+"where"; on them, solutions coincide.
+
 ## Elimination and normal forms
 
 `eliminate` gives the relations that hold among the remaining variables on every solution, as
@@ -79,4 +99,6 @@ normal_form(x^4 + 2x^2*y^2 + y^4, [x^2 + y^2 - 1])      # 1
 ```@docs
 Giac.RealSolution
 Giac.Parametrization
+Giac.RootClassification
+Giac.RootCase
 ```

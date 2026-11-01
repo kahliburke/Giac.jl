@@ -33,8 +33,13 @@ function _variables(es)
 end
 
 # The system as an ideal of the polynomial ring over QQ in `vars`, in that order. `first`
-# variables come before the rest (an elimination's block).
+# variables come before the rest (an elimination's block, or parameters).
 function _system(eqs, vars; first = GiacExpr[], ordering = :lex)
+    polys, vs, R = _polynomials(eqs, vars; first, ordering)
+    return AS.Ideal(polys), vs, R
+end
+
+function _polynomials(eqs, vars; first = GiacExpr[], ordering = :lex)
     es = GiacExpr[_expression(e) for e in eqs]
     rest = vars === nothing ? GiacExpr[v for v in _variables(es) if !any(f -> string(f) == string(v), first)] : _vector(vars)
     vs = vcat(first, rest)
@@ -46,7 +51,7 @@ function _system(eqs, vars; first = GiacExpr[], ordering = :lex)
         isempty(extra) || throw(ArgumentError("$(join(sort!(collect(extra)), ", ")) in $e is not among the variables $(join(names, ", "))"))
     end
     R, _ = polynomial_ring(QQ, Symbol.(names); internal_ordering = ordering)
-    return AS.Ideal([_polynomial(e, R) for e in es]), vs, R
+    return [_polynomial(e, R) for e in es], vs, R
 end
 
 function _polynomial(e, R)
@@ -212,6 +217,59 @@ function AS.normal_form(e::GiacExpr, eqs::_System, vars::_Vars = nothing; kw...)
     G = AS.groebner_basis(I; kw...)
     return Giac.to_giac(last(divrem(_polynomial(e, R), G)))
 end
+
+"""
+    real_root_classification(eqs, vars = nothing; params, positive = [])
+
+How the number of real solutions of a system depends on its parameters: a
+[`Giac.RootClassification`](@ref), whose cases each give the signs of some polynomials in the
+parameters and the number of real solutions where they hold, with a point of the parameters as
+an example. With `positive`, only the solutions where each of those expressions is positive are
+counted. `eqs` must have finitely many complex solutions for generic values of the parameters.
+
+```julia
+@giac_var x a b
+real_root_classification([x^3 - a*x + b], [x]; params = [a, b])
+# Real root classification in a, b, where 4*a^3-27*b^2 ≠ 0
+#   6*a < 0, 4*a^3-27*b^2 < 0: 1 real solution  (e.g. a = -1, b = 0)
+#   6*a > 0, 4*a^3-27*b^2 < 0: 1 real solution  (e.g. a = 1, b = -2)
+#   6*a > 0, 4*a^3-27*b^2 > 0: 3 real solutions  (e.g. a = 1, b = 0)
+```
+"""
+function AS.real_root_classification(eqs::_System, vars::_Vars = nothing; params, positive = GiacExpr[], kw...)
+    ps = _vector(params)
+    gs = GiacExpr[_expression(convert(GiacExpr, g)) for g in positive]
+    pnames = Set(string.(ps))
+    vs = vars === nothing ? GiacExpr[v for v in _variables(vcat(GiacExpr[_expression(e) for e in eqs], gs)) if !(string(v) in pnames)] :
+         _vector(vars)
+    polys, _, _ = _polynomials(vcat(GiacExpr[e for e in eqs], gs), vs; first = ps)
+    # polynomials in the variables over the rational functions of the parameters
+    np = length(ps)
+    K, _ = polynomial_ring(QQ, Symbol.(string.(ps)))
+    F = fraction_field(K)
+    S, _ = polynomial_ring(F, Symbol.(string.(vs)))
+    function lifted(p)
+        parts = Dict{Vector{Int}, typeof(zero(K))}()
+        for (c, ev) in zip(coefficients(p), exponent_vectors(p))
+            key = ev[(np + 1):end]
+            parts[key] = get(parts, key, zero(K)) + c * _monomial(K, ev[1:np])
+        end
+        ctx = MPolyBuildCtx(S)
+        foreach(((ev, c),) -> push_term!(ctx, F(c), ev), parts)
+        return finish(ctx)
+    end
+    lifts = map(lifted, polys)
+    neq = length(eqs)
+    result = AS.real_root_classification(AS.ParametricIdeal(lifts[1:neq]), lifts[(neq + 1):end]; kw...)
+    sets = result isa AS.Intersect ? result.S : [result]
+    excluded = GiacExpr[Giac.to_giac(q) for s in sets if s isa AS.BasicSemialgebraicSet for q in s.ineqs]
+    enum = only(s for s in sets if s isa AS.SignEnum)
+    cases = [Giac.RootCase(collect(Int, sg), n, Pair{GiacExpr, GiacExpr}[p => Giac.to_giac(v) for (p, v) in zip(ps, w)])
+             for (sg, n, w) in zip(enum.signs, enum.counts, enum.witnesses)]
+    return Giac.RootClassification(ps, GiacExpr[Giac.to_giac(q) for q in enum.polys], cases, excluded)
+end
+
+_monomial(R, ev) = (ctx = MPolyBuildCtx(R); push_term!(ctx, one(base_ring(R)), ev); finish(ctx))
 
 """
     dimension(eqs, vars = nothing)

@@ -62,3 +62,61 @@ function Base.show(io::IO, ::MIME"text/plain", p::Parametrization)
     end
 end
 Base.show(io::IO, p::Parametrization) = print(io, "Parametrization(", p.t, ", ", p.degree, " solutions)")
+
+"""
+    RootCase
+
+One case of a [`RootClassification`](@ref): where the classification's polynomials have the
+`signs` given (`-1` or `1` each), the system has `count` real solutions; `witness` is a point of
+the parameters in that case, as `p => value` pairs.
+"""
+struct RootCase
+    signs::Vector{Int}
+    count::Int
+    witness::Vector{Pair{GiacExpr, GiacExpr}}
+end
+
+"""
+    RootClassification
+
+The number of real solutions of a system with parameters, from `real_root_classification`: in
+each of the `cases`, the signs of the polynomials `polys` in the parameters `params` fix the
+number of real solutions. It holds where none of the polynomials `excluded` vanishes.
+"""
+struct RootClassification
+    params::Vector{GiacExpr}
+    polys::Vector{GiacExpr}
+    cases::Vector{RootCase}
+    excluded::Vector{GiacExpr}
+end
+
+_solutions(n) = string(n, n == 1 ? " real solution" : " real solutions")
+
+# a witness value: exact when an integer, else a few digits
+function _witness_text(w)
+    v = to_julia(last(w))
+    text = v isa Integer || (v isa Rational && isone(denominator(v))) ? string(v) : "≈ " * string(round(Float64(v); sigdigits = 4))
+    return string(first(w), startswith(text, "≈") ? " " : " = ", text)
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::RootClassification)
+    print(io, "Real root classification in ", join(string.(r.params), ", "))
+    isempty(r.excluded) || print(io, ", where ", join((string(e, " ≠ 0") for e in r.excluded), ", "))
+    if length(r.cases) <= 6
+        for c in r.cases
+            conditions = join((string(p, s < 0 ? " < 0" : " > 0") for (p, s) in zip(r.polys, c.signs)), ", ")
+            print(io, "\n  ", isempty(conditions) ? "always" : conditions, ": ", _solutions(c.count),
+                  "  (e.g. ", join(_witness_text.(c.witness), ", "), ")")
+        end
+    else
+        # many sign cases: how many give each number of solutions
+        print(io, "\n  ", length(r.cases), " sign cases of ", length(r.polys), " polynomials")
+        for n in sort!(unique(c.count for c in r.cases))
+            group = [c for c in r.cases if c.count == n]
+            print(io, "\n  ", _solutions(n), ": ", length(group), length(group) == 1 ? " case" : " cases",
+                  "  (e.g. ", join(_witness_text.(first(group).witness), ", "), ")")
+        end
+    end
+end
+Base.show(io::IO, r::RootClassification) =
+    print(io, "RootClassification(", join(string.(r.params), ", "), "; ", length(r.cases), " cases)")
