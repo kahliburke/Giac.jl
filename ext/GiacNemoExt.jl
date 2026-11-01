@@ -610,31 +610,10 @@ _node_number(c) = Giac._node(Giac.to_giac(c))
 # positivity: coefficient signs after writing an ordering as positive gaps
 # ===========================================================================
 
-_chains(order) = isempty(order) ? Any[] :
-    (order isa Tuple && !(first(order) isa Union{Tuple, AbstractVector})) ? Any[order] : collect(Any, order)
-
 function Giac.positivity(e; order = (), positive = (), param = (), strict = true)
     e = convert(GiacExpr, e)
     isempty(param) || (e = substitute(e, param...))
-    gaps = Pair{GiacExpr, GiacExpr}[]
-    known = Set{String}(string.(positive))         # variables known positive (or ≥ 0 if not strict)
-    for chain in _chains(order)
-        items = collect(Any, chain)
-        start = popfirst!(items)
-        acc = convert(GiacExpr, start)
-        if start isa Number && iszero(start) && !isempty(items)
-            # 0 < v: v itself is the first gap
-            v = popfirst!(items)
-            push!(known, string(v))
-            acc = convert(GiacExpr, v)
-        end
-        for v in items
-            Δ = Giac.giac_identifier("Δ" * string(v))
-            push!(known, string(Δ))
-            acc = acc + Δ
-            push!(gaps, convert(GiacExpr, v) => acc)
-        end
-    end
+    gaps, known = Giac._gap_substitution(order, positive)
     isempty(gaps) || (e = substitute(e, gaps...))
     rational = Giac.Commands.normal(e)
     num, den = Giac.Commands.numer(rational), Giac.Commands.denom(rational)

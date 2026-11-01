@@ -200,7 +200,7 @@ export solve
 
 # Conversion functions (extended by GiacSymbolicsExt, GiacMathJSONExt, GiacSymPyExt, and GiacNemoExt)
 export to_giac, to_symbolics, to_mathjson, to_sympy, to_nemo
-export positivity, decompose
+export positivity, decompose, certify
 
 # MCP server entry point (extended by GiacMCPExt when ModelContextProtocol is loaded)
 export giac_mcp_server

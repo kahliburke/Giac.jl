@@ -78,7 +78,7 @@
         # Core API + utilities + output handling (029) + the symbolic-algebra helpers should be
         # under 90 symbols (not thousands)
         # Output handling adds: 13 type constants + 10 predicates + 6 accessors = ~29 exports
-        @test length(public_exports) <= 104
+        @test length(public_exports) <= 105
     end
 
     @testset "Exportable Commands Generation" begin

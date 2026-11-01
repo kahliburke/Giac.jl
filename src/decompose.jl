@@ -72,3 +72,24 @@ decompose(target, [p*(L - p)*r*(L - r)])        # 4 · p(L-p)r(L-r)
 ```
 """
 function decompose end
+
+"""
+    certify(d::Decomposition; order = (), positive = (), param = (), signs = 1)
+
+A member of the solution family of `d` whose multipliers each have one sign, certified by
+coefficient signs under the ordering, as in [`positivity`](@ref). `signs` gives the sign wanted
+for each multiplier (one number for all). The weights of the free directions are found by a
+linear program (JuMP with HiGHS), made rational, and checked exactly in Nemo. Needs
+`using JuMP, HiGHS, Nemo`.
+
+Returns `(λ = weights, multipliers = …, checks = [Positivity, …])`, or `nothing` when no member
+is certified this way.
+
+```julia
+using Nemo, JuMP, HiGHS
+@giac_var x y
+d = decompose(x^3 + y^3, [x + y, x*y]; degree = [2, 1])
+certify(d; positive = (x, y), signs = (1, -1))   # x³+y³ = (x²+xy+y²)(x+y) - 2(x+y)·xy
+```
+"""
+function certify end

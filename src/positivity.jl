@@ -90,3 +90,30 @@ positivity(A^2 - 2A*B + B^2; positive = (A, B))                          # not d
 ```
 """
 function positivity end
+
+_chains(order) = isempty(order) ? Any[] :
+    (order isa Tuple && !(first(order) isa Union{Tuple, AbstractVector})) ? Any[order] : collect(Any, order)
+
+# Each ordered variable as the one before it plus a gap `Δv`: the substitutions, and the names
+# known positive (the gaps, the `positive` variables, a chain's first variable after 0)
+function _gap_substitution(order, positive)
+    gaps = Pair{GiacExpr, GiacExpr}[]
+    known = Set{String}(string.(positive))
+    for chain in _chains(order)
+        items = collect(Any, chain)
+        start = popfirst!(items)
+        acc = convert(GiacExpr, start)
+        if start isa Number && iszero(start) && !isempty(items)
+            v = popfirst!(items)                   # 0 < v: v itself is the first gap
+            push!(known, string(v))
+            acc = convert(GiacExpr, v)
+        end
+        for v in items
+            Δ = giac_identifier("Δ" * string(v))
+            push!(known, string(Δ))
+            acc = acc + Δ
+            push!(gaps, convert(GiacExpr, v) => acc)
+        end
+    end
+    return gaps, known
+end

@@ -40,7 +40,19 @@ using Nemo
         d = decompose(T, [:S => (t₂ - τ)^2, :W => W, :V => V]; degree = [5, 0, 0], param = (l′ => t₂ / g, u′ => t₂ * g))
         @test isempty(d.directions) && string.(d.multipliers[2:3]) == ["1", "-1"]
         M = d.multipliers[1]
-        @test Bool(positivity(substitute(M, τ => t₁); order = (u, t₁, t₂, t₃, l″), positive = (A, A′, A₃)))
-        @test Bool(positivity(substitute(M, τ => t₃); order = (u, t₁, t₂, t₃, l″), positive = (A, A′, A₃)))
+        @test Bool(positivity(Giac.substitute(M, τ => t₁); order = (u, t₁, t₂, t₃, l″), positive = (A, A′, A₃)))
+        @test Bool(positivity(Giac.substitute(M, τ => t₃); order = (u, t₁, t₂, t₃, l″), positive = (A, A′, A₃)))
     end
+end
+
+using JuMP, HiGHS
+
+@testset "certify a member of the family" begin
+    C = Giac.Commands
+    @giac_var x y
+    d = decompose(x^3 + y^3, [x + y, x * y]; degree = [2, 1])
+    c = certify(d; positive = (x, y), signs = (1, -1))
+    @test c !== nothing && all(r -> Bool(r), c.checks)
+    @test iszero(C.expand(c.multipliers[1] * (x + y) + c.multipliers[2] * x * y - (x^3 + y^3)))
+    @test certify(d; positive = (x, y), signs = (1, 1)) === nothing          # no member has both ≥ 0
 end
