@@ -35,6 +35,14 @@ using Nemo
         r = positivity(x^2 - 2x * y + y^2; positive = (x, y))
         @test r.sign == 0 && string.(r.numerator.against) == ["-2*x*y"]
         @test occursin("sum-of-squares", sprint(show, MIME("text/plain"), r))
+        @test r.numerator.terms == (2, 1) && r.numerator.degrees == 2:2
+        @test r.numerator.opposing == ["x" => 1, "y" => 1]
+        # a long report stays short when shown, and groups by the variables chosen
+        big = positivity((x - y)^2 * (A + A′)^3 * τ^2; positive = (x, y, A, A′, τ))
+        shown = sprint(show, MIME("text/plain"), big)
+        @test count(==('\n'), shown) <= 8 && occursin("terms against, in:", shown)
+        groups = Giac.group_terms(big.numerator.against, (A, A′))
+        @test length(groups) == 4 && all(g -> string(last(g)) == "-2*x*y*τ^2" || occursin("x*y", string(last(g))), groups)
         r2 = positivity(x * τ; positive = (x,))
         @test r2.sign == 0 && string.(r2.numerator.free) == ["τ"]                    # τ's sign is not known
     end

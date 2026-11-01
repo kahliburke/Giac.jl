@@ -629,12 +629,23 @@ function _sign_report(P, known, strict)
     pos, neg = count(>(0), cs), count(<(0), cs)
     sign = !isempty(free) || iszero(P) ? 0 : neg == 0 ? 1 : pos == 0 ? -1 : 0
     majority = pos >= neg ? 1 : -1
-    against = [Giac.to_giac(c * m) for (c, m) in zip(coefficients(P), monomials(P)) if sign == 0 && Base.sign(c) == -majority]
+    degrees = iszero(P) ? (0:0) : (minimum(sum, exponent_vectors(P)):maximum(sum, exponent_vectors(P)))
+    # the terms against the majority sign, largest coefficient first, and the variables in them
+    opposing = [(c, e) for (c, e) in zip(coefficients(P), exponent_vectors(P)) if sign == 0 && Base.sign(c) == -majority]
+    sort!(opposing; by = t -> -abs(t[1]))
+    names = string.(symbols(parent(P)))
+    uses = zeros(Int, length(names))
+    foreach(((c, e),) -> (uses .+= e .> 0), opposing)
+    in_against = sort!([names[i] => uses[i] for i in eachindex(names) if uses[i] > 0]; by = p -> -last(p))
+    R = parent(P)
+    against = [Giac.to_giac(c * _monomial(R, e)) for (c, e) in opposing]
     # strictly positive variables and a nonzero polynomial give a strict sign; with ≤ chains
     # (strict = false) a constant term is needed
     strict_sign = sign != 0 && (strict ? all(v -> v in known || _declared_positive(v, true), vars) : !iszero(constant_coefficient(P)))
-    return Giac.SignReport(sign, strict_sign, Giac.to_giac(P), against, free)
+    return Giac.SignReport(sign, strict_sign, Giac.to_giac(P), against, free, (pos, neg), degrees, in_against)
 end
+
+_monomial(R, e) = (ctx = MPolyBuildCtx(R); push_term!(ctx, one(base_ring(R)), e); finish(ctx))
 
 # whether a name was declared positive (`@giac_var A::positive`), or with `strict_only = false`
 # nonnegative
