@@ -604,8 +604,84 @@ end
 
 const _CALL_NAME = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
-# The tree of a GIAC object (with the GIAC lock held)
-function _node_from_gen(gen)
+# The tree of a GIAC object (with the GIAC lock held). A wrapper with `gen_export` writes the
+# whole tree in one call; otherwise it is read node by node.
+_node_from_gen(gen) = _has_export() ? _node_from_export(gen) : _node_from_gen_by_node(gen)
+
+_has_export() = isdefined(GiacCxxBindings, :gen_export)
+
+const _EXPORT_HEADS = join(keys(_INFIX), "\n")
+
+function _node_from_export(gen)
+    B = GiacCxxBindings
+    buf = Vector{UInt8}(codeunits(String(B.gen_export(gen, _EXPORT_HEADS))))
+    pos = Ref(1)
+    node = GC.@preserve buf _read_node(buf, pos)
+    return node === nothing ? _node_from_gen_by_node(gen) : node
+end
+
+function _read_value(::Type{T}, buf::Vector{UInt8}, pos::Ref{Int}) where {T}
+    v = ltoh(unsafe_load(Ptr{T}(pointer(buf, pos[]))))
+    pos[] += sizeof(T)
+    return v
+end
+
+function _read_string(buf::Vector{UInt8}, pos::Ref{Int})
+    n = Int(_read_value(UInt32, buf, pos))
+    s = String(buf[pos[]:(pos[] + n - 1)])
+    pos[] += n
+    return s
+end
+
+# a node of an exported tree (see the wrapper's gen_export); `nothing` for a shape this side does
+# not expect, which makes the caller read the object node by node
+function _read_node(buf::Vector{UInt8}, pos::Ref{Int})
+    tag = buf[pos[]]
+    pos[] += 1
+    if tag == 0x01
+        return NumNode(Int(_read_value(Int64, buf, pos)))
+    elseif tag == 0x02
+        sign = _read_value(Int32, buf, pos)
+        n = Int(_read_value(UInt32, buf, pos))
+        magnitude = n == 0 ? big(0) : parse(BigInt, bytes2hex(view(buf, pos[]:(pos[] + n - 1))); base = 16)
+        pos[] += n
+        return NumNode(sign < 0 ? -magnitude : magnitude)
+    elseif tag == 0x03
+        return NumNode(_read_value(Float64, buf, pos))
+    elseif tag == 0x04
+        return SymNode(_read_string(buf, pos))
+    elseif tag == 0x05
+        p, q = _read_node(buf, pos), _read_node(buf, pos)
+        (p isa NumNode && q isa NumNode) || return nothing
+        return NumNode(p.v // q.v)
+    elseif tag == 0x06
+        re, im = _read_node(buf, pos), _read_node(buf, pos)
+        (re isa NumNode && im isa NumNode && re.v isa Real && im.v isa Real) || return nothing
+        return NumNode(Complex(re.v, im.v))
+    elseif tag == 0x07
+        h = _read_string(buf, pos)
+        k = Int(_read_value(UInt32, buf, pos))
+        args = Vector{Node}(undef, k)
+        for i in 1:k
+            a = _read_node(buf, pos)
+            a === nothing && return nothing
+            args[i] = a
+        end
+        h == "+" && return _add(args...)
+        h == "*" && return _mul(args...)
+        h == "-" && return k == 1 ? _neg(args[1]) : k == 2 ? _sub(args[1], args[2]) : nothing
+        h == "inv" && return k == 1 ? _pow(args[1], _MINUS_ONE) : nothing
+        h == "^" && return k == 2 ? _pow(args[1], args[2]) : nothing
+        h == "/" && return k == 2 ? _div(args[1], args[2]) : nothing
+        return _call(h, args)
+    elseif tag == 0x09
+        g = GiacCxxBindings.gen_export_opaque(Int32(_read_value(UInt32, buf, pos)))
+        return GenNode(GiacExpr(_make_gen_ptr(g)), String(GiacCxxBindings.to_string(g)))
+    end
+    return nothing
+end
+
+function _node_from_gen_by_node(gen)
     B = GiacCxxBindings
     t = T(B.type(gen))
     t == INT && return NumNode(Int(B.to_int64(gen)))
@@ -613,10 +689,10 @@ function _node_from_gen(gen)
     t == DOUBLE && return NumNode(Float64(B.to_double(gen)))
     t == IDNT && return SymNode(String(B.idnt_name(gen)))
     if t == FRAC
-        p, q = _node_from_gen(B.frac_num(gen)), _node_from_gen(B.frac_den(gen))
+        p, q = _node_from_gen_by_node(B.frac_num(gen)), _node_from_gen_by_node(B.frac_den(gen))
         (p isa NumNode && q isa NumNode) && return NumNode(p.v // q.v)
     elseif t == CPLX
-        re, im = _node_from_gen(B.cplx_re(gen)), _node_from_gen(B.cplx_im(gen))
+        re, im = _node_from_gen_by_node(B.cplx_re(gen)), _node_from_gen_by_node(B.cplx_im(gen))
         (re isa NumNode && im isa NumNode && re.v isa Real && im.v isa Real) && return NumNode(Complex(re.v, im.v))
     elseif t == SYMB
         h = String(B.symb_sommet_name(gen))
@@ -630,7 +706,7 @@ function _node_from_gen(gen)
             else
                 push!(raw, leaf)
             end
-            args = Node[_node_from_gen(a) for a in raw]
+            args = Node[_node_from_gen_by_node(a) for a in raw]
             h == "+" && return _add(args...)
             h == "*" && return _mul(args...)
             h == "-" && return length(args) == 1 ? _neg(args[1]) : _sub(args[1], args[2])
