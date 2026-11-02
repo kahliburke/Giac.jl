@@ -27,7 +27,7 @@ Base.:-(a::GiacExpr, b::GiacExpr) = _arith(-, _sub, a, b)
 
 Negate an expression.
 """
-Base.:-(a::GiacExpr) = _is_equation(a) ? -(lhs(a)) ~ -(rhs(a)) : GiacExpr(_negated(_node(a)))
+Base.:-(a::GiacExpr)::GiacExpr = _is_equation(a) ? -(lhs(a)) ~ -(rhs(a)) : GiacExpr(_negated(_node(a)))
 
 # a negated sum is the sum of the negated terms, as GIAC writes -(a + b)
 _negated(n::AddNode) = _add((_scale(m, _nmul(-1, c)) for (m, c) in n.terms)...)
@@ -54,7 +54,9 @@ Raise an expression to a power.
 """
 Base.:^(a::GiacExpr, b::GiacExpr) = _arith(^, _pow, a, b)
 
-function _arith(op, f, a::GiacExpr, b::GiacExpr)
+# declared GiacExpr: inference of the recursion through an equation's sides can give up, and
+# matrix products take their element type from it
+function _arith(op, f, a::GiacExpr, b::GiacExpr)::GiacExpr
     if _is_equation(a) || _is_equation(b)
         return op(_side(lhs, a), _side(lhs, b)) ~ op(_side(rhs, a), _side(rhs, b))
     end
