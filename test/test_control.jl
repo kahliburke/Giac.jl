@@ -57,4 +57,25 @@ using Giac.Control
         @test hurwitz_stable(GiacExpr[0 1; 2 -3], s) == :unstable
         @test_throws ArgumentError hurwitz_conditions(convert(GiacExpr, 3), s)
     end
+
+    @testset "center manifolds" begin
+        @giac_var x y z ν::positive μ
+        m = center_manifold([x * y, -y + x^2], [x, y]; center = [x])
+        @test same(last(only(m.h)), x^2) && same(only(m.reduced), x^3)
+        @test m.stability == :unstable
+        @test center_manifold([-x * y, -y + x^2], [x, y]; center = [x]).stability == :stable
+        # higher order: h = x² - 4x⁴
+        m5 = center_manifold([x * y, -y + x^2 - 2y^2], [x, y]; center = [x], order = 5)
+        @test same(last(only(m5.h)), x^2 - 4x^4) && same(only(m5.reduced), x^3 - 4x^5)
+        # two stable directions
+        m2 = center_manifold([x * y + x * z, -y + x^2, -2z + x^2], [x, y, z]; center = [x])
+        @test same(last(m2.h[2]), x^2 / 2) && same(only(m2.reduced), 3x^3 / 2)
+        # a parameter of known sign decides; one of unknown sign does not
+        @test center_manifold([-ν * x * y, -y + x^2], [x, y]; center = [x]).stability == :stable
+        @test center_manifold([μ * x * y, -y + x^2], [x, y]; center = [x]).stability == :unknown
+        @test occursin("asymptotically stable", sprint(show, MIME"text/plain"(),
+                                                       center_manifold([-x * y, -y + x^2], [x, y]; center = [x])))
+        @test_throws ArgumentError center_manifold([x + y, -y], [x, y]; center = [x])     # coupled
+        @test_throws ArgumentError center_manifold([x * y, -y], [x, y]; center = [z])
+    end
 end

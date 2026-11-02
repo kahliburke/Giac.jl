@@ -19,7 +19,7 @@ using ..Giac
 using ..Giac: GiacExpr, GiacMatrix, Commands, jacobian, substitute, sign_of
 
 export lie_derivative, lie_bracket, ad, accessibility_rank, involutive, relative_degree, io_linearization
-export hurwitz_conditions, hurwitz_stable, equilibria, stable
+export hurwitz_conditions, hurwitz_stable, equilibria, stable, center_manifold
 
 _field(v) = GiacExpr[convert(GiacExpr, e) for e in v]
 _simplified(e::GiacExpr) = Commands.simplify(e)
@@ -250,5 +250,136 @@ equilibria([y, x - x^3 - y], [x, y])
 ```
 """
 function equilibria end
+
+# ---------------------------------------------------------------------------------------------
+# Center manifolds
+# ---------------------------------------------------------------------------------------------
+
+"""
+    CenterManifold
+
+From [`center_manifold`](@ref): the manifold `y = h(x)` as pairs `yⱼ => hⱼ(x)` up to the order
+asked, the `reduced` dynamics `ẋ` on it, and for a one-dimensional center the `stability` of
+the origin it implies: `:stable` (asymptotically), `:unstable`, or `:unknown`.
+"""
+struct CenterManifold
+    center::Vector{GiacExpr}
+    h::Vector{Pair{GiacExpr, GiacExpr}}
+    reduced::Vector{GiacExpr}
+    order::Int
+    stability::Symbol
+end
+
+function Base.show(io::IO, ::MIME"text/plain", m::CenterManifold)
+    println(io, "Center manifold to order ", m.order, ":")
+    for (y, h) in m.h
+        println(io, "  ", y, " = ", h)
+    end
+    for (x, r) in zip(m.center, m.reduced)
+        println(io, "  d", x, "/dt = ", r)
+    end
+    print(io, "  the origin is ", m.stability === :stable ? "asymptotically stable" :
+              m.stability === :unstable ? "unstable" : "not decided at this order")
+end
+Base.show(io::IO, m::CenterManifold) = print(io, "CenterManifold(order ", m.order, ", ", m.stability, ")")
+
+# the exponent vectors of total degree k in n variables
+_exponents(n, k) = n == 1 ? [[k]] : [vcat(i, e) for i in k:-1:0 for e in _exponents(n - 1, k - i)]
+
+_monomial(xs, α) = prod((x^a for (x, a) in zip(xs, α) if a > 0); init = convert(GiacExpr, 1))
+
+# p's terms of total degree k in xs: monomial exponent => coefficient (which may hold parameters)
+function _graded_terms(p, xs, k)
+    out = Pair{Vector{Int}, GiacExpr}[]
+    for α in _exponents(length(xs), k)
+        c = Commands.invoke_cmd(:coeff, p, xs, α)
+        iszero(c) || push!(out, α => c)
+    end
+    return out
+end
+
+_truncated(p, xs, order) =
+    sum((c * _monomial(xs, α) for k in 0:order for (α, c) in _graded_terms(p, xs, k)); init = convert(GiacExpr, 0))
+
+"""
+    center_manifold(f, x; center, order = 3)
+
+The center manifold of `ẋ = f(x)` at the origin, to order `order`, and the dynamics on it. `f`
+is polynomial (coefficients may hold parameters); `center` lists the variables of the center
+directions, and the others are the stable ones. The linear part must already be in block form,
+with no linear coupling between the two groups. The manifold `y = h(x)` is found order by order
+from the invariance equation, each order a linear system; a [`CenterManifold`](@ref) holds it,
+the reduced dynamics, and for one center variable the stability the leading term gives, its sign
+decided by [`sign_of`](@ref).
+
+```julia
+@giac_var x y
+m = center_manifold([x*y, -y + x^2], [x, y]; center = [x])
+m.h            # [y => x^2]
+m.reduced      # [x^3]: the origin is unstable
+```
+"""
+function center_manifold(f, x; center, order::Integer = 3)
+    F, X = _field(f), _field(x)
+    C = _field(center)
+    names = string.(X)
+    ci = [something(findfirst(==(string(c)), names), 0) for c in C]
+    0 in ci && throw(ArgumentError("center_manifold: a center variable is not a state variable"))
+    si = setdiff(eachindex(X), ci)
+    S = X[si]
+    order >= 2 || throw(ArgumentError("center_manifold: order must be at least 2"))
+    zero_at = [v => convert(GiacExpr, 0) for v in X]
+    A = GiacExpr[_simplified(substitute(Commands.diff(F[i], X[j]), zero_at...)) for i in eachindex(F), j in eachindex(X)]
+    all(iszero, A[ci, si]) && all(iszero, A[si, ci]) ||
+        throw(ArgumentError("center_manifold: the linear part couples the center and stable variables; " *
+                            "change coordinates to block form first"))
+
+    H = Dict{String, GiacExpr}(string(y) => convert(GiacExpr, 0) for y in S)
+    on_manifold(e, Hs) = substitute(e, (y => Hs[string(y)] for y in S)...)
+    for k in 2:order
+        # the unknown coefficients of degree k, and the invariance equation's degree-k terms
+        unknowns = GiacExpr[]
+        trial = Dict{String, GiacExpr}()
+        for (j, y) in enumerate(S)
+            terms = GiacExpr[]
+            for α in _exponents(length(C), k)
+                c = Giac.giac_identifier("cm_$(j)_" * join(α, "_"))
+                push!(unknowns, c)
+                push!(terms, c * _monomial(C, α))
+            end
+            trial[string(y)] = H[string(y)] + sum(terms)
+        end
+        eqs = GiacExpr[]
+        for (j, y) in enumerate(S)
+            hy = trial[string(y)]
+            lhs = sum(Commands.diff(hy, C[i]) * on_manifold(F[ci[i]], trial) for i in eachindex(C))
+            residual = Commands.expand(lhs - on_manifold(F[si[j]], trial))
+            append!(eqs, last.(_graded_terms(residual, C, k)))
+        end
+        values = isempty(eqs) ? fill(convert(GiacExpr, 0), length(unknowns)) :
+                 collect(Commands.invoke_cmd(:linsolve, eqs, unknowns))
+        length(values) == length(unknowns) ||
+            throw(ArgumentError("center_manifold: no solution at order $k (is the stable block's linear part invertible?)"))
+        solved = [u => v for (u, v) in zip(unknowns, values)]
+        for y in S
+            H[string(y)] = Commands.expand(substitute(trial[string(y)], solved...))
+        end
+    end
+    reduced = [Commands.expand(_truncated(Commands.expand(on_manifold(F[i], H)), C, order)) for i in ci]
+    stability = length(C) == 1 ? _leading_stability(reduced[1], C[1], order) : :unknown
+    return CenterManifold(C, [y => H[string(y)] for y in S], reduced, order, stability)
+end
+
+# ẋ = a xᵐ + …: the lowest term that is not zero decides, asymptotically stable for odd m and
+# a < 0, unstable for a > 0 or even m
+function _leading_stability(r, x, order)
+    for m in 1:order
+        s = sign_of(Commands.invoke_cmd(:coeff, r, x, m))
+        s === :zero && continue
+        s in (:positive, :negative) || return :unknown
+        return isodd(m) && s === :negative ? :stable : :unstable
+    end
+    return :unknown
+end
 
 end # module

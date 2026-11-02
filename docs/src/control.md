@@ -77,6 +77,23 @@ equilibria([y, x - x^3 - y], [x, y])
 # (x ≈ 1.0, y ≈ 0.0): stable
 ```
 
+## Center manifolds
+
+When the linearization leaves stability open (an eigenvalue on the imaginary axis), the dynamics
+on the center manifold decide it. `center_manifold(f, x; center, order)` finds the manifold
+`y = h(x)` order by order from the invariance equation, for a system whose linear part is in
+block form, and the reduced dynamics on it; with one center variable, the leading term's sign
+(decided by `sign_of`, so parameters of declared sign work) gives the verdict:
+
+```julia
+@giac_var x y
+center_manifold([-x*y, -y + x^2], [x, y]; center = [x])
+# Center manifold to order 3:
+#   y = x^2
+#   dx/dt = -x^3
+#   the origin is asymptotically stable
+```
+
 For stability and regions of attraction, see `lyapunov` and `region_of_attraction` on the
 [exact certificates](certificates.md) page; for how the number of equilibria depends on
 parameters, `real_root_classification` on [polynomial systems](polynomial_systems.md).
@@ -96,4 +113,6 @@ Giac.Control.hurwitz_conditions
 Giac.Control.hurwitz_stable
 Giac.Control.equilibria
 Giac.Control.Equilibrium
+Giac.Control.center_manifold
+Giac.Control.CenterManifold
 ```
