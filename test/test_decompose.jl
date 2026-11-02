@@ -52,7 +52,7 @@ using JuMP, HiGHS
     @giac_var x y
     d = decompose(x^3 + y^3, [x + y, x * y]; degree = [2, 1])
     c = certify(d; positive = (x, y), signs = (1, -1))
-    @test c !== nothing && all(r -> Bool(r), c.checks)
+    @test c !== nothing && all(r -> r === nothing || Bool(r), c.checks)
     @test iszero(C.expand(c.multipliers[1] * (x + y) + c.multipliers[2] * x * y - (x^3 + y^3)))
     @test certify(d; positive = (x, y), signs = (1, 1)) === nothing          # no member has both ≥ 0
 end

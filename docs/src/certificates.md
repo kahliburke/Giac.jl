@@ -175,6 +175,7 @@ sign_of
 simplify_signs
 decompose
 Giac.Decomposition
+Giac.Certified
 Giac.combination
 certify
 sos_decomposition

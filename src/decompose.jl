@@ -43,11 +43,48 @@ end
 Base.show(io::IO, d::Decomposition) = print(io, "Decomposition(", length(d.blocks), " blocks, ", length(d.directions), " free)")
 
 function Base.show(io::IO, ::MIME"text/latex", d::Decomposition)
-    terms = [(_paren_tex(m), _block_tex(n, b)) for (n, b, m) in zip(d.names, d.blocks, d.multipliers) if !iszero(m)]
-    rhs = isempty(terms) ? "0" : join((m * " \\, " * n for (m, n) in terms), " + ")
+    terms = [(_multiplier_tex(m), _block_tex(n, b)) for (n, b, m) in zip(d.names, d.blocks, d.multipliers) if !iszero(m)]
+    rhs = isempty(terms) ? "0" : replace(join((m * n for (m, n) in terms), " + "), "+ -" => "- ")
     print(io, "\$\$", giac_latex(d.target), " = ", rhs, "\$\$")
 end
 _paren_tex(m::GiacExpr) = (s = giac_latex(m); _node(m) isa AddNode ? "\\left(" * s * "\\right)" : s)
+
+# a multiplier written before its block: nothing for 1, a sign for -1
+function _multiplier_tex(m::GiacExpr)
+    isone(m) && return ""
+    isone(-m) && return "-"
+    return _paren_tex(m) * " \\, "
+end
+
+"""
+    Certified
+
+The result of [`certify`](@ref): a member of a [`Decomposition`](@ref)'s family whose
+multipliers each have the sign wanted. `λ` are the weights of the free directions that give it,
+`multipliers` its multipliers, block by block, and `checks` the [`positivity`](@ref) report of
+each signed multiplier (`nothing` for a zero one).
+"""
+struct Certified
+    decomposition::Decomposition
+    λ::Vector{Rational{BigInt}}
+    multipliers::Vector{GiacExpr}
+    checks::Vector{Union{Nothing, Positivity}}
+end
+
+_member(c::Certified) = (d = c.decomposition;
+    Decomposition(d.target, d.blocks, d.names, c.multipliers, Vector{GiacExpr}[], d.factors))
+
+function Base.show(io::IO, ::MIME"text/plain", c::Certified)
+    d = c.decomposition
+    println(io, "Certified: ", d.target, " =")
+    for (n, b, m, r) in zip(d.names, d.blocks, c.multipliers, c.checks)
+        iszero(m) && continue
+        println(io, "  (", m, ") · ", _block_text(n, b), r === nothing ? "" : string("   ", _sign_word(r.sign, r.strict)))
+    end
+    isempty(c.λ) || print(io, "  weights of the free directions: ", join(_rational_text.(c.λ), ", "))
+end
+Base.show(io::IO, c::Certified) = print(io, "Certified(", count(!iszero, c.multipliers), " blocks)")
+Base.show(io::IO, m::MIME"text/latex", c::Certified) = show(io, m, _member(c))
 
 """
     decompose(target, blocks; vars = all, degree = automatic, param = ())
@@ -88,8 +125,8 @@ makes its term agree with the target, through the product of its block's factors
 linear program (JuMP with HiGHS), made rational, and checked exactly in Nemo. Needs
 `using JuMP, HiGHS, Nemo`.
 
-Returns `(λ = weights, multipliers = …, checks = [Positivity, …])`, or `nothing` when no member
-is certified this way.
+Returns a [`Certified`](@ref Giac.Certified), which shows the member with each multiplier's
+certified sign, or `nothing` when no member is certified this way.
 
 ```julia
 using Nemo, JuMP, HiGHS

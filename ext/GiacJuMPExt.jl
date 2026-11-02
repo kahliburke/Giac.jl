@@ -47,8 +47,9 @@ function Giac.certify(d::Giac.Decomposition; order = (), positive = (), param = 
         q = Rational{BigInt}[rationalize(BigInt, Float64(v); tol) for v in λ]
         if _signs_hold(rows, s, q)
             multipliers = Giac.combination(d, q)
-            checks = [positivity(wanted[k] * multipliers[k]; order, positive, param) for k in 1:nb]
-            return (λ = q, multipliers, checks)
+            checks = Union{Nothing, Giac.Positivity}[iszero(multipliers[k]) ? nothing :
+                                                      positivity(wanted[k] * multipliers[k]; order, positive, param) for k in 1:nb]
+            return Giac.Certified(d, q, multipliers, checks)
         end
     end
     return nothing
