@@ -77,6 +77,22 @@ equilibria([y, x - x^3 - y], [x, y])
 # (x ≈ 1.0, y ≈ 0.0): stable
 ```
 
+## Weak foci
+
+A planar equilibrium with eigenvalues `±iω` is not decided by its linearization either.
+`lyapunov_coefficient(f, x; at)` computes the first Lyapunov coefficient `ℓ₁` exactly, from
+derivatives up to third order at the equilibrium, so `f` may hold `sin` and the like. `ℓ₁ < 0`
+makes it an asymptotically stable weak focus, and a Hopf bifurcation through it supercritical;
+`ℓ₁ > 0` unstable and subcritical.
+
+```julia
+@giac_var x₁ x₂ c::positive
+lyapunov_coefficient([sin(x₂) - c*x₁^3, x₁], [x₁, x₂]; at = (x₁ => 0, x₂ => π))
+# Weak focus, eigenvalues ±iω with ω = 1:
+#   ℓ₁ = -3*c/8
+#   asymptotically stable (a Hopf bifurcation through it is supercritical)
+```
+
 ## Center manifolds
 
 When the linearization leaves stability open (an eigenvalue on the imaginary axis), the dynamics
@@ -125,4 +141,6 @@ Giac.Control.equilibria
 Giac.Control.Equilibrium
 Giac.Control.center_manifold
 Giac.Control.CenterManifold
+Giac.Control.lyapunov_coefficient
+Giac.Control.WeakFocus
 ```

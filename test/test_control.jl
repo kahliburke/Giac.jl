@@ -79,6 +79,26 @@ using Giac.Control
         @test_throws ArgumentError center_manifold([x * y, -y], [x, y]; center = [z])
     end
 
+    @testset "weak foci: the first Lyapunov coefficient" begin
+        @giac_var x₁ x₂ c::positive x y μ
+        # notebook 4's pendulum with cubic damping, about the hanging position: ℓ₁ = -3c/8
+        w = lyapunov_coefficient([sin(x₂) - c * x₁^3, x₁], [x₁, x₂]; at = (x₁ => 0, x₂ => π))
+        @test same(w.ℓ₁, -3c / 8) && same(w.ω, 1) && w.stability == :stable
+        @test lyapunov_coefficient([sin(x₂), x₁], [x₁, x₂]; at = (x₁ => 0, x₂ => π)).stability == :unknown
+        # the Hopf normal form: ℓ₁ = ∓1
+        @test same(lyapunov_coefficient([-y - x * (x^2 + y^2), x - y * (x^2 + y^2)], [x, y]).ℓ₁, -1)
+        @test lyapunov_coefficient([-y + x * (x^2 + y^2), x + y * (x^2 + y^2)], [x, y]).stability == :unstable
+        # a linear part not in normal form, ω = √2
+        w2 = lyapunov_coefficient([y, -2x - x^2 * y], [x, y])
+        @test same(w2.ω^2, 2) && w2.stability == :stable
+        # a parameter of unknown sign
+        @test lyapunov_coefficient([-y + μ * x^3, x], [x, y]).stability == :unknown
+        @test occursin("supercritical", sprint(show, MIME"text/plain"(), w))
+        @test_throws ArgumentError lyapunov_coefficient([-x, -y], [x, y])            # trace not zero
+        @test_throws ArgumentError lyapunov_coefficient([y, x], [x, y])              # a saddle
+        @test_throws ArgumentError lyapunov_coefficient([y + 1, -x], [x, y])         # not an equilibrium
+    end
+
     @testset "center manifolds in new coordinates" begin
         @giac_var x y z μ
         # already in block form: the same variables, without center

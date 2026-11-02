@@ -19,7 +19,7 @@ using ..Giac
 using ..Giac: GiacExpr, GiacMatrix, Commands, jacobian, substitute, sign_of
 
 export lie_derivative, lie_bracket, ad, accessibility_rank, involutive, relative_degree, io_linearization
-export hurwitz_conditions, hurwitz_stable, equilibria, stable, center_manifold
+export hurwitz_conditions, hurwitz_stable, equilibria, stable, center_manifold, lyapunov_coefficient
 
 _field(v) = GiacExpr[convert(GiacExpr, e) for e in v]
 _simplified(e::GiacExpr) = Commands.simplify(e)
@@ -471,6 +471,85 @@ function _leading_stability(r, x, order)
         return isodd(m) && s === :negative ? :stable : :unstable
     end
     return :unknown
+end
+
+# ---------------------------------------------------------------------------------------------
+# Weak foci: the first Lyapunov coefficient
+# ---------------------------------------------------------------------------------------------
+
+"""
+    WeakFocus
+
+From [`lyapunov_coefficient`](@ref): an equilibrium of a planar system whose linearization has
+eigenvalues `±iω`, with the first Lyapunov coefficient `ℓ₁` and the `stability` its sign gives:
+`:stable` (ℓ₁ < 0, an asymptotically stable weak focus; a Hopf bifurcation through it is
+supercritical), `:unstable` (ℓ₁ > 0; subcritical), or `:unknown` (ℓ₁ = 0, or its sign not
+decided).
+"""
+struct WeakFocus
+    ω::GiacExpr
+    ℓ₁::GiacExpr
+    stability::Symbol
+end
+
+function Base.show(io::IO, ::MIME"text/plain", w::WeakFocus)
+    println(io, "Weak focus, eigenvalues ±iω with ω = ", w.ω, ":")
+    println(io, "  ℓ₁ = ", w.ℓ₁)
+    print(io, "  ", w.stability === :stable ? "asymptotically stable (a Hopf bifurcation through it is supercritical)" :
+                    w.stability === :unstable ? "unstable (a Hopf bifurcation through it is subcritical)" :
+                    "not decided by ℓ₁")
+end
+Base.show(io::IO, w::WeakFocus) = print(io, "WeakFocus(ℓ₁ = ", w.ℓ₁, ", ", w.stability, ")")
+
+"""
+    lyapunov_coefficient(f, x; at = ())
+
+The first Lyapunov coefficient of the planar system `ẋ = f(x)` at the equilibrium `at` (pairs
+`xᵢ => value`, the origin by default), whose linearization has eigenvalues `±iω`: a
+[`WeakFocus`](@ref). The linearization alone cannot decide such an equilibrium; the sign of `ℓ₁`
+does, unless it is zero. Only derivatives up to the third order at the equilibrium enter, so `f`
+may be any smooth expression (`sin`, `exp`, …) and the result is exact. The coordinates are
+changed so that the linear part is `[0 -ω; ω 0]`, and `ℓ₁` is Guckenheimer and Holmes's
+`(f_xxx + f_xyy + g_xxy + g_yyy)/16 + (f_xy (f_xx + f_yy) − g_xy (g_xx + g_yy) − f_xx g_xx + f_yy g_yy)/(16ω)`.
+Its sign is decided by [`sign_of`](@ref), so parameters of declared sign work.
+
+```julia
+@giac_var x₁ x₂ c::positive
+lyapunov_coefficient([sin(x₂) - c*x₁^3, x₁], [x₁, x₂]; at = (x₁ => 0, x₂ => π))
+# ℓ₁ = -3c/8: asymptotically stable
+```
+"""
+function lyapunov_coefficient(f, x; at = ())
+    F, X = _field(f), _field(x)
+    length(X) == 2 && length(F) == 2 || throw(ArgumentError("lyapunov_coefficient: a planar system, two states"))
+    # the equilibrium moved to the origin
+    if !isempty(at)
+        shift = Dict(string(first(p)) => convert(GiacExpr, last(p)) for p in at)
+        F = [substitute(Fi, (v => v + get(shift, string(v), convert(GiacExpr, 0)) for v in X)...) for Fi in F]
+    end
+    origin = [v => convert(GiacExpr, 0) for v in X]
+    all(Fi -> iszero(_simplified(substitute(Fi, origin...))), F) ||
+        throw(ArgumentError("lyapunov_coefficient: not an equilibrium"))
+    J = GiacExpr[_simplified(substitute(Commands.diff(F[i], X[j]), origin...)) for i in 1:2, j in 1:2]
+    iszero(_simplified(J[1, 1] + J[2, 2])) ||
+        throw(ArgumentError("lyapunov_coefficient: the linearization's trace is not zero, so its eigenvalues are not ±iω"))
+    Δ = _simplified(J[1, 1] * J[2, 2] - J[1, 2] * J[2, 1])
+    sign_of(Δ) === :positive ||
+        throw(ArgumentError("lyapunov_coefficient: the linearization's determinant $Δ is not known to be positive"))
+    ω = _simplified(sqrt(Δ))
+    # x = T z with T = [e₁ J e₁/ω] makes the linear part [0 -ω; ω 0]
+    T = GiacExpr[1 J[1, 1] / ω; 0 J[2, 1] / ω]
+    ξ, η = Giac.giac_identifier("lc_ξ"), Giac.giac_identifier("lc_η")
+    xs = T * [ξ, η]
+    f_, g_ = Giac._giac_inv(T) * [substitute(Fi, (X .=> xs)...) for Fi in F]
+    at0 = (ξ => convert(GiacExpr, 0), η => convert(GiacExpr, 0))
+    d(e, vars...) = _simplified(substitute(foldl((acc, v) -> Commands.diff(acc, v), vars; init = e), at0...))
+    ℓ = (d(f_, ξ, ξ, ξ) + d(f_, ξ, η, η) + d(g_, ξ, ξ, η) + d(g_, η, η, η)) / 16 +
+        (d(f_, ξ, η) * (d(f_, ξ, ξ) + d(f_, η, η)) - d(g_, ξ, η) * (d(g_, ξ, ξ) + d(g_, η, η)) -
+         d(f_, ξ, ξ) * d(g_, ξ, ξ) + d(f_, η, η) * d(g_, η, η)) / (16ω)
+    ℓ = _simplified(ℓ)
+    s = sign_of(ℓ)
+    return WeakFocus(ω, ℓ, s === :negative ? :stable : s === :positive ? :unstable : :unknown)
 end
 
 end # module
