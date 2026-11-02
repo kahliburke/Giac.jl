@@ -124,6 +124,16 @@ using Giac.Commands: simplify
         @test string(simplify(adjoint(giac_eval("3+4*i")))) == "3-4*i"
     end
 
+    @testset "transpose: scalars unchanged, matrices transposed" begin
+        @giac_var a b
+        @test string(transpose(a + b)) == "a+b"
+        M = GiacExpr[a b; 0 1]
+        @test string.(transpose(M)) == ["a" "0"; "b" "1"]
+        @test string.(transpose(M) * M) == string.(permutedims(M) * M)
+        @test string(transpose(giac_eval("[[1,2],[3,4]]"))) == "matrix[[1,3],[2,4]]"
+        @test string(simplify(adjoint(giac_eval("[[1,i],[0,2]]")))) == "matrix[[1,0],[-i,2]]"
+    end
+
     # ========================================================================
     # zero / one — needed for Julia's identity-element machinery (matrices etc.)
     # ========================================================================

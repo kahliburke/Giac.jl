@@ -459,7 +459,20 @@ Compute the complex conjugate of a GiacExpr.
 Uses Tier 1 C++ wrapper for high performance.
 """
 Base.conj(expr::GiacExpr)::GiacExpr = _tier1_or_fallback(_giac_conj_tier1, :conj, expr)
-Base.adjoint(expr::GiacExpr)::GiacExpr = conj(expr)
+
+# a GiacExpr is a scalar unless it holds a vector or matrix, or an expression in matrix symbols
+_scalar(expr::GiacExpr) = giac_type(expr) != GenTypes.VECT && isempty(_atoms_in(expr))
+
+"""
+    Base.transpose(expr::GiacExpr) -> GiacExpr
+    Base.adjoint(expr::GiacExpr) -> GiacExpr
+
+The (conjugate) transpose of a vector or matrix held in a GiacExpr, or of an expression in matrix
+symbols. Any other expression is a scalar: `transpose` returns it unchanged and `adjoint`
+conjugates it, as for numbers, so a `Matrix{GiacExpr}` transposes like a matrix of numbers.
+"""
+Base.transpose(expr::GiacExpr)::GiacExpr = _scalar(expr) ? expr : invoke_cmd(:transpose, expr)
+Base.adjoint(expr::GiacExpr)::GiacExpr = _scalar(expr) ? conj(expr) : conj(invoke_cmd(:transpose, expr))
 
 """
     Base.isfinite(expr::GiacExpr) -> Bool
