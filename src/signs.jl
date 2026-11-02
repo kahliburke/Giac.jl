@@ -210,7 +210,7 @@ function _resolve(n::CallNode, hints, sos)
     if n.f == "abs" && length(args) == 1
         s = _decided_signs(args[1], hints, sos)
         !s[1] && return args[1]
-        !s[3] && return _neg(args[1])
+        !s[3] && return _negated(args[1])
     elseif n.f == "sign" && length(args) == 1
         s = _decided_signs(args[1], hints, sos)
         count(s) == 1 && return NumNode(s[3] ? 1 : s[1] ? -1 : 0)
