@@ -91,7 +91,7 @@ using Giac.Control
         ξ = only(c.center)
         @test same(only(c.reduced), -ξ^3 / 2)
         # x + y = 2ξ on the manifold, and (x + y)' = -x³
-        @test same(substitute(last(c.coordinates[1]) + last(c.coordinates[2]), first(only(c.h)) => last(only(c.h))), 2ξ)
+        @test same(Giac.substitute(last(c.coordinates[1]) + last(c.coordinates[2]), first(only(c.h)) => last(only(c.h))), 2ξ)
         # a rotation and a stable direction: a two-dimensional center
         r = center_manifold([y, -x - x^2 * y, -z + x^2], [x, y, z])
         @test length(r.center) == 2 && r.stability == :unknown
