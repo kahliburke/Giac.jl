@@ -487,6 +487,9 @@ The exact rational `x` (`1//2` is 1/2).
 """
 Base.convert(::Type{GiacExpr}, x::Rational) = GiacExpr(NumNode(x))
 
+# `GiacExpr(3//4)`, `GiacExpr.(M)` for a numeric matrix: the same as `convert`
+GiacExpr(x::Number) = convert(GiacExpr, x)
+
 """
     convert(::Type{GiacExpr}, x::Complex) -> GiacExpr
 
