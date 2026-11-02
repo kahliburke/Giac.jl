@@ -25,6 +25,9 @@
         @test string(Giac.invoke_cmd(:eval, b)) == "p(t₂)*η(t₂)-p(t₁)*η(t₁)"         # GIAC's preval
         @test L(evaluated(cos(a * t), a => 0)) == "\\left. \\cos\\left(a t\\right) \\right|_{a = 0}"
         @test Giac.written_latex(:(evaluated(diff(V, ε), ε => 0))) == "\\left. \\frac{\\mathrm{d} V}{\\mathrm{d} \\varepsilon} \\right|_{\\varepsilon = 0}"
+        # written `substitute` with one pair is the same bar; a written rational is a fraction
+        @test Giac.written_latex(:(substitute(G, s => im * ω))) == "\\left. G \\right|_{s = i \\omega}"
+        @test Giac.written_latex(:(P(t^2, 3) - 1 // 10)) == "P\\left(t^{2}, 3\\right) - \\frac{1}{10}"
         # a substitution inside keeps the bar; one that changes its value takes the value
         @test L(substitute(evaluated(a * η, t, t₁, t₂), a => 2)) == "\\left. 2 \\eta \\right|_{t_{1}}^{t_{2}}"
         @test string(substitute(b, η(t₁) => 0)) == "p(t₂)*η(t₂)"
