@@ -123,7 +123,8 @@ _text_row(s::AbstractString) = ("", "\\text{" * replace(s, "&" => "\\&", "%" => 
 Base.show(io::IO, d::Derivation) = print(io, "Derivation with $(length(d.rows)) step(s)")
 
 # Julia syntax → Giac syntax for typesetting a written expression unevaluated.
-const _GIAC_NAMES = Dict(:∇ => :grad, :⋅ => :dot, :tr => :trace, :jacobian => :diff, :inv => :inv, :integral => :integrate)
+const _GIAC_NAMES = Dict(:∇ => :grad, :⋅ => :dot, :tr => :trace, :jacobian => :diff, :inv => :inv, :integral => :integrate,
+                         :real => :re, :imag => :im)
 
 _to_giac_syntax(x) = x
 _to_giac_syntax(s::Symbol) = s === :im ? :i : Symbol(replace(string(s), GIAC_RESERVED_LETTERS...))   # Julia's im is GIAC's i
@@ -135,13 +136,17 @@ function _to_giac_syntax(ex::Expr)
     end
     # a rational `a // b` is written as the fraction a / b
     ex.head === :call && ex.args[1] === :(//) && return Expr(:call, :/, map(_to_giac_syntax, ex.args[2:end])...)
-    # `evaluated(f, x => a)` (or `substitute`) is GIAC's subst(f, x = a); `evaluated(f, x, a, b)`
-    # its preval(f, a, b, x)
-    if ex.head === :call && ex.args[1] in (:evaluated, :substitute)
-        a = ex.args[2:end]
-        length(a) == 2 && a[2] isa Expr && a[2].head === :call && a[2].args[1] === :(=>) &&
-            return Expr(:call, :subst, _to_giac_syntax(a[1]), Expr(:kw, map(_to_giac_syntax, a[2].args[2:3])...))
-        length(a) == 4 && return Expr(:call, :preval, map(_to_giac_syntax, a[[1, 3, 4, 2]])...)
+    # `evaluated(f, x => a, …)` (or `substitute`) is GIAC's subst(f, x = a), or for several pairs
+    # subst(f, [x = a, y = b]); `evaluated(f, x, a, b)` is its preval(f, a, b, x)
+    if ex.head === :call && ex.args[1] in (:evaluated, :substitute) && length(ex.args) >= 3
+        f, rest = ex.args[2], ex.args[3:end]
+        if all(_is_pair, rest)
+            eqs = [map(_to_giac_syntax, p.args[2:3]) for p in rest]
+            at = length(eqs) == 1 ? Expr(:kw, only(eqs)...) : Expr(:vect, (Expr(:(=), q...) for q in eqs)...)
+            return Expr(:call, :subst, _to_giac_syntax(f), at)
+        end
+        ex.args[1] === :evaluated && length(rest) == 3 &&
+            return Expr(:call, :preval, map(_to_giac_syntax, (f, rest[2], rest[3], rest[1]))...)
     end
     if ex.head === :. && length(ex.args) == 2 && ex.args[2] isa Expr && ex.args[2].head === :tuple
         return _to_giac_syntax(Expr(:call, ex.args[1], ex.args[2].args...))

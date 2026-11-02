@@ -28,6 +28,12 @@
         # written `substitute` with one pair is the same bar; a written rational is a fraction
         @test Giac.written_latex(:(substitute(G, s => im * ω))) == "\\left. G \\right|_{s = i \\omega}"
         @test Giac.written_latex(:(P(t^2, 3) - 1 // 10)) == "P\\left(t^{2}, 3\\right) - \\frac{1}{10}"
+        # several pairs share one bar, three pairs are not `evaluated`'s preval form, and a
+        # substitution inside real/imag keeps its bar
+        @test Giac.written_latex(:(substitute(G, s => 1, t => 2))) == "\\left. G \\right|_{s = 1, t = 2}"
+        @test Giac.written_latex(:(substitute(G, s => 1, t => 2, u => 3))) == "\\left. G \\right|_{s = 1, t = 2, u = 3}"
+        @test Giac.written_latex(:(real(substitute(G, s => im * ω)))) == "\\operatorname{Re}\\left(\\left. G \\right|_{s = i \\omega}\\right)"
+        @test Giac.written_latex(:(imag(G(im * ω)))) == "\\operatorname{Im}\\left(G\\left(i \\omega\\right)\\right)"
         # a substitution inside keeps the bar; one that changes its value takes the value
         @test L(substitute(evaluated(a * η, t, t₁, t₂), a => 2)) == "\\left. 2 \\eta \\right|_{t_{1}}^{t_{2}}"
         @test string(substitute(b, η(t₁) => 0)) == "p(t₂)*η(t₂)"

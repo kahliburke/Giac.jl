@@ -154,6 +154,17 @@ struct _PIntegral <: _PNode; f::_PNode; var::_PNode; limits::Vector{_PNode}; end
 struct _PBraKet <: _PNode; kind::String; args::Vector{_PNode}; end
 # `f` evaluated: at `lower` (x = a), or between `lower` and `upper`
 struct _PBar <: _PNode; f::_PNode; lower::_PNode; upper::Union{Nothing, _PNode}; end
+# items separated by commas, as the equations under an evaluation bar: f|_{a = 1, b = 2}
+struct _PList <: _PNode; items::Vector{_PNode}; end
+
+# the equations of a substitution, `x = a` or a list `[x = a, y = b]`, or nothing
+function _equations(x::GiacExpr)
+    is_eq(q) = iscall(q) && symb_funcname(q) == "="
+    is_eq(x) && return [x]
+    giac_type(x) == VECT || return nothing
+    qs = collect(GiacExpr, x)
+    return !isempty(qs) && all(is_eq, qs) ? qs : nothing
+end
 
 const _CALL_TEX = Dict(
     "sin" => "\\sin", "cos" => "\\cos", "tan" => "\\tan", "cot" => "\\cot", "sec" => "\\sec", "csc" => "\\csc",
@@ -247,7 +258,10 @@ function _pnode(e::GiacExpr)
     end
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
-    h == "subst" && length(a) == 2 && iscall(a[2]) && symb_funcname(a[2]) == "=" && return _PBar(_pnode(a[1]), _pnode(a[2]), nothing)
+    if h == "subst" && length(a) == 2 && (eqs = _equations(a[2])) !== nothing
+        lower = length(eqs) == 1 ? _pnode(only(eqs)) : _PList(_PNode[_pnode(q) for q in eqs])
+        return _PBar(_pnode(a[1]), lower, nothing)
+    end
     h == "preval" && length(a) in (3, 4) && return _PBar(_pnode(a[1]), _pnode(a[2]), _pnode(a[3]))
     _is_held_call(_node(e)) && return _PHeld(Symbol(h), Tuple(a))       # lim, Σ, ℒ, … (held_cmd.jl)
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
@@ -775,6 +789,8 @@ function _label_tex(a::_PNode, c::_Ctx)
     (isempty(ops) || isempty(rest)) && return _tex(a, c)
     return join((_tex(f, c) for f in ops), " ") * " " * _tex(length(rest) == 1 ? rest[1] : _PProd(rest), c)
 end
+
+_tex(n::_PList, c::_Ctx) = join((_tex(x, c) for x in n.items), ", ")
 
 function _tex(n::_PBar, c::_Ctx)
     f = n.f isa _PSum ? "\\left(" * _tex(n.f, c) * "\\right)" : _tex(n.f, c)
