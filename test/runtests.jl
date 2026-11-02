@@ -235,6 +235,7 @@ using LinearAlgebra
     include("test_polynomial_systems.jl")
     include("test_sos.jl")
     include("test_signs.jl")
+    include("test_control.jl")
 
     # ============================================================================
     # Doctests
