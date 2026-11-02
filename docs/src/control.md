@@ -55,14 +55,31 @@ and assumptions:
 
 ```julia
 @giac_var s k a q::positive
-hurwitz_conditions(s^3 + 2s^2 + k*s + a, s)     # [2, -a+2*k, a*(2*k-a)]
+hurwitz_conditions(s^3 + 2s^2 + k*s + a, s)     # [2, -a+2*k, -a^2+2*a*k]
 hurwitz_stable(s^3 + 2s^2 + q*s + q, s)         # :stable
 hurwitz_stable(GiacExpr[0 1; -2 -3], s)         # :stable
 ```
 
+## Equilibria
+
+With AlgebraicSolving loaded, `equilibria(f, x)` finds every real equilibrium of a polynomial
+system and the number of eigenvalues of its linearization in the right half-plane. The values of
+the Hurwitz determinants at each equilibrium are isolated along with it, so their signs, and the
+count, are certain; an equilibrium with an eigenvalue possibly on the imaginary axis is reported
+as not decided by the linearization.
+
+```julia
+using AlgebraicSolving
+@giac_var x y
+equilibria([y, x - x^3 - y], [x, y])
+# (x ≈ -1.0, y ≈ 0.0): stable
+# (x ≈ 0.0, y ≈ 0.0): unstable, 1 eigenvalue in the right half-plane
+# (x ≈ 1.0, y ≈ 0.0): stable
+```
+
 For stability and regions of attraction, see `lyapunov` and `region_of_attraction` on the
-[exact certificates](certificates.md) page; for equilibria and how their number depends on
-parameters, [polynomial systems](polynomial_systems.md).
+[exact certificates](certificates.md) page; for how the number of equilibria depends on
+parameters, `real_root_classification` on [polynomial systems](polynomial_systems.md).
 
 ## API
 
@@ -77,4 +94,6 @@ Giac.Control.relative_degree
 Giac.Control.io_linearization
 Giac.Control.hurwitz_conditions
 Giac.Control.hurwitz_stable
+Giac.Control.equilibria
+Giac.Control.Equilibrium
 ```

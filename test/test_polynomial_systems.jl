@@ -85,6 +85,21 @@ import AlgebraicSolving
         @test Set((c.count, Giac.to_julia(last(only(c.witness))) > 0) for c in rp.cases) == Set([(0, false), (1, true)])
     end
 
+    @testset "equilibria and their stability" begin
+        eqs = Giac.Control.equilibria([y, x - x^3 - y], [x, y])
+        @test length(eqs) == 3
+        byx = Dict(round(Int, Float64(e.point[x])) => e.unstable for e in eqs)
+        @test byx == Dict(-1 => 0, 0 => 1, 1 => 0)
+        @test count(Giac.Control.stable, eqs) == 2
+        @test occursin("unstable, 1 eigenvalue", sprint(show, eqs[findfirst(e -> e.unstable == 1, eqs)]))
+        # a center: the linearization does not decide
+        @test only(Giac.Control.equilibria([y, -x], [x, y])).unstable === nothing
+        # Lorenz above the Hopf bifurcation: a saddle at the origin, two eigenvalues to the right
+        # at the other two
+        lz = Giac.Control.equilibria([10 * (y - x), x * (28 - z) - y, x * y - 8 // 3 * z], [x, y, z])
+        @test sort([e.unstable for e in lz]) == [1, 2, 2]
+    end
+
     @testset "errors" begin
         @test_throws ArgumentError AlgebraicSolving.real_solutions([x^2 + y^2 - 1])          # infinitely many
         @test_throws ArgumentError AlgebraicSolving.real_solutions([x / y - 1, y - 2])        # not a polynomial

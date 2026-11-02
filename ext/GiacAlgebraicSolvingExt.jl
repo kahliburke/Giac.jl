@@ -271,6 +271,36 @@ end
 
 _monomial(R, ev) = (ctx = MPolyBuildCtx(R); push_term!(ctx, one(base_ring(R)), ev); finish(ctx))
 
+# Equilibria with their linearization's stability: the Hurwitz determinants of the Jacobian's
+# characteristic polynomial join the system as new variables dₖ = Δₖ(x), so msolve isolates
+# their values too, and a value's interval that excludes zero gives its sign for certain.
+function Giac.Control.equilibria(f::AbstractVector, x; precision::Integer = 64)
+    F = GiacExpr[convert(GiacExpr, e) for e in f]
+    X = _vector(x)
+    n = length(X)
+    length(F) == n || throw(ArgumentError("equilibria: one component of f per state variable"))
+    s = Giac.giac_identifier("hurwitz_s")
+    P = Giac.Commands.invoke_cmd(:charpoly, Giac.GiacMatrix(Giac.jacobian(F, X)), s)
+    Δ = Giac.Control.hurwitz_conditions(P, s)
+    D = [Giac.giac_identifier("hurwitz_d$k") for k in 1:n]
+    for bits in (Int(precision), 4Int(precision))
+        sols = AS.real_solutions(vcat(F, D .- Δ), vcat(X, D); precision = bits)
+        signs = [[s.lower[n + k] > 0 ? 1 : s.upper[n + k] < 0 ? -1 : 0 for k in 1:n] for s in sols]
+        # a determinant too close to zero to sign: more precision once, then undecided
+        bits == Int(precision) && any(sg -> 0 in sg, signs) && continue
+        return [Giac.Control.Equilibrium(Giac.RealSolution(X, sol.lower[1:n], sol.upper[1:n]), _routh_changes(sg))
+                for (sol, sg) in zip(sols, signs)]
+    end
+end
+
+# the eigenvalues in the right half-plane, from the signs of the Hurwitz determinants (monic
+# characteristic polynomial): the sign changes along 1, Δ₁, Δ₂/Δ₁, …; nothing if one is zero
+function _routh_changes(signs)
+    0 in signs && return nothing
+    column = [1; signs[1]; [signs[k] * signs[k - 1] for k in 2:length(signs)]]
+    return count(k -> column[k] != column[k + 1], 1:(length(column) - 1))
+end
+
 """
     dimension(eqs, vars = nothing)
 

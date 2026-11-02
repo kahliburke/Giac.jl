@@ -19,7 +19,7 @@ using ..Giac
 using ..Giac: GiacExpr, GiacMatrix, Commands, jacobian, substitute, sign_of
 
 export lie_derivative, lie_bracket, ad, accessibility_rank, involutive, relative_degree, io_linearization
-export hurwitz_conditions, hurwitz_stable
+export hurwitz_conditions, hurwitz_stable, equilibria, stable
 
 _field(v) = GiacExpr[convert(GiacExpr, e) for e in v]
 _simplified(e::GiacExpr) = Commands.simplify(e)
@@ -167,7 +167,7 @@ hold parameters, so the conditions describe where the system is stable.
 
 ```julia
 @giac_var s k a
-hurwitz_conditions(s^3 + 2s^2 + k*s + a, s)    # [2, 2*k-a, a*(2*k-a)]
+hurwitz_conditions(s^3 + 2s^2 + k*s + a, s)    # [2, -a+2*k, -a^2+2*a*k]
 ```
 """
 function hurwitz_conditions(p, s)
@@ -176,7 +176,7 @@ function hurwitz_conditions(p, s)
     n >= 1 || throw(ArgumentError("hurwitz_conditions: the polynomial has no roots"))
     a(k) = 0 <= k <= n ? Commands.invoke_cmd(:coeff, P, s, k) : convert(GiacExpr, 0)
     H = GiacExpr[a(n - 2j + i) for i in 1:n, j in 1:n]
-    return [Commands.factor(Giac.LinearAlgebra.det(H[1:k, 1:k])) for k in 1:n]
+    return [Commands.normal(Giac.LinearAlgebra.det(H[1:k, 1:k])) for k in 1:n]
 end
 
 """
@@ -204,5 +204,51 @@ function hurwitz_stable(p, s; positive = (), negative = (), sos = true)
     any(in((:negative, :nonpositive, :zero)), signs) && return :unstable
     return :unknown
 end
+
+# ---------------------------------------------------------------------------------------------
+# Equilibria
+# ---------------------------------------------------------------------------------------------
+
+"""
+    Equilibrium
+
+A real equilibrium from [`equilibria`](@ref): `point`, a `Giac.RealSolution` (each state in an
+interval guaranteed to contain it), and `unstable`, the number of eigenvalues of the
+linearization in the open right half-plane, or `nothing` when one may lie on the imaginary axis
+(the linearization does not decide). `stable(e)` is `unstable == 0`.
+"""
+struct Equilibrium
+    point::Giac.RealSolution
+    unstable::Union{Int, Nothing}
+end
+
+stable(e::Equilibrium) = e.unstable == 0
+
+function Base.show(io::IO, e::Equilibrium)
+    print(io, e.point, ": ", e.unstable === nothing ? "not decided by the linearization" :
+          e.unstable == 0 ? "stable" : string("unstable, ", e.unstable, e.unstable == 1 ? " eigenvalue" : " eigenvalues",
+                                              " in the right half-plane"))
+end
+Base.show(io::IO, ::MIME"text/plain", e::Equilibrium) = show(io, e)
+
+"""
+    equilibria(f, x; precision = 64)
+
+Every real equilibrium of `ẋ = f(x)` (polynomial, rational coefficients), each with its
+stability from the linearization: a vector of [`Equilibrium`](@ref)s. The equilibria are
+isolated exactly (msolve), and so are the values of the Hurwitz determinants of the Jacobian
+there, so the count of eigenvalues in the right half-plane (the sign changes of Routh's first
+column) is certain. Needs AlgebraicSolving.
+
+```julia
+using Giac, Giac.Control, AlgebraicSolving
+@giac_var x y
+equilibria([y, x - x^3 - y], [x, y])
+# (x ≈ -1.0, y ≈ 0.0): stable
+# (x ≈ 0.0, y ≈ 0.0): unstable, 1 eigenvalue in the right half-plane
+# (x ≈ 1.0, y ≈ 0.0): stable
+```
+"""
+function equilibria end
 
 end # module
