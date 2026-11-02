@@ -205,13 +205,19 @@ Giac._sos_certificate(P::QQMPolyRingElem; maxbasis = 120) = _sos(P, Giac.to_giac
 # The exponents of total degree lo..hi in n variables
 _monomials(n, lo, hi) = _Exp[collect(m) for m in Iterators.product(fill(0:hi, n)...) if lo <= sum(m) <= hi]
 
-function Giac.lyapunov(f, x; degree::Integer = 2, strict::Bool = true, ε = 1 // 1000, bits = 48)
-    iseven(degree) && degree >= 2 || throw(ArgumentError("lyapunov: degree must be even and at least 2"))
+# ẋ = f(x) as polynomials of a ring in the state variables, with the origin an equilibrium
+function _dynamics(f, x, name)
     n = length(x)
-    length(f) == n || throw(ArgumentError("lyapunov: one component of f per state variable"))
+    length(f) == n || throw(ArgumentError("$name: one component of f per state variable"))
     R, _ = polynomial_ring(QQ, Symbol.(string.(x)))
     F = [Giac.to_nemo(convert(GiacExpr, fi), R) for fi in f]
-    all(Fi -> iszero(constant_coefficient(Fi)), F) || throw(ArgumentError("lyapunov: the origin is not an equilibrium, f(0) ≠ 0"))
+    all(Fi -> iszero(constant_coefficient(Fi)), F) || throw(ArgumentError("$name: the origin is not an equilibrium, f(0) ≠ 0"))
+    return n, R, F
+end
+
+function Giac.lyapunov(f, x; degree::Integer = 2, strict::Bool = true, ε = 1 // 1000, bits = 48)
+    iseven(degree) && degree >= 2 || throw(ArgumentError("lyapunov: degree must be even and at least 2"))
+    n, R, F = _dynamics(f, x, "lyapunov")
     ε, δ = Rational{BigInt}(ε), strict ? Rational{BigInt}(ε) : zero(Rational{BigInt})
     monos = _monomials(n, 2, degree)
     unit(i) = [j == i ? 1 : 0 for j in 1:n]
@@ -265,6 +271,144 @@ function Giac.lyapunov(f, x; degree::Integer = 2, strict::Bool = true, ε = 1 //
         dec = _sos(-Vdot - QQ(δ) * sq, Giac.to_giac(-Vdot - QQ(δ) * sq); bits)
         dec === nothing && continue
         return Giac.LyapunovCertificate(Giac.to_giac(V), Giac.to_giac(Vdot), ε, δ, pos, dec)
+    end
+    return nothing
+end
+
+# ---------------------------------------------------------------------------------------------
+# Regions of attraction
+# ---------------------------------------------------------------------------------------------
+
+# A with f(x) = A x + higher terms
+function _linear_part(F, n)
+    A = zeros(Rational{BigInt}, n, n)
+    for i in 1:n, (c, e) in zip(coefficients(F[i]), exponent_vectors(F[i]))
+        sum(e) == 1 && (A[i, findfirst(==(1), e)] += Rational{BigInt}(c))
+    end
+    return A
+end
+
+# P with AᵀP + PA = −I, solved exactly; nothing unless it is positive definite
+function _lyapunov_matrix(A)
+    n = size(A, 1)
+    pairs = [(i, j) for i in 1:n for j in i:n]
+    idx = Dict(p => k for (k, p) in enumerate(pairs))
+    at(i, j) = idx[(min(i, j), max(i, j))]
+    M = zero_matrix(QQ, length(pairs), length(pairs))
+    b = zero_matrix(QQ, length(pairs), 1)
+    for (row, (i, j)) in enumerate(pairs)
+        for k in 1:n           # (AᵀP)[i, j] + (PA)[i, j]
+            M[row, at(k, j)] = M[row, at(k, j)] + QQ(A[k, i])
+            M[row, at(i, k)] = M[row, at(i, k)] + QQ(A[k, j])
+        end
+        b[row, 1] = i == j ? QQ(-1) : QQ(0)
+    end
+    ok, sol = can_solve_with_solution(M, b; side = :right)
+    ok || return nothing
+    P = [Rational{BigInt}(sol[at(i, j), 1]) for i in 1:n, j in 1:n]
+    f = _ldl(P)
+    return f !== nothing && length(first(f)) == n ? P : nothing
+end
+
+# nᵀ S n for an exactly positive semidefinite rational S, as a certificate; nothing if S is not
+function _gram_certificate(S, basis, R)
+    f = _ldl(S)
+    f === nothing && return nothing
+    D, L = f
+    squares = [_poly(R, [(l[j], basis[j]) for j in eachindex(basis)]) for l in L]
+    s = sum((QQ(d) * q^2 for (d, q) in zip(D, squares)); init = zero(R))
+    return s, Giac.SOSCertificate(Giac.to_giac(s), D, [Giac.to_giac(q) for q in squares])
+end
+
+# exponent => affine expression, for a polynomial whose coefficients are those of nᵀ S n
+function _gram_polynomial(S, basis)
+    p = Dict{_Exp, AffExpr}()
+    for a in eachindex(basis), b in a:length(basis)
+        α = basis[a] .+ basis[b]
+        p[α] = add_to_expression!(get(p, α, zero(AffExpr)), _weight(a, b), S[a, b])
+    end
+    return p
+end
+
+function Giac.region_of_attraction(f, x; V = nothing, multiplier_degree::Integer = 2, ε = 1 // 1000,
+                                   tolerance = 1 // 1000, bits = 48)
+    iseven(multiplier_degree) && multiplier_degree >= 2 ||
+        throw(ArgumentError("region_of_attraction: multiplier_degree must be even and at least 2"))
+    n, R, F = _dynamics(f, x, "region_of_attraction")
+    xs = gens(R)
+    if V === nothing
+        P = _lyapunov_matrix(_linear_part(F, n))
+        P === nothing && throw(ArgumentError("region_of_attraction: the linearization at the origin is not " *
+                                             "asymptotically stable; pass a V"))
+        Vp = sum(QQ(P[i, j]) * xs[i] * xs[j] for i in 1:n, j in 1:n)
+    else
+        Vp = Giac.to_nemo(convert(GiacExpr, V), R)
+        iszero(constant_coefficient(Vp)) || throw(ArgumentError("region_of_attraction: V(0) ≠ 0"))
+    end
+    ε = Rational{BigInt}(ε)
+    sq = sum(g^2 for g in xs)
+    pos = _sos(Vp - QQ(ε) * sq, Giac.to_giac(Vp - QQ(ε) * sq); bits)
+    pos === nothing && throw(ArgumentError("region_of_attraction: V − ε|x|² is not a sum of squares"))
+    Vdot = sum(Nemo.derivative(Vp, i) * F[i] for i in 1:n)
+
+    sbasis = _monomials(n, 1, multiplier_degree ÷ 2)
+    D = max(total_degree(Vdot), multiplier_degree + total_degree(Vp))
+    qbasis = _monomials(n, 1, cld(D, 2))
+    base = _coeffs(-Vdot - QQ(ε) * sq)
+    Vterms = [(Float64(c), collect(e)) for (c, e) in zip(coefficients(Vp), exponent_vectors(Vp))]
+
+    # a multiplier's Gram matrix for c, well inside the cone, or nothing
+    function multiplier(c)
+        model = _model()
+        Ns, Nq = length(sbasis), length(qbasis)
+        @variable(model, S[1:Ns, 1:Ns], Symmetric)
+        @variable(model, Q[1:Nq, 1:Nq], Symmetric)
+        @variable(model, t <= 1)
+        @constraint(model, S - t * I(Ns) in PSDCone())
+        @constraint(model, Q - t * I(Nq) in PSDCone())
+        @constraint(model, sum(S[a, a] for a in 1:Ns) <= 100)
+        s = _gram_polynomial(S, sbasis)
+        p = Dict{_Exp, AffExpr}(α => AffExpr(Float64(v)) for (α, v) in base)
+        for (α, e) in s                            # − s·c + s·V
+            p[α] = add_to_expression!(get(p, α, zero(AffExpr)), -Float64(c), e)
+            for (v, β) in Vterms
+                γ = α .+ β
+                p[γ] = add_to_expression!(get(p, γ, zero(AffExpr)), v, e)
+            end
+        end
+        _match!(model, Q, _classes(qbasis), p) || return nothing
+        @objective(model, Max, t)
+        optimize!(model)
+        is_solved_and_feasible(model; allow_almost = true) && value(t) > 1.0e-9 || return nothing
+        return value.(S)
+    end
+
+    # bisection on c, then the largest c tried that certifies exactly
+    lo, hi = 0.0, 1.0
+    while multiplier(hi) !== nothing
+        lo, hi = hi, 2hi
+        hi > 2.0^30 && break
+    end
+    lo == 0.0 && multiplier(hi / 1024) === nothing && return nothing
+    lo == 0.0 && (lo = hi / 1024)
+    while (hi - lo) > Float64(tolerance) * hi
+        mid = (lo + hi) / 2
+        multiplier(mid) === nothing ? (hi = mid) : (lo = mid)
+    end
+    for shrink in (1, 0.99, 0.9, 0.5)
+        c = rationalize(BigInt, lo * shrink; tol = Float64(tolerance) * lo / 10)
+        Sf = multiplier(Float64(c))
+        Sf === nothing && continue
+        for sbits in 8:8:bits
+            Sr = [rationalize(BigInt, Sf[a, b]; tol = 2.0^-sbits) for a in axes(Sf, 1), b in axes(Sf, 2)]
+            got = _gram_certificate(Sr, sbasis, R)
+            got === nothing && continue
+            s, scert = got
+            rest = -Vdot - QQ(ε) * sq - s * (QQ(c) - Vp)
+            dec = _sos(rest, Giac.to_giac(rest); bits)
+            dec === nothing && continue
+            return Giac.AttractionCertificate(Giac.to_giac(Vp), Giac.to_giac(Vdot), c, ε, pos, scert, dec)
+        end
     end
     return nothing
 end

@@ -114,6 +114,26 @@ L.positive, L.decreasing        # the two certificates
 `strict = false` asks only for `V̇ ≤ 0` (stability). A higher `degree` searches more
 functions.
 
+## Regions of attraction
+
+When the origin is only locally stable, `region_of_attraction(f, x)` finds a level `c` with the
+set `V ≤ c` inside its region of attraction: `−V̇ − ε|x|² − s·(c − V)` is a sum of squares for a
+sum-of-squares multiplier `s`, so `V` decreases throughout the set. `c` is found by bisection,
+and `V` defaults to the quadratic Lyapunov function of the linearization, `AᵀP + PA = −I` solved
+exactly.
+
+```julia
+@giac_var x
+region_of_attraction([-x + x^3], [x])
+# Region of attraction contains V ≤ 244/489 (≈ 0.49897750511247446):
+#   V  = x^2/2
+#   V̇  = x^4-x^2
+#   s  = 2*x^2, a sum of 1 square
+#   −V̇ − 1/1000|x|² − s·(c − V) is a sum of 1 square
+```
+
+The exact region is `|x| < 1`, `V < 1/2`.
+
 ## Stopping a long computation
 
 GIAC checks an interruption flag in its long loops. `Giac.with_timeout(f, seconds)` stops a GIAC
@@ -135,6 +155,8 @@ sos_decomposition
 Giac.SOSCertificate
 lyapunov
 Giac.LyapunovCertificate
+region_of_attraction
+Giac.AttractionCertificate
 Giac.with_timeout
 Giac.interrupt
 ```

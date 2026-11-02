@@ -22,10 +22,12 @@ function GiacExpr(c::SOSCertificate)
     return sum(convert(GiacExpr, w) * q^2 for (w, q) in zip(c.weights, c.squares))
 end
 
+_squares_text(n) = string(n, n == 1 ? " square" : " squares")
+
 _rational_text(w) = isone(denominator(w)) ? string(numerator(w)) : string(numerator(w), "/", denominator(w))
 
 function Base.show(io::IO, ::MIME"text/plain", c::SOSCertificate)
-    println(io, "Sum of squares, ", length(c.squares), length(c.squares) == 1 ? " square" : " squares", ":")
+    println(io, "Sum of squares, ", _squares_text(length(c.squares)), ":")
     print(io, "  ", c.polynomial, " =")
     isempty(c.squares) && print(io, " 0")
     for (i, (w, q)) in enumerate(zip(c.weights, c.squares))
@@ -83,11 +85,54 @@ function Base.show(io::IO, ::MIME"text/plain", c::LyapunovCertificate)
     println(io, "Lyapunov function, ", c.δ > 0 ? "global asymptotic stability" : "stability", ":")
     println(io, "  V  = ", c.V)
     println(io, "  V̇  = ", c.Vdot)
-    println(io, "  V − ", _rational_text(c.ε), "|x|² is a sum of ", length(c.positive.squares), " squares")
+    println(io, "  V − ", _rational_text(c.ε), "|x|² is a sum of ", _squares_text(length(c.positive.squares)))
     print(io, "  −V̇", c.δ > 0 ? string(" − ", _rational_text(c.δ), "|x|²") : "", " is a sum of ",
-          length(c.decreasing.squares), " squares")
+          _squares_text(length(c.decreasing.squares)))
 end
 Base.show(io::IO, c::LyapunovCertificate) = print(io, "LyapunovCertificate(V = ", c.V, ")")
+
+"""
+    AttractionCertificate
+
+From [`region_of_attraction`](@ref): the set `V ≤ c` lies in the region of attraction of the
+origin for `ẋ = f(x)`. `positive` proves `V − ε|x|² ≥ 0`; `multiplier` proves `s ≥ 0`; and
+`decreasing` proves `−V̇ − ε|x|² − s·(c − V) ≥ 0`, so `V̇ < 0` wherever `V ≤ c` and `x ≠ 0`.
+"""
+struct AttractionCertificate
+    V::GiacExpr
+    Vdot::GiacExpr
+    c::Rational{BigInt}
+    ε::Rational{BigInt}
+    positive::SOSCertificate
+    multiplier::SOSCertificate
+    decreasing::SOSCertificate
+end
+
+function Base.show(io::IO, ::MIME"text/plain", a::AttractionCertificate)
+    println(io, "Region of attraction contains V ≤ ", _rational_text(a.c), " (≈ ", Float64(a.c), "):")
+    println(io, "  V  = ", a.V)
+    println(io, "  V̇  = ", a.Vdot)
+    println(io, "  s  = ", GiacExpr(a.multiplier), ", a sum of ", _squares_text(length(a.multiplier.squares)))
+    print(io, "  −V̇ − ", _rational_text(a.ε), "|x|² − s·(c − V) is a sum of ", _squares_text(length(a.decreasing.squares)))
+end
+Base.show(io::IO, a::AttractionCertificate) = print(io, "AttractionCertificate(V ≤ ", _rational_text(a.c), ")")
+
+"""
+    region_of_attraction(f, x; V = nothing, multiplier_degree = 2, ε = 1//1000, tolerance = 1//1000)
+
+A set `V ≤ c` inside the region of attraction of the origin for `ẋ = f(x)`, with `c` as large as
+the search finds, certified exactly: an [`Giac.AttractionCertificate`](@ref), or `nothing`. `V`
+defaults to the quadratic Lyapunov function of the linearization, `xᵀPx` with
+`AᵀP + PA = −I` solved exactly. `c` is found by bisection to within `tolerance` (relative), each
+step a semidefinite program for a sum-of-squares multiplier `s` of degree `multiplier_degree`
+with `−V̇ − ε|x|² − s·(c − V)` a sum of squares. Needs JuMP, Clarabel and Nemo.
+
+```julia
+@giac_var x
+region_of_attraction([-x + x^3], [x])        # V = x²/2, c just under 1/2: |x| < 1
+```
+"""
+function region_of_attraction end
 
 """
     lyapunov(f, x; degree = 2, strict = true, ε = 1//1000)

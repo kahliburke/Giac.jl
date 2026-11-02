@@ -68,4 +68,21 @@ using JuMP, Clarabel
         @test_throws ArgumentError lyapunov([x₁ + 1, x₂], [x₁, x₂])
         @test_throws ArgumentError lyapunov([x₁, x₂], [x₁, x₂]; degree = 3)
     end
+
+    @testset "regions of attraction" begin
+        # ẋ = -x + x³ is attracted to 0 exactly for |x| < 1: V = x²/2 below 1/2
+        r = region_of_attraction([-x + x^3], [x])
+        @test r !== nothing && string(r.V) == "x^2/2"
+        @test 0.49 < r.c < 1 // 2
+        @test exact(r.positive) && exact(r.multiplier) && exact(r.decreasing)
+        s = GiacExpr(r.multiplier)
+        @test iszero(C.expand(r.decreasing.polynomial - (-r.Vdot - r.ε * x^2 - s * (r.c - r.V))))
+        @test occursin("Region of attraction contains", sprint(show, MIME"text/plain"(), r))
+        # reversed-time Van der Pol
+        vdp = region_of_attraction([-x₂, x₁ + (x₁^2 - 1) * x₂], [x₁, x₂])
+        @test vdp !== nothing && vdp.c > 0
+        @test exact(vdp.decreasing)
+        # an unstable linearization needs a V
+        @test_throws ArgumentError region_of_attraction([x], [x])
+    end
 end
