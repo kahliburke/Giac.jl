@@ -118,6 +118,7 @@ include("sos.jl")
 include("positivity.jl")
 include("decompose.jl")
 include("polynomial_systems.jl")
+include("signs.jl")
 include("trig_simplify.jl")
 include("exact_literals.jl")
 include("matrix_symbols.jl")
@@ -203,6 +204,7 @@ export solve
 # Conversion functions (extended by GiacSymbolicsExt, GiacMathJSONExt, GiacSymPyExt, and GiacNemoExt)
 export to_giac, to_symbolics, to_mathjson, to_sympy, to_nemo
 export positivity, decompose, certify, sos_decomposition, lyapunov, region_of_attraction
+export sign_of, simplify_signs
 
 # MCP server entry point (extended by GiacMCPExt when ModelContextProtocol is loaded)
 export giac_mcp_server

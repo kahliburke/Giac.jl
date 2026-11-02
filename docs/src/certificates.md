@@ -43,6 +43,30 @@ they contain and how often, and shows the largest. `Giac.group_terms(r.numerator
 groups them by their part in chosen variables. Mixed signs do not mean the expression changes
 sign: `x² − 2xy + y²` is not decided by coefficients, though it is a square.
 
+## Signs
+
+`sign_of(e)` decides the sign of any expression as far as it can: `:positive`, `:negative`,
+`:zero`, `:nonnegative`, `:nonpositive`, or `:unknown`. It reads what is known of the variables
+from their declarations (`@giac_var k::positive`), assumptions in force (`assuming(k > 0)`) and
+the `positive`/`negative` keywords; works through sums, products, powers and functions of known
+sign (`exp`, `abs`, `sqrt`, `ln`, ...); and otherwise hands the polynomial skeleton, each
+function call a variable of known sign, to `positivity`.
+
+```julia
+@giac_var x y k::positive
+sign_of(log(1 + k))                     # :positive
+sign_of(x^2 - 2x*y + y^2)               # :nonnegative, by a sum of squares
+sign_of(sin(x)^2 - 2sin(x) + 1)         # :nonnegative
+```
+
+`simplify_signs(e)` uses it to resolve `abs`, `sign`, `max` and `min`:
+
+```julia
+@giac_var a::positive b::positive
+simplify_signs(abs(a*b + 1))                # a*b+1
+simplify_signs(max(a^2 + b^2, 2a*b))        # a^2+b^2
+```
+
 ## Decompositions
 
 `decompose(target, blocks; degree, vars, param, products)` writes `target = Σ Mₖ Bₖ` with
@@ -147,6 +171,8 @@ positivity
 Giac.Positivity
 Giac.SignReport
 Giac.group_terms
+sign_of
+simplify_signs
 decompose
 Giac.Decomposition
 Giac.combination
