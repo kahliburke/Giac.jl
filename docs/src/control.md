@@ -81,9 +81,12 @@ equilibria([y, x - x^3 - y], [x, y])
 
 When the linearization leaves stability open (an eigenvalue on the imaginary axis), the dynamics
 on the center manifold decide it. `center_manifold(f, x; center, order)` finds the manifold
-`y = h(x)` order by order from the invariance equation, for a system whose linear part is in
-block form, and the reduced dynamics on it; with one center variable, the leading term's sign
-(decided by `sign_of`, so parameters of declared sign work) gives the verdict:
+`y = h(x)` order by order from the invariance equation, and the reduced dynamics on it; with one
+center variable, the leading term's sign (decided by `sign_of`, so parameters of declared sign
+work) gives the verdict. Without `center`, the coordinates are changed first, exactly, to separate
+the center directions (`ξ`) from the stable ones (`η`), and `coordinates` in the result gives the
+original states in them. With `center`, the system must already be in block form, and its
+coefficients may hold parameters.
 
 ```julia
 @giac_var x y
@@ -91,6 +94,13 @@ center_manifold([-x*y, -y + x^2], [x, y]; center = [x])
 # Center manifold to order 3:
 #   y = x^2
 #   dx/dt = -x^3
+#   the origin is asymptotically stable
+
+center_manifold([-x + y - x^3, x - y], [x, y])     # eigenvalues 0 and -2, coupled
+# Center manifold to order 3:
+#   in coordinates with x = η₁+ξ₁, y = -η₁+ξ₁
+#   η₁ = -1/4*ξ₁^3
+#   dξ₁/dt = -1/2*ξ₁^3
 #   the origin is asymptotically stable
 ```
 

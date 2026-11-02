@@ -260,7 +260,9 @@ function equilibria end
 
 From [`center_manifold`](@ref): the manifold `y = h(x)` as pairs `yⱼ => hⱼ(x)` up to the order
 asked, the `reduced` dynamics `ẋ` on it, and for a one-dimensional center the `stability` of
-the origin it implies: `:stable` (asymptotically), `:unstable`, or `:unknown`.
+the origin it implies: `:stable` (asymptotically), `:unstable`, or `:unknown`. When the
+coordinates were changed to separate the center and stable directions, `coordinates` gives each
+original state in the new ones (`xᵢ => …`), and `h` and `reduced` are in the new coordinates.
 """
 struct CenterManifold
     center::Vector{GiacExpr}
@@ -268,10 +270,12 @@ struct CenterManifold
     reduced::Vector{GiacExpr}
     order::Int
     stability::Symbol
+    coordinates::Vector{Pair{GiacExpr, GiacExpr}}
 end
 
 function Base.show(io::IO, ::MIME"text/plain", m::CenterManifold)
     println(io, "Center manifold to order ", m.order, ":")
+    isempty(m.coordinates) || println(io, "  in coordinates with ", join((string(x, " = ", e) for (x, e) in m.coordinates), ", "))
     for (y, h) in m.h
         println(io, "  ", y, " = ", h)
     end
@@ -302,12 +306,17 @@ _truncated(p, xs, order) =
     sum((c * _monomial(xs, α) for k in 0:order for (α, c) in _graded_terms(p, xs, k)); init = convert(GiacExpr, 0))
 
 """
-    center_manifold(f, x; center, order = 3)
+    center_manifold(f, x; center = nothing, order = 3)
 
 The center manifold of `ẋ = f(x)` at the origin, to order `order`, and the dynamics on it. `f`
-is polynomial (coefficients may hold parameters); `center` lists the variables of the center
-directions, and the others are the stable ones. The linear part must already be in block form,
-with no linear coupling between the two groups. The manifold `y = h(x)` is found order by order
+is polynomial. With `center`, the variables of the center directions, the others are the stable
+ones and the linear part must already be in block form, with no linear coupling between the two
+groups; the coefficients may then hold parameters. Without it, the coordinates are changed
+first: the linear part's characteristic polynomial is factored over the rationals into the
+factors with roots on the imaginary axis and the Hurwitz ones, and new variables `ξ` (center) and
+`η` (stable) are taken along the kernels of the two products, exactly; `coordinates` in the
+result gives `x` in them. The linear part's coefficients must then be numbers and it may have
+no eigenvalue in the right half-plane. The manifold `y = h(x)` is found order by order
 from the invariance equation, each order a linear system; a [`CenterManifold`](@ref) holds it,
 the reduced dynamics, and for one center variable the stability the leading term gives, its sign
 decided by [`sign_of`](@ref).
@@ -317,9 +326,12 @@ decided by [`sign_of`](@ref).
 m = center_manifold([x*y, -y + x^2], [x, y]; center = [x])
 m.h            # [y => x^2]
 m.reduced      # [x^3]: the origin is unstable
+
+center_manifold([-x + y - x^3, x - y], [x, y])  # coupled linear part: x = ξ₁ + η₁, y = ξ₁ - η₁
 ```
 """
-function center_manifold(f, x; center, order::Integer = 3)
+function center_manifold(f, x; center = nothing, order::Integer = 3)
+    center === nothing && return _center_manifold_by_blocks(f, x, order)
     F, X = _field(f), _field(x)
     C = _field(center)
     names = string.(X)
@@ -367,7 +379,86 @@ function center_manifold(f, x; center, order::Integer = 3)
     end
     reduced = [Commands.expand(_truncated(Commands.expand(on_manifold(F[i], H)), C, order)) for i in ci]
     stability = length(C) == 1 ? _leading_stability(reduced[1], C[1], order) : :unknown
-    return CenterManifold(C, [y => H[string(y)] for y in S], reduced, order, stability)
+    return CenterManifold(C, [y => H[string(y)] for y in S], reduced, order, stability, Pair{GiacExpr, GiacExpr}[])
+end
+
+# The coordinates x = T z that split the linear part into its center and stable blocks: the
+# kernels of the products of the characteristic polynomial's factors with roots on the imaginary
+# axis and of the Hurwitz ones. Then the reduction in z.
+function _center_manifold_by_blocks(f, x, order)
+    F, X = _field(f), _field(x)
+    n = length(X)
+    zero_at = [v => convert(GiacExpr, 0) for v in X]
+    A = GiacExpr[_simplified(substitute(Commands.diff(F[i], X[j]), zero_at...)) for i in 1:n, j in 1:n]
+    all(a -> Giac.to_julia(a) isa Number, A) ||
+        throw(ArgumentError("center_manifold: the linear part has parameters; pass `center` for a system in block form"))
+    s = Giac.giac_identifier("cm_s")
+    p = Commands.invoke_cmd(:charpoly, GiacMatrix(A), s)
+    fl = collect(Commands.invoke_cmd(:factors, p))
+    pc, ps = convert(GiacExpr, 1), convert(GiacExpr, 1)
+    for k in 1:2:length(fl)
+        q, m = fl[k], fl[k + 1]
+        Int(Giac.to_julia(Commands.invoke_cmd(:degree, q, s))) == 0 && continue
+        if hurwitz_stable(q, s) === :stable
+            ps *= q^m
+        elseif _roots_on_axis(q, s)
+            pc *= q^m
+        else
+            throw(ArgumentError("center_manifold: the linearization has an eigenvalue in the right half-plane " *
+                                "(a root of $q): the origin is unstable"))
+        end
+    end
+    isone(pc) && throw(ArgumentError("center_manifold: no eigenvalue on the imaginary axis; the linearization decides"))
+    Vc = _kernel(_matrix_polynomial(pc, A, s))
+    Vs = isone(ps) ? Vector{GiacExpr}[] : _kernel(_matrix_polynomial(ps, A, s))
+    length(Vc) + length(Vs) == n || throw(ArgumentError("center_manifold: the center and stable directions do not span the state space"))
+    # already in block form, up to the order of the variables: keep them
+    unit(v) = count(!iszero, v) == 1 && isone(v[findfirst(!iszero, v)])
+    all(unit, Vc) && all(unit, Vs) && return center_manifold(F, X; center = [X[findfirst(!iszero, v)] for v in Vc], order)
+    T = GiacExpr[v[i] for i in 1:n, v in vcat(Vc, Vs)]
+    Tinv = Giac._giac_inv(T)
+    ξ = [Giac.giac_identifier("ξ" * _subscript(k)) for k in eachindex(Vc)]
+    η = [Giac.giac_identifier("η" * _subscript(k)) for k in eachindex(Vs)]
+    Z = vcat(ξ, η)
+    xs = [Commands.expand(sum(T[i, j] * Z[j] for j in 1:n)) for i in 1:n]
+    G = [Commands.expand(e) for e in Tinv * [substitute(Fi, (X .=> xs)...) for Fi in F]]
+    m = center_manifold(G, Z; center = ξ, order)
+    return CenterManifold(m.center, m.h, m.reduced, m.order, m.stability, X .=> xs)
+end
+
+_subscript(k) = join(Char(0x2080 + d) for d in reverse(digits(k)))
+
+# p(A) for a polynomial p in s
+function _matrix_polynomial(p, A, s)
+    n = size(A, 1)
+    d = Int(Giac.to_julia(Commands.invoke_cmd(:degree, p, s)))
+    E = GiacExpr[i == j ? 1 : 0 for i in 1:n, j in 1:n]
+    P = zero(E)
+    for k in 0:d
+        P += Commands.invoke_cmd(:coeff, p, s, k) * E
+        E = E * A
+    end
+    return P
+end
+
+# a basis of the kernel of a square matrix, exactly, each vector's first nonzero entry positive
+function _kernel(M)
+    all(iszero, M) && return [GiacExpr[i == j ? 1 : 0 for i in 1:size(M, 1)] for j in 1:size(M, 2)]
+    basis = [collect(GiacExpr, collect(v)) for v in collect(Commands.invoke_cmd(:ker, GiacMatrix(M)))]
+    return [Giac.to_julia(v[findfirst(!iszero, v)]) < 0 ? -v : v for v in basis]
+end
+
+# whether every root of q lies on the imaginary axis: q(-s) = ±q(s), and numerically no real part
+function _roots_on_axis(q, s)
+    qm = substitute(q, s => -s)
+    (iszero(_simplified(qm - q)) || iszero(_simplified(qm + q))) || return false
+    d = Int(Giac.to_julia(Commands.invoke_cmd(:degree, q, s)))
+    c = [Float64(Giac.to_julia(Commands.invoke_cmd(:coeff, q, s, k))) for k in 0:d]
+    d == 1 && return iszero(c[1])
+    companion = zeros(d, d)
+    companion[2:end, 1:(end - 1)] .= Giac.LinearAlgebra.I(d - 1)
+    companion[:, end] .= -c[1:d] ./ c[end]
+    return all(r -> abs(real(r)) <= 1.0e-9 * max(1, abs(r)), Giac.LinearAlgebra.eigvals(companion))
 end
 
 # ẋ = a xᵐ + …: the lowest term that is not zero decides, asymptotically stable for odd m and

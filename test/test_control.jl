@@ -78,4 +78,26 @@ using Giac.Control
         @test_throws ArgumentError center_manifold([x + y, -y], [x, y]; center = [x])     # coupled
         @test_throws ArgumentError center_manifold([x * y, -y], [x, y]; center = [z])
     end
+
+    @testset "center manifolds in new coordinates" begin
+        @giac_var x y z μ
+        # already in block form: the same variables, without center
+        m = center_manifold([x * y, -y + x^2], [x, y])
+        @test isempty(m.coordinates) && string(only(m.center)) == "x" && same(last(only(m.h)), x^2)
+        @test string(only(center_manifold([-y + x^2, x * y], [y, x]).center)) == "x"
+        # a coupled linear part, eigenvalues 0 and -2: x = ξ + η, y = ξ - η
+        c = center_manifold([-x + y - x^3, x - y], [x, y])
+        @test length(c.coordinates) == 2 && c.stability == :stable
+        ξ = only(c.center)
+        @test same(only(c.reduced), -ξ^3 / 2)
+        # x + y = 2ξ on the manifold, and (x + y)' = -x³
+        @test same(substitute(last(c.coordinates[1]) + last(c.coordinates[2]), first(only(c.h)) => last(only(c.h))), 2ξ)
+        # a rotation and a stable direction: a two-dimensional center
+        r = center_manifold([y, -x - x^2 * y, -z + x^2], [x, y, z])
+        @test length(r.center) == 2 && r.stability == :unknown
+        @test occursin("in coordinates with", sprint(show, MIME"text/plain"(), c))
+        @test_throws ArgumentError center_manifold([y - x^3, -y + x], [x, y])     # a root in the right half-plane
+        @test_throws ArgumentError center_manifold([-x, -y], [x, y])              # nothing on the axis
+        @test_throws ArgumentError center_manifold([μ * x, -y], [x, y])           # parameters
+    end
 end
