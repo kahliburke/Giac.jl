@@ -41,4 +41,20 @@ using Giac.Control
         @test same(io.α, sin(θ)) && same(io.β, 1)
         @test_throws ArgumentError io_linearization(x₁, [0, 0], [0, 1], [x₁, x₂])
     end
+
+    @testset "Hurwitz stability" begin
+        @giac_var s k a q::positive
+        Δ = hurwitz_conditions(s^3 + 2s^2 + k * s + a, s)
+        @test same(Δ[1], 2) && same(Δ[2], 2k - a) && same(Δ[3], a * (2k - a))
+        @test hurwitz_stable(s^2 + q * s + 1, s) == :stable
+        @test hurwitz_stable(s^2 - s + 1, s) == :unstable
+        @test hurwitz_stable(s^2 + k * s + 1, s) == :unknown
+        @test hurwitz_stable(s^2 + k * s + 1, s; positive = [k]) == :stable
+        @test hurwitz_stable(s^3 + 2s^2 + q * s + q, s) == :stable        # Δ₂ = q, Δ₃ = q²
+        @test hurwitz_stable(-s^2 - 3s - 2, s) == :stable                 # a negative leading coefficient
+        # a matrix: its characteristic polynomial
+        @test hurwitz_stable(GiacExpr[0 1; -2 -3], s) == :stable
+        @test hurwitz_stable(GiacExpr[0 1; 2 -3], s) == :unstable
+        @test_throws ArgumentError hurwitz_conditions(convert(GiacExpr, 3), s)
+    end
 end

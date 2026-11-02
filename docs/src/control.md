@@ -45,6 +45,21 @@ io_linearization(θ, [ω, -sin(θ)], [0, 1], [θ, ω])
 # (r = 2, z = [θ, ω], α = sin(θ), β = 1)
 ```
 
+## Hurwitz stability
+
+`hurwitz_conditions(p, s)` gives the Hurwitz determinants of a polynomial, or of a matrix's
+characteristic polynomial; with a positive leading coefficient, all roots lie in the open left
+half-plane exactly when every one is positive. With parameters in the coefficients they describe
+the stable region. `hurwitz_stable` decides them with [`sign_of`](@ref), under the declared signs
+and assumptions:
+
+```julia
+@giac_var s k a q::positive
+hurwitz_conditions(s^3 + 2s^2 + k*s + a, s)     # [2, -a+2*k, a*(2*k-a)]
+hurwitz_stable(s^3 + 2s^2 + q*s + q, s)         # :stable
+hurwitz_stable(GiacExpr[0 1; -2 -3], s)         # :stable
+```
+
 For stability and regions of attraction, see `lyapunov` and `region_of_attraction` on the
 [exact certificates](certificates.md) page; for equilibria and how their number depends on
 parameters, [polynomial systems](polynomial_systems.md).
@@ -60,4 +75,6 @@ Giac.Control.accessibility_rank
 Giac.Control.involutive
 Giac.Control.relative_degree
 Giac.Control.io_linearization
+Giac.Control.hurwitz_conditions
+Giac.Control.hurwitz_stable
 ```

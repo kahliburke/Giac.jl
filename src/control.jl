@@ -16,9 +16,10 @@ lie_bracket(f, g, [x₁, x₂, x₃])
 module Control
 
 using ..Giac
-using ..Giac: GiacExpr, GiacMatrix, Commands, jacobian, substitute
+using ..Giac: GiacExpr, GiacMatrix, Commands, jacobian, substitute, sign_of
 
 export lie_derivative, lie_bracket, ad, accessibility_rank, involutive, relative_degree, io_linearization
+export hurwitz_conditions, hurwitz_stable
 
 _field(v) = GiacExpr[convert(GiacExpr, e) for e in v]
 _simplified(e::GiacExpr) = Commands.simplify(e)
@@ -148,6 +149,60 @@ function io_linearization(h, f, g, x)
     k = lie_derivative(last(z), g, x)
     Lr = lie_derivative(last(z), f, x)
     return (r = r, z = z, α = _simplified(-Lr / k), β = _simplified(1 / k))
+end
+
+# ---------------------------------------------------------------------------------------------
+# Hurwitz stability
+# ---------------------------------------------------------------------------------------------
+
+_polynomial(p, s) = p isa AbstractMatrix ? Commands.invoke_cmd(:charpoly, GiacMatrix(GiacExpr.(p)), s) : convert(GiacExpr, p)
+
+"""
+    hurwitz_conditions(p, s)
+
+The Hurwitz determinants `Δ₁, …, Δₙ` of the polynomial `p` in `s` (or of the characteristic
+polynomial of a square matrix `p`), simplified. With the leading coefficient positive, all roots
+of `p` lie in the open left half-plane exactly when every `Δₖ` is positive. The coefficients may
+hold parameters, so the conditions describe where the system is stable.
+
+```julia
+@giac_var s k a
+hurwitz_conditions(s^3 + 2s^2 + k*s + a, s)    # [2, 2*k-a, a*(2*k-a)]
+```
+"""
+function hurwitz_conditions(p, s)
+    P = _polynomial(p, s)
+    n = Int(Giac.to_julia(Commands.invoke_cmd(:degree, P, s)))
+    n >= 1 || throw(ArgumentError("hurwitz_conditions: the polynomial has no roots"))
+    a(k) = 0 <= k <= n ? Commands.invoke_cmd(:coeff, P, s, k) : convert(GiacExpr, 0)
+    H = GiacExpr[a(n - 2j + i) for i in 1:n, j in 1:n]
+    return [Commands.factor(Giac.LinearAlgebra.det(H[1:k, 1:k])) for k in 1:n]
+end
+
+"""
+    hurwitz_stable(p, s; positive = (), negative = ())
+
+Whether every root of the polynomial `p` in `s` (or every eigenvalue of a square matrix `p`)
+lies in the open left half-plane: `:stable`, `:unstable` (some root does not), or `:unknown`. The
+signs of the leading coefficient and of the [`hurwitz_conditions`](@ref) are decided by
+[`sign_of`](@ref), under the variables' declarations, the assumptions in force and the
+`positive` and `negative` hints.
+
+```julia
+@giac_var s k::positive
+hurwitz_stable(s^2 + k*s + 1, s)      # :stable
+```
+"""
+function hurwitz_stable(p, s; positive = (), negative = (), sos = true)
+    P = _polynomial(p, s)
+    n = Int(Giac.to_julia(Commands.invoke_cmd(:degree, P, s)))
+    lead = sign_of(Commands.invoke_cmd(:coeff, P, s, n); positive, negative, sos)
+    lead in (:positive, :negative) || return :unknown
+    lead === :negative && (P = -P)
+    signs = [sign_of(Δ; positive, negative, sos) for Δ in hurwitz_conditions(P, s)]
+    all(==(:positive), signs) && return :stable
+    any(in((:negative, :nonpositive, :zero)), signs) && return :unstable
+    return :unknown
 end
 
 end # module
