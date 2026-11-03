@@ -266,29 +266,38 @@ function _matrix_latex(A::AbstractVecOrMat; rowbreaks = (), colbreaks = ())
     M = A isa AbstractVector ? reshape(A, :, 1) : A
     nr, nc = size(M)
     entries = [_entry_latex(M[i, j]) for i in 1:nr, j in 1:nc]
-    # matrix cells are set at text size, which shrinks fractions; set them at display size, and
-    # pad each row with an invisible strut so the rows separate and the brackets, which TeX
-    # draws slightly short of their contents, still enclose them
+    # matrix cells are set at text size, which shrinks fractions; set them at display size
     tall = any(e -> occursin("\\frac", e), entries)
     tall && (entries = replace.(entries, "\\frac" => "\\dfrac"))
-    # a square root over powers raises its row too, though less than a display fraction
-    pad = tall ? _ROW_STRUT : any(e -> occursin("\\sqrt", e), entries) ? _ROOT_STRUT : ""
-    rows = [((i - 1) in rowbreaks ? "\\hline " : "") * pad * join(entries[i, :], " & ") for i in 1:nr]
+    # KaTeX spaces array rows by text-size heights, so a row holding a display fraction is given
+    # the fraction's height and depth by an invisible strut, and a row without one keeps its own.
+    # The first and last rows get more, since the brackets are drawn slightly short of their
+    # contents. A square root over powers raises its row too, though less than a fraction.
+    root = !tall && any(e -> occursin("\\sqrt", e), entries)
+    pad(i) = any(e -> occursin("\\dfrac", e), entries[i, :]) ? _frac_strut(i == 1, i == nr) :
+             root ? _ROOT_STRUT : ""
+    rows = [((i - 1) in rowbreaks ? "\\hline " : "") * pad(i) * join(entries[i, :], " & ") for i in 1:nr]
+    sep = tall ? " \\\\[0.15em] " : " \\\\ "
     # a column of plain numbers is right-aligned, so digits line up by place value and signs hang
     # to the left; a column with anything symbolic, or a fraction, stays centred
     numeric(j) = all(i -> _is_plain_number(M[i, j]) && !occursin("\\dfrac", entries[i, j]), 1:nr)
     align = [numeric(j) ? 'r' : 'c' for j in 1:nc]
     if all(==('c'), align) && isempty(rowbreaks) && isempty(colbreaks)
-        return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
+        return "\\begin{bmatrix}" * join(rows, sep) * "\\end{bmatrix}"
     end
     spec = join(string(align[j], j in colbreaks ? "|" : "") for j in 1:nc)
     # an `array` pads its outer edges by the column separation, which `bmatrix` drops
-    return "\\left[\\hspace{-5pt}\\begin{array}{$spec}" * join(rows, " \\\\ ") *
+    return "\\left[\\hspace{-5pt}\\begin{array}{$spec}" * join(rows, sep) *
            "\\end{array}\\hspace{-5pt}\\right]"
 end
 
-# the height and depth of a display fraction's row, so a row without one is spaced the same
-const _ROW_STRUT = "\\rule[-0.6em]{0pt}{1.9em}"
+# a display fraction's row: 1.7em above the baseline and 1.2em below, 0.35em more at an edge
+function _frac_strut(first::Bool, last::Bool)
+    depth = last ? 155 : 120
+    total = depth + (first ? 205 : 170)
+    em(x) = string(x ÷ 100, ".", lpad(x % 100, 2, '0'), "em")
+    return "\\rule[-$(em(depth))]{0pt}{$(em(total))}"
+end
 const _ROOT_STRUT = "\\rule[-0.7em]{0pt}{2.2em}"
 
 Base.show(io::IO, ::MIME"text/latex", A::AbstractVecOrMat{GiacExpr}) = print(io, "\$\$", giac_latex(A), "\$\$")

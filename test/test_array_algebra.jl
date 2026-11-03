@@ -204,9 +204,13 @@ end
     @test occursin("\\begin{array}{cr}", Giac.giac_latex([r1 1; -2 -3]))
     @test startswith(Giac.giac_latex([r1, -1]), "\\begin{bmatrix}")
     @test Giac._is_list(solve(k^2 ~ 4, k)) && !Giac._is_list(giac_eval("[1,2]"))
-    strut = "\\rule[-0.6em]{0pt}{1.9em}"
+    # a row with a fraction gets a strut, more at the matrix's edge; a row without one keeps its height
     @test Giac.giac_latex([1 / r1 0; 0 1]) ==
-          "\\left[\\hspace{-5pt}\\begin{array}{cr}$(strut)\\dfrac{1}{r_{1}} & 0 \\\\ $(strut)0 & 1\\end{array}\\hspace{-5pt}\\right]"
+          "\\left[\\hspace{-5pt}\\begin{array}{cr}\\rule[-1.20em]{0pt}{3.25em}\\dfrac{1}{r_{1}} & 0 \\\\[0.15em] 0 & 1\\end{array}\\hspace{-5pt}\\right]"
+    @test Giac.giac_latex([1 1; 1 / r1 0; 1 / r2 1]) ==
+          "\\left[\\hspace{-5pt}\\begin{array}{cr}1 & 1 \\\\[0.15em] \\rule[-1.20em]{0pt}{2.90em}\\dfrac{1}{r_{1}} & 0 " *
+          "\\\\[0.15em] \\rule[-1.55em]{0pt}{3.25em}\\dfrac{1}{r_{2}} & 1\\end{array}\\hspace{-5pt}\\right]"
+    @test occursin("\\rule[-1.55em]{0pt}{3.60em}", Giac.giac_latex(GiacExpr[1 // 2 1]))
     @test startswith(sprint(show, MIME("text/latex"), [r1 r2]), "\$\$\\begin{bmatrix}")
     # solve's lists are sets; points are column vectors
     @test Giac.giac_latex(solve([r1 * (1 - r1), r2] ~ 0, r)) ==
