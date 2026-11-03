@@ -195,14 +195,16 @@ end
     @test Giac.giac_latex(r) == "\\begin{bmatrix}r_{1} \\\\ r_{2}\\end{bmatrix}"
     @test Giac.giac_latex(r') == "\\begin{bmatrix}r_{1} & r_{2}\\end{bmatrix}"
     @test Giac.giac_latex(r1) == "r_{1}"
-    # a column of plain numbers is right-aligned; a column with anything symbolic stays centred
+    # a column of plain numbers is right-aligned; a column with anything symbolic, or a fraction,
+    # stays centred
     @test Giac.giac_latex(GiacExpr[2, -1]) ==
           "\\left[\\hspace{-5pt}\\begin{array}{r}2 \\\\ -1\\end{array}\\hspace{-5pt}\\right]"
-    @test occursin("\\begin{array}{r}", Giac.giac_latex(GiacExpr[1 // 2, -3]))
+    @test startswith(Giac.giac_latex(GiacExpr[1 // 2, -3]), "\\begin{bmatrix}")
+    @test occursin("\\begin{array}{cr}", Giac.giac_latex(GiacExpr[1859 // 250 1; 1 1]))
     @test occursin("\\begin{array}{cr}", Giac.giac_latex([r1 1; -2 -3]))
     @test startswith(Giac.giac_latex([r1, -1]), "\\begin{bmatrix}")
     @test Giac._is_list(solve(k^2 ~ 4, k)) && !Giac._is_list(giac_eval("[1,2]"))
-    strut = "\\rule[-1.4em]{0pt}{3.3em}"
+    strut = "\\rule[-0.6em]{0pt}{1.9em}"
     @test Giac.giac_latex([1 / r1 0; 0 1]) ==
           "\\left[\\hspace{-5pt}\\begin{array}{cr}$(strut)\\dfrac{1}{r_{1}} & 0 \\\\ $(strut)0 & 1\\end{array}\\hspace{-5pt}\\right]"
     @test startswith(sprint(show, MIME("text/latex"), [r1 r2]), "\$\$\\begin{bmatrix}")

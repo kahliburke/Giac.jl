@@ -275,8 +275,9 @@ function _matrix_latex(A::AbstractVecOrMat; rowbreaks = (), colbreaks = ())
     pad = tall ? _ROW_STRUT : any(e -> occursin("\\sqrt", e), entries) ? _ROOT_STRUT : ""
     rows = [((i - 1) in rowbreaks ? "\\hline " : "") * pad * join(entries[i, :], " & ") for i in 1:nr]
     # a column of plain numbers is right-aligned, so digits line up by place value and signs hang
-    # to the left; a column with anything symbolic stays centred
-    align = [all(i -> _is_plain_number(M[i, j]), 1:nr) ? 'r' : 'c' for j in 1:nc]
+    # to the left; a column with anything symbolic, or a fraction, stays centred
+    numeric(j) = all(i -> _is_plain_number(M[i, j]) && !occursin("\\dfrac", entries[i, j]), 1:nr)
+    align = [numeric(j) ? 'r' : 'c' for j in 1:nc]
     if all(==('c'), align) && isempty(rowbreaks) && isempty(colbreaks)
         return "\\begin{bmatrix}" * join(rows, " \\\\ ") * "\\end{bmatrix}"
     end
@@ -286,7 +287,8 @@ function _matrix_latex(A::AbstractVecOrMat; rowbreaks = (), colbreaks = ())
            "\\end{array}\\hspace{-5pt}\\right]"
 end
 
-const _ROW_STRUT = "\\rule[-1.4em]{0pt}{3.3em}"
+# the height and depth of a display fraction's row, so a row without one is spaced the same
+const _ROW_STRUT = "\\rule[-0.6em]{0pt}{1.9em}"
 const _ROOT_STRUT = "\\rule[-0.7em]{0pt}{2.2em}"
 
 Base.show(io::IO, ::MIME"text/latex", A::AbstractVecOrMat{GiacExpr}) = print(io, "\$\$", giac_latex(A), "\$\$")
