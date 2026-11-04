@@ -93,9 +93,11 @@ Base.:-(a::Number, b::GiacExpr) = convert(GiacExpr, a) - b
 Base.:*(a::GiacExpr, b::Number) = a * convert(GiacExpr, b)
 Base.:*(a::Number, b::GiacExpr) = convert(GiacExpr, a) * b
 
-# Division
+# Division, exact; `//` as well, as for Julia's rationals
 Base.:/(a::GiacExpr, b::Number) = a / convert(GiacExpr, b)
 Base.:/(a::Number, b::GiacExpr) = convert(GiacExpr, a) / b
+Base.://(a::GiacExpr, b::Union{GiacExpr, Integer, Rational}) = a / b
+Base.://(a::Union{Integer, Rational}, b::GiacExpr) = a / b
 
 # =============================================================================
 # Comparison Operators

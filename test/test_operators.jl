@@ -27,6 +27,9 @@
         @test string(2 * a) == "2*x"
         @test string(a / 2) == "x/2"
         @test string(2 / a) == "2/x"
+        # `//` divides exactly, as `/` does
+        @test string(a // 2) == "x/2" && string(3 // a) == "3/x"
+        @test string(a // (2 // 3)) == "3*x/2" && string(a // giac_eval("k")) == "x/k"
     end
 
     @testset "Comparison Operators" begin
