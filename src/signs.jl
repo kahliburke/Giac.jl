@@ -99,11 +99,29 @@ function _signs(n::CallNode, hints)
     return _S_ANY
 end
 
+# A constant that is not a plain number: with Nemo loaded, an algebraic one has an exact sign
+_is_algebraic_candidate(n::Node) = !(n isa NumNode) && all(==("pi"), _symbol_names(n))
+
+# `s` narrowed to the exact sign of `n` when `n` is an algebraic constant
+function _constant_signs(n::Node, s::_Signs)
+    (count(s) == 1 || !_is_algebraic_candidate(n) || isempty(methods(_algebraic_sign))) && return s
+    t = _algebraic_sign(n)
+    return t === nothing ? s : t
+end
+
 # The polynomial skeleton: each function call, fractional power and GIAC object replaced by a new
 # variable, recorded in `atoms`
 function _skeleton(n::Node, atoms)
     (n isa NumNode || n isa SymNode) && return n
-    n isa AddNode && return _add((_mul(NumNode(c), _skeleton(m, atoms)) for (m, c) in n.terms)...)
+    if n isa AddNode
+        # the constant terms together, one atom when they are not a plain number
+        isconst(m) = all(==("pi"), _symbol_names(m))
+        constant = [(m, c) for (m, c) in n.terms if isconst(m)]
+        rest = [_mul(NumNode(c), _skeleton(m, atoms)) for (m, c) in n.terms if !isconst(m)]
+        any(t -> !(first(t) isa NumNode), constant) ||
+            return _add((_mul(NumNode(c), _skeleton(m, atoms)) for (m, c) in n.terms)...)
+        return _add(_atom(_add((_mul(NumNode(c), m) for (m, c) in constant)...), atoms), rest...)
+    end
     if n isa MulNode
         parts = Node[NumNode(n.coef)]
         for (b, e) in n.factors
@@ -122,10 +140,13 @@ function _skeleton_signs(n::Node, hints, sos)
     isempty(methods(positivity)) && return nothing
     atoms = Dict{Node, SymNode}()
     sk = _skeleton(n, atoms)
-    signs = Dict{String, _Signs}(a.name => _signs(m, hints) for (m, a) in atoms)
+    signs = Dict{String, _Signs}(a.name => _constant_signs(m, _signs(m, hints)) for (m, a) in atoms)
     for name in _symbol_names(sk)
         haskey(signs, name) || (signs[name] = _variable_sign(name, hints))
     end
+    # the structure may decide it once a constant part is one atom of known sign
+    st = _signs(sk, copy(signs))
+    count(st) == 1 && return st
     positive = GiacExpr[]
     flips = Pair{GiacExpr, GiacExpr}[]
     weak = false
@@ -157,7 +178,7 @@ function _skeleton_signs(n::Node, hints, sos)
 end
 
 function _decided_signs(n::Node, hints, sos)
-    s = _signs(n, hints)
+    s = _constant_signs(n, _signs(n, hints))
     count(s) == 1 && return s
     (n isa AddNode || n isa MulNode) || return s
     t = _skeleton_signs(n, hints, sos)

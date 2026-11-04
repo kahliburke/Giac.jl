@@ -67,6 +67,42 @@ simplify_signs(abs(a*b + 1))                # a*b+1
 simplify_signs(max(a^2 + b^2, 2a*b))        # a^2+b^2
 ```
 
+## Algebraic numbers
+
+A constant built from rationals, `i`, `+ − × ÷`, rational powers, `sqrt`, `rootof`, `abs`, `re`,
+`im`, `conj`, and `cos`, `sin`, `tan` at rational multiples of `π` is an algebraic number. With
+Nemo loaded it is computed exactly in Nemo's field of algebraic numbers (Calcium), where equality
+and signs are decided without floating point. `sign_of` uses it for constants, and for the
+constant part of a sum:
+
+```julia
+using Giac, Nemo
+@giac_var x
+r(n) = sqrt(GiacExpr(n))
+sign_of(r(2) + r(3) - r(10))                        # :negative
+sign_of(giac_eval("cos(pi/7)") - 9//10)             # :positive
+sign_of(x^2 + r(2) - 1)                             # :positive
+```
+
+`Giac.minimal_polynomial(e, x)` gives the minimal polynomial over the rationals,
+`Giac.algebraic_roots(p, x)` the exact roots of a polynomial, including those that have no
+expression in radicals, and `Giac.simplify_algebraic(e)` rewrites the constants in an expression
+in a canonical form, which proves equal constants equal:
+
+```julia
+Giac.minimal_polynomial(giac_eval("cos(pi/7)"), x)              # 8*x^3-4*x^2-4*x+1
+Giac.simplify_algebraic(giac_eval("(2+sqrt(5))^(1/3)") * x)     # (1/2+sqrt(5)/2)*x
+Giac.simplify_algebraic(giac_eval("sqrt(2)*sqrt(3) - sqrt(6)")) # 0
+Giac.algebraic_roots(x^5 - x - 1, x)                            # one real root, two complex pairs
+```
+
+A number of degree 2 is written with a square root, and a root of `a·xⁿ + b` as a radical. Any
+other is a `rootof`. GIAC's `rootof` names the root of a polynomial with the largest real part,
+so another root `a` is written `P(β)`, with `β = q(a)` for a map `q`, such as `−(x − c)²` or
+`1/(x − c)`, that sends `a` alone to that root. In LaTeX a `rootof` is shown as the root of its
+own minimal polynomial near a decimal, with enough digits to tell it from the other roots:
+``\operatorname{root}_{\approx 0.347}\left(x^{3} - 3 x + 1\right)``.
+
 ## Decompositions
 
 `decompose(target, blocks; degree, vars, param, products)` writes `target = Σ Mₖ Bₖ` with
@@ -173,6 +209,9 @@ Giac.SignReport
 Giac.group_terms
 sign_of
 simplify_signs
+Giac.minimal_polynomial
+Giac.algebraic_roots
+Giac.simplify_algebraic
 decompose
 Giac.Decomposition
 Giac.Certified

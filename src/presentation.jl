@@ -264,6 +264,10 @@ function _pnode(e::GiacExpr)
     end
     h == "preval" && length(a) in (3, 4) && return _PBar(_pnode(a[1]), _pnode(a[2]), _pnode(a[3]))
     _is_held_call(_node(e)) && return _PHeld(Symbol(h), Tuple(a))       # lim, Σ, ℒ, … (held_cmd.jl)
+    if h == "rootof" && !isempty(methods(_rootof_tex))                 # with Nemo (algebraic.jl)
+        t = _rootof_tex(e)
+        t === nothing || return _PRaw(t)
+    end
     haskey(_CALL_TEX, h) && return _PCall(h, _PNode[_pnode(x) for x in a], false)
     return _PRaw(tidy_latex(_giac_tex(e)))
 end

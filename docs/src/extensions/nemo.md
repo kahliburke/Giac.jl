@@ -89,6 +89,20 @@ factor(p)
 
 `base = ZZ` gives integer coefficients, for factoring over the integers.
 
+## Algebraic numbers
+
+A constant built from rationals, `i`, roots, `rootof` and the trigonometric functions at rational
+multiples of `π` goes into Nemo's field of algebraic numbers, and comes back as a rational,
+`a + b√d`, a radical, or a `rootof`:
+
+```julia
+to_nemo(giac_eval("(2+sqrt(5))^(1/3)"), QQBar)        # {a2: 1.61803}
+to_nemo(giac_eval("cos(pi/7)"), QQBar)                # {a3: 0.900969}
+to_giac(roots(QQBar, x^3 - 3x + 1)[2])                # a rootof of x^3-3*x+1
+```
+
+See [Algebraic numbers](../certificates.md#Algebraic-numbers) for what is built on it.
+
 ## Round-trip fidelity
 
 Round trips are compared **by value**, never by `string`: Nemo polynomials are canonical (expanded, ring-sorted), so a Giac factored form `factor(x^2-1)` arrives in Nemo expanded as `x^2-1`, and the printed term order can differ. The variable **name** survives both crossings; the ordering does not.
@@ -105,7 +119,9 @@ end
 Both directions refuse everything that is not algebraic over the supported rings. Every refusal throws an `ErrorException` whose message names the supported set, so the caller learns the boundary from the error itself.
 
 **Inward (`to_nemo`)** refuses:
-- transcendental functions: `sin`, `cos`, `tan`, `exp`, `ln`, `sqrt`, `log10`, …
+- transcendental functions: `sin`, `cos`, `tan`, `exp`, `ln`, `sqrt`, `log10`, … (into `QQBar`,
+  the algebraic ones are accepted: `sqrt`, rational powers, and the trigonometric functions at
+  rational multiples of `π`)
 - the constants `pi` and `e` (transcendental, no element in an algebraic ring)
 - real and complex values (`DOUBLE`, `REAL`, `CPLX`) — see *Reals* below
 - a non-integer rational into `ZZ`
@@ -125,7 +141,7 @@ Neither direction may go through a printed decimal chosen by a printer: a Giac `
 - **Factored structure is not preserved** Giac → Nemo: `factor(x^2-1)` becomes `x^2-1` (expanded) in Nemo.
 - **`GF(p^n)` extension degree** is not auto-inferred: the caller must pass the `FqField`. A `GiacExpr` does not carry the extension degree.
 - **Number-field / finite-field embeddings** are one-way: a Nemo element reduced mod its defining polynomial loses the embedding information when round-tripped.
-- **Algebraic closure of QQ** (`algebraic_closure(QQ)` elements) and **Cauchy/real-complex balls** are refused (carry root indices / radii that Giac's flat `Gen` tree cannot faithfully represent).
+- **Cauchy/real-complex balls** are refused (they carry radii that Giac's `Gen` tree cannot represent).
 - **Compat:** the bridge depends on Nemo 0.56 API surfaces (`AbsSimpleNumFieldElem`, `FqFieldElem`, `Nemo._coeff`, `Nemo.coeff`, `coefficients`, `defining_polynomial`, `matrix_space`). Nemo has historically renamed types between minor versions; the compat covers `"0.56, 0.57"` and should be re-validated on bumps.
 
 ## API Reference

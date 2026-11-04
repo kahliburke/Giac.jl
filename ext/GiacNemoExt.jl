@@ -820,6 +820,389 @@ function _polynomial(R, terms)
     return finish(ctx)
 end
 
+# ===========================================================================
+# Algebraic numbers: constants in Nemo's field of algebraic numbers, and back
+# ===========================================================================
+#
+# A constant built from rationals, i, roots, rootof and the trigonometric functions at rational
+# multiples of π has an exact value in QQBar, where equality and signs are decided exactly. Back
+# in GIAC, a number of degree 2 is written with a square root and one of higher degree as a
+# `rootof`. GIAC's `rootof(P, Q)` is P at the root of Q with the largest real part, then the
+# largest imaginary part.
+
+import Nemo: QQBarField, QQBarFieldElem
+
+# A constant whose degree could exceed this (by a bound from its structure) is not computed:
+# QQBar's arithmetic grows quickly with the degree
+const _DEGREE_LIMIT = 512
+
+"""
+    to_nemo(e::GiacExpr, QQBar)
+
+The algebraic number `e` in Nemo's field of algebraic numbers (`QQBar`, or
+`algebraic_closure(QQ)`). See [`Giac.minimal_polynomial`](@ref) for the constants accepted.
+"""
+Giac.to_nemo(e::GiacExpr, K::QQBarField) = _algebraic(Giac._node(e), K)
+
+_not_algebraic(n) = error("to_nemo: $(Giac._str(n)) is not an algebraic number")
+
+_algebraic(n::Giac.NumNode, K) = _qqbar(K, n.v)
+_algebraic(n::Giac.SymNode, K) = _not_algebraic(n)
+_algebraic(n::Giac.GenNode, K) = _not_algebraic(n)
+function _algebraic(n::Giac.AddNode, K)
+    acc = zero(K)
+    for (m, c) in n.terms
+        acc += _qqbar(K, c) * _algebraic(m, K)
+    end
+    return acc
+end
+function _algebraic(n::Giac.MulNode, K)
+    acc = _qqbar(K, n.coef)
+    for (b, e) in n.factors
+        acc *= _rational_power(_algebraic(b, K), e)
+    end
+    return acc
+end
+function _algebraic(n::Giac.CallNode, K)
+    f, args = n.f, n.args
+    f == "rootof" && return _rootof_value(n, K)
+    if f == "surd" && length(args) == 2                  # the real root
+        a, k = _algebraic(args[1], K), _whole(args[2])
+        isreal(a) || _not_algebraic(n)
+        return isodd(k) && is_negative(a) ? -root(-a, k) : root(a, k)
+    end
+    length(args) == 1 || _not_algebraic(n)
+    if f in ("cos", "sin", "tan")
+        r = _pi_multiple(args[1])
+        r === nothing && _not_algebraic(n)
+        q = K(_qq(r))
+        return f == "cos" ? cospi(q) : f == "sin" ? sinpi(q) : tanpi(q)
+    elseif f == "exp"
+        r = _pi_multiple(args[1]; imaginary = true)
+        r === nothing && _not_algebraic(n)
+        return exp_pi_i(K(_qq(r)))
+    end
+    v = _algebraic(args[1], K)
+    f == "sqrt" && return sqrt(v)
+    f == "abs" && return abs(v)
+    f in ("re", "real") && return real(v)
+    f in ("im", "imag") && return imag(v)
+    f == "conj" && return conj(v)
+    _not_algebraic(n)
+end
+
+_qqbar(K, v::Union{Integer, Rational}) = K(_qq(v))
+_qqbar(K, v::Complex) = _qqbar(K, real(v)) + _qqbar(K, imag(v)) * K(im)
+_qqbar(K, v) = error("to_nemo: the number $v is not exact, so it has no algebraic value")
+
+function _whole(n)
+    (n isa Giac.NumNode && n.v isa Integer && n.v > 0) || error("to_nemo: $(Giac._str(n)) is not a positive whole number")
+    return Int(n.v)
+end
+
+# a^e for a rational e, on the principal branch: the principal root, to the numerator's power
+function _rational_power(a, e)
+    (e isa Giac.NumNode && e.v isa Union{Integer, Rational}) ||
+        error("to_nemo: the power $(Giac._str(e)) is not a rational number")
+    q = Rational{BigInt}(e.v)
+    r = isone(denominator(q)) ? a : root(a, Int(denominator(q)))
+    k = Int(numerator(q))
+    return k >= 0 ? r^k : inv(r)^(-k)
+end
+
+# r when n is r·π (or r·i·π with `imaginary`), r rational; nothing otherwise
+function _pi_multiple(n; imaginary = false)
+    n isa Giac.SymNode && n.name == "pi" && return imaginary ? nothing : 1
+    n isa Giac.MulNode && length(n.factors) == 1 || return nothing
+    (b, e) = only(n.factors)
+    (b isa Giac.SymNode && b.name == "pi" && isequal(e, Giac._ONE)) || return nothing
+    c = imaginary ? -im * n.coef : n.coef
+    return isreal(c) && real(c) isa Union{Integer, Rational} ? real(c) : nothing
+end
+
+# GIAC's rootof(P, Q): P at the root of Q with the largest real part, then imaginary part
+function _rootof_value(n::Giac.CallNode, K)
+    lists = length(n.args) == 1 ? _list(only(n.args)) : n.args
+    length(lists) == 2 || _not_algebraic(n)
+    P, Q = (_coefficients(l, n) for l in lists)
+    Qx, t = polynomial_ring(QQ, "t"; cached = false)
+    γ = _principal(roots(K, sum(c * t^(length(Q) - k) for (k, c) in enumerate(Q))))
+    return sum(K(c) * γ^(length(P) - k) for (k, c) in enumerate(P); init = zero(K))
+end
+
+_list(g::Giac.GenNode) = [Giac._node(x) for x in g.expr]
+_list(n) = error("to_nemo: $(Giac._str(n)) is not a list")
+_coefficients(l::Giac.Node, n) = _coefficients(_list(l), n)
+_coefficients(l::AbstractVector, n) =
+    [x isa Giac.NumNode && x.v isa Union{Integer, Rational} ? _qq(x.v) : _not_algebraic(n) for x in l]
+
+_principal(rs) = reduce((a, b) -> _before(a, b) ? b : a, rs)
+# whether b comes after a in GIAC's order: larger real part, then larger imaginary part
+function _before(a, b)
+    ra, rb = real(a), real(b)
+    ra == rb ? imag(a) < imag(b) : ra < rb
+end
+
+# A bound on the degree of a constant, from its structure; nothing when it is not one
+_degree_bound(n::Giac.NumNode) = n.v isa Complex && !iszero(imag(n.v)) ? 2 : 1
+_degree_bound(n::Giac.Node) = nothing
+function _degree_bound(n::Giac.AddNode)
+    d = 1
+    for (m, c) in n.terms
+        b = _degree_bound(m)
+        b === nothing && return nothing
+        d = min(d * b * (c isa Complex && !iszero(imag(c)) ? 2 : 1), typemax(Int) ÷ 1024)
+    end
+    return d
+end
+function _degree_bound(n::Giac.MulNode)
+    d = n.coef isa Complex && !iszero(imag(n.coef)) ? 2 : 1
+    for (b, e) in n.factors
+        db = _degree_bound(b)
+        (db === nothing || !(e isa Giac.NumNode && e.v isa Union{Integer, Rational})) && return nothing
+        d = min(d * db * Int(min(denominator(e.v), 1024)), typemax(Int) ÷ 1024)
+    end
+    return d
+end
+function _degree_bound(n::Giac.CallNode)
+    if n.f == "rootof"
+        lists = length(n.args) == 1 ? _list(only(n.args)) : n.args
+        return length(lists) == 2 && lists[2] isa Giac.GenNode ? length(lists[2].expr) - 1 : nothing
+    elseif n.f in ("cos", "sin", "tan", "exp") && length(n.args) == 1
+        r = _pi_multiple(only(n.args); imaginary = n.f == "exp")
+        return r === nothing ? nothing : 2 * Int(min(denominator(r), 1024))
+    elseif n.f == "surd" && length(n.args) == 2
+        b = _degree_bound(n.args[1])
+        k = n.args[2]
+        return b === nothing || !(k isa Giac.NumNode && k.v isa Integer) ? nothing : b * Int(min(k.v, 1024))
+    elseif n.f in ("sqrt", "abs", "re", "real", "im", "imag", "conj") && length(n.args) == 1
+        b = _degree_bound(only(n.args))
+        return b === nothing ? nothing : 2b * (n.f == "conj" ? 1 : 2)
+    end
+    return nothing
+end
+
+# the value of a constant node in QQBar, or nothing when it is not an algebraic number of
+# moderate degree
+function _maybe_algebraic(n::Giac.Node, K = Nemo.QQBar)
+    d = _degree_bound(n)
+    (d === nothing || d > _DEGREE_LIMIT) && return nothing
+    return try
+        _algebraic(n, K)
+    catch err
+        err isa Union{ErrorException, ArgumentError, DomainError, InexactError} || rethrow()
+        nothing
+    end
+end
+
+function Giac._algebraic_sign(n::Giac.Node)
+    v = _maybe_algebraic(n)
+    (v === nothing || !isreal(v)) && return nothing
+    return iszero(v) ? Giac._S_ZERO : is_positive(v) ? Giac._S_POS : Giac._S_NEG
+end
+
+"""
+    to_giac(a::QQBarFieldElem)
+
+An algebraic number as a `GiacExpr`: a rational, `a + b√d` for a number of degree 2, and otherwise
+a `rootof`.
+"""
+function Giac.to_giac(a::QQBarFieldElem)
+    is_rational(a) && return Giac.to_giac(QQFieldElem(a))
+    Zx, _ = polynomial_ring(ZZ, "x"; cached = false)
+    f = minpoly(Zx, a)
+    degree(f) == 2 && return _quadratic(a, f)
+    e = _radical(a, f)
+    e === nothing || return e
+    _principal(conjugates(a)) == a && return _rootof([QQ(0), QQ(1)], f)
+    e = _principal_rootof(a, f, Zx)
+    e === nothing || return e
+    isreal(a) && error("to_giac: no rootof form found for $a")
+    return Giac.to_giac(real(a)) + convert(GiacExpr, im) * Giac.to_giac(imag(a))
+end
+
+# GIAC's rootof names only the principal root of a polynomial, so another root a is written
+# P(β), β = q(a) for a map q under which a is the one conjugate sent to the principal root and
+# no two conjugates meet (β generates the same field). The maps tried are -x, ±(x - c)² and
+# ±1/(x - c), with c simple rationals near a; P comes from linear algebra in the number field.
+# The shortest result is kept; nothing if no map works.
+function _principal_rootof(a, f, Zx)
+    conj = conjugates(a)
+    i = findfirst(==(a), conj)
+    za = [ComplexF64(_approx(real(b)), _approx(imag(b))) for b in conj]
+    K, α = number_field(change_base_ring(QQ, f), "α"; cached = false)
+    best = nothing
+    for (k, s, c) in _maps(za, i)
+        # (dx - n)^k for c = n/d keeps an algebraic integer integral
+        d = Int(denominator(c))
+        q(z, c) = k == 0 ? s * inv(z - c) : s * (d * z - d * c)^k
+        _numeric_principal(q.(za, Float64(c))) == i || continue
+        βs = q.(conj, QQBarFieldElem(c))
+        _principal(βs) == βs[i] && allunique(βs) || continue
+        β = q(α, K(c))
+        P = _coordinates(α, β, degree(f))
+        P === nothing && continue
+        e = _rootof(P, minpoly(Zx, βs[i]))
+        (best === nothing || length(string(e)) < length(string(best))) && (best = e)
+    end
+    return best
+end
+
+# (power, sign, centre) for s(x - c)^k, k = 0 meaning s/(x - c): centres are 0 and simple
+# rationals ever closer to a's real part, on both sides
+function _maps(za, i)
+    a = za[i]
+    w = minimum(abs(a - b) for (j, b) in enumerate(za) if j != i)
+    cs = QQFieldElem[QQ(0)]
+    for d in (w / 2, w / 4, w / 8, w / 32, w / 128)
+        lo, hi = real(a) - d, real(a) - d / 4
+        push!(cs, _simplest(_rational_below(lo), _rational_above(hi)))
+        push!(cs, _simplest(_rational_below(real(a) + d / 4), _rational_above(real(a) + d)))
+    end
+    unique!(cs)
+    return [(k, s, c) for c in cs for k in (2, 0) for s in (-1, 1)] |> m -> vcat([(1, -1, QQ(0))], m)
+end
+
+# The index of the root with the largest real part, then imaginary part, in floating point;
+# nothing when two are too close to tell
+function _numeric_principal(zs)
+    order = sortperm(zs; by = z -> (real(z), imag(z)), rev = true)
+    length(zs) > 1 && isapprox(zs[order[1]], zs[order[2]]; rtol = 1e-9) && return nothing
+    return order[1]
+end
+
+# the coordinates of α in powers of β, a generator of the same field: α = Σ P[j] β^(j-1)
+function _coordinates(α, β, n)
+    M = zero_matrix(QQ, n, n)
+    p = one(parent(β))
+    for j in 1:n
+        for k in 1:n
+            M[k, j] = coeff(p, k - 1)
+        end
+        p *= β
+    end
+    v = matrix(QQ, n, 1, [coeff(α, k - 1) for k in 1:n])
+    ok, x = can_solve_with_solution(M, v; side = :right)
+    return ok ? [x[j, 1] for j in 1:n] : nothing
+end
+
+# a real algebraic number as a Float64; a rational at most 2^-m below one
+_approx(x) = Float64(_below(x, 60))
+_below(x, m) = QQFieldElem(floor(x * QQBarFieldElem(ZZ(2)^m))) // ZZ(2)^m
+_rational_below(x::Float64) = QQ(floor(BigInt, x * 2^20), ZZ(2)^20)
+_rational_above(x::Float64) = QQ(ceil(BigInt, x * 2^20), ZZ(2)^20)
+
+# the rational with the smallest denominator in [lo, hi], then the smallest in size
+function _simplest(lo::QQFieldElem, hi::QQFieldElem)
+    lo <= 0 <= hi && return QQ(0)
+    hi < 0 && return -_simplest(-hi, -lo)
+    n = floor(lo)
+    (n == lo || n + 1 <= hi) && return QQ(ceil(lo))
+    return n + inv(_simplest(inv(hi - n), inv(lo - n)))
+end
+
+# A root of a·xⁿ + b as a radical: the real root (b/a)^(1/n), times a root of unity of degree at
+# most 2 for the others; nothing for any other polynomial
+function _radical(a, f)
+    n = degree(f)
+    all(k -> iszero(coeff(f, k)), 1:(n - 1)) || return nothing
+    r = -QQ(coeff(f, 0)) // QQ(coeff(f, n))
+    ρ = root(QQBarFieldElem(abs(r)), n)
+    ζ = a // ρ
+    degree(ζ) <= 2 || return nothing
+    return Giac.to_giac(ζ) * convert(GiacExpr, Rational{BigInt}(abs(r)))^(1 // n)
+end
+
+function _quadratic(a, f)
+    c2, c1, c0 = (BigInt(coeff(f, k)) for k in 2:-1:0)
+    mid, Δ = -c1 // 2c2, c1^2 - 4c2 * c0
+    Δ < 0 && return convert(GiacExpr, mid) + (is_positive(imag(a)) ? 1 : -1) * sqrt(convert(GiacExpr, Δ)) / convert(GiacExpr, 2c2)
+    s = a > QQBarFieldElem(QQ(mid)) ? 1 : -1
+    return convert(GiacExpr, mid) + s * sqrt(convert(GiacExpr, Δ)) / convert(GiacExpr, 2c2)
+end
+
+# P(γ) for γ the principal root of the integer polynomial f, as `rootof`; P's coefficients from
+# the constant term up. GIAC takes a monic integer polynomial, so γ is scaled by f's leading
+# coefficient L (positive, which keeps it principal): Lγ is a root of L^(n-1) f(y/L)
+function _rootof(P, f)
+    n, L = degree(f), leading_coefficient(f)
+    Q = [coeff(f, k) * L^(n - 1 - k) for k in 0:(n - 1)]
+    P = [QQ(c) // QQ(L)^(j - 1) for (j, c) in enumerate(P)]
+    while length(P) > 1 && iszero(last(P))
+        pop!(P)
+    end
+    q(c) = isone(denominator(c)) ? string(numerator(c)) : string(numerator(c), "/", denominator(c))
+    return giac_eval("rootof([" * join(q.(reverse(P)), ",") * "],[1," * join(string.(reverse(Q)), ",") * "])")
+end
+
+function Giac.algebraic_roots(p, x)
+    p, x = convert(GiacExpr, p), convert(GiacExpr, x)
+    others = setdiff(Giac._symbol_names(Giac._node(p)), (string(x),))
+    isempty(others) || throw(ArgumentError("algebraic_roots: $p has variables other than $x: " * join(others, ", ")))
+    rs = roots(Nemo.QQBar, Giac.to_nemo(p, polynomial_ring(QQ, string(x); cached = false)[1]))
+    return GiacExpr[Giac.to_giac(r) for r in sort!(rs; lt = _root_order)]
+end
+
+# real roots first, in increasing order; then by real part, then imaginary part
+function _root_order(a, b)
+    isreal(a) != isreal(b) && return isreal(a)
+    real(a) == real(b) ? imag(a) < imag(b) : real(a) < real(b)
+end
+
+Giac.minimal_polynomial(e, x) =_polynomial_in(_minpoly(Giac.to_nemo(convert(GiacExpr, e), Nemo.QQBar)), x)
+
+_minpoly(v) = minpoly(polynomial_ring(ZZ, "x"; cached = false)[1], v)
+_polynomial_in(f, x) = sum(convert(GiacExpr, BigInt(coeff(f, k))) * convert(GiacExpr, x)^k for k in degree(f):-1:0)
+
+function Giac._rootof_tex(e::GiacExpr)
+    v = _maybe_algebraic(Giac._node(e))
+    (v === nothing || is_rational(v)) && return nothing
+    w = minimum(_approx(abs(v - b)) for b in conjugates(v) if b != v)
+    digits = max(3, ceil(Int, log10(4 / w)))
+    r, i = round(_approx(real(v)); digits), round(_approx(imag(v)); digits)
+    near = iszero(i) ? string(r) : (iszero(r) ? "" : string(r, i < 0 ? " - " : " + ")) * string(abs(i), " i")
+    p = Giac.giac_latex(_polynomial_in(_minpoly(v), Giac.giac_identifier("x")))
+    return "\\operatorname{root}_{\\approx " * near * "}\\left(" * p * "\\right)"
+end
+
+Giac.simplify_algebraic(e) = GiacExpr(_canonical(Giac._node(convert(GiacExpr, e))))
+
+# whether a node can only be a number: its one name, if any, is π
+_is_constant(n::Giac.Node) = all(==("pi"), Giac._symbol_names(n))
+
+_canonical(n::Union{Giac.NumNode, Giac.SymNode, Giac.GenNode}) = n
+function _canonical(n::Giac.Node)
+    if _is_constant(n)
+        v = _maybe_algebraic(n)
+        if v !== nothing
+            c = Giac._node(Giac.to_giac(v))
+            (c isa Giac.NumNode || length(Giac._str(c)) <= length(Giac._str(n))) && return c
+        end
+    end
+    return _rebuilt(n)
+end
+# the constant terms of a sum together, and the constant factors of a product; each part on its
+# own when the whole is constant
+function _rebuilt(n::Giac.AddNode)
+    constant = [(m, c) for (m, c) in n.terms if _is_constant(m)]
+    rest = [Giac._mul(Giac.NumNode(c), _canonical(m)) for (m, c) in n.terms if !_is_constant(m)]
+    isempty(rest) && return Giac._add((Giac._mul(Giac.NumNode(c), _canonical(m)) for (m, c) in n.terms)...)
+    isempty(constant) && return Giac._add(rest...)
+    # the constant part where its first term was
+    k = count(((m, c),) -> !_is_constant(m), n.terms[1:findfirst(((m, c),) -> _is_constant(m), n.terms)])
+    part = _canonical(Giac._add((Giac._mul(Giac.NumNode(c), m) for (m, c) in constant)...))
+    return Giac._add(rest[1:k]..., part, rest[(k + 1):end]...)
+end
+function _rebuilt(n::Giac.MulNode)
+    isconst((b, e)) = _is_constant(b) && _is_constant(e)
+    rest = [Giac._pow(_canonical(b), _canonical(e)) for (b, e) in n.factors if !isconst((b, e))]
+    isempty(rest) && return Giac._mul(Giac.NumNode(n.coef), (Giac._pow(_canonical(b), _canonical(e)) for (b, e) in n.factors)...)
+    constant = [Giac._pow(b, e) for (b, e) in n.factors if isconst((b, e))]
+    return Giac._mul(_canonical(Giac._mul(Giac.NumNode(n.coef), constant...)), rest...)
+end
+_rebuilt(n::Giac.CallNode) = Giac._call(n.f, Giac.Node[_canonical(a) for a in n.args])
+_rebuilt(n::Giac.Node) = n
+
 export to_giac, to_nemo
 
 end # module GiacNemoExt
