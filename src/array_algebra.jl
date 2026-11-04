@@ -115,6 +115,9 @@ Commands.solve(eqs::GiacMatrix, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix
 
 function _solve_for_matrix(eqs, X)
     unknowns = unique(string, filter(is_identifier, vec(X)))
+    # linear equations with rational-function coefficients and one solution: in Nemo
+    values = _exact(:linear, vec(eqs), unknowns)
+    values === nothing || return map(x -> get(values, string(x), x), X)
     # the same equation can come out with its terms in a different order: compare normal forms
     equations = unique(e -> string(Commands.normal(e)), vec(eqs))
     solutions = Commands.solve(equations, unknowns)
@@ -302,21 +305,38 @@ const _ROOT_STRUT = "\\rule[-0.7em]{0pt}{2.2em}"
 
 Base.show(io::IO, ::MIME"text/latex", A::AbstractVecOrMat{GiacExpr}) = print(io, "\$\$", giac_latex(A), "\$\$")
 
-LinearAlgebra.det(A::AbstractMatrix{GiacExpr}) = det(GiacMatrix(A))
+# With Nemo loaded, the determinant, inverse, rank and linear solves of a matrix whose entries are
+# rational functions of its variables are computed in Nemo (GiacNemoExt), much faster than in
+# GIAC for symbolic entries; the hook returns nothing for any other matrix, which GIAC handles.
+function _exact_matrix end
+_exact(op::Symbol, args...) = isempty(methods(_exact_matrix)) ? nothing : _exact_matrix(Val(op), args...)
+
+function LinearAlgebra.det(A::AbstractMatrix{GiacExpr})
+    d = _exact(:det, A)
+    return d === nothing ? det(GiacMatrix(A)) : d
+end
 
 # LinearAlgebra's dense `inv(::StridedMatrix)` outranks an `AbstractMatrix{GiacExpr}` method for
 # a plain `Matrix`, so both are defined.
-_giac_inv(A) = Matrix(inv(GiacMatrix(A)))
+function _giac_inv(A)
+    B = _exact(:inv, A)
+    return B === nothing ? Matrix(inv(GiacMatrix(A))) : B
+end
 Base.inv(A::AbstractMatrix{GiacExpr}) = _giac_inv(A)
 Base.inv(A::StridedMatrix{GiacExpr}) = _giac_inv(A)
 
 """
     A \\ b
 
-Solve `A x = b` for symbolic `A` (via Giac's inverse, entries simplified).
+Solve `A x = b` for symbolic `A`: in Nemo when it is loaded and the entries are rational
+functions, otherwise by GIAC's inverse with the entries simplified.
 """
-Base.:\(A::AbstractMatrix{GiacExpr}, b::AbstractVecOrMat) = Commands.simplify.(_giac_inv(A) * b)
-Base.:\(A::StridedMatrix{GiacExpr}, b::AbstractVecOrMat) = Commands.simplify.(_giac_inv(A) * b)
+Base.:\(A::AbstractMatrix{GiacExpr}, b::AbstractVecOrMat) = _giac_solve(A, b)
+Base.:\(A::StridedMatrix{GiacExpr}, b::AbstractVecOrMat) = _giac_solve(A, b)
+function _giac_solve(A, b)
+    x = _exact(:solve, A, b)
+    return x === nothing ? Commands.simplify.(_giac_inv(A) * b) : x
+end
 # ---------------------------------------------------------------------------------------------
 # Spectra, rank, null space and the matrix exponential, computed by Giac
 # ---------------------------------------------------------------------------------------------
@@ -362,7 +382,10 @@ function Base.show(io::IO, ::MIME"text/latex", E::Eigen{GiacExpr})
     print(io, "\$\$\\Lambda = ", giac_latex(Λ), ", \\quad V = ", giac_latex(E.vectors), "\$\$")
 end
 
-LinearAlgebra.rank(A::AbstractMatrix{GiacExpr}) = to_julia(Commands.invoke_cmd(:rank, GiacMatrix(A)))
+function LinearAlgebra.rank(A::AbstractMatrix{GiacExpr})
+    r = _exact(:rank, A)
+    return r === nothing ? to_julia(Commands.invoke_cmd(:rank, GiacMatrix(A))) : r
+end
 
 """
     nullspace(A::AbstractMatrix{GiacExpr}) -> Matrix{GiacExpr}

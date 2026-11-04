@@ -1203,6 +1203,116 @@ end
 _rebuilt(n::Giac.CallNode) = Giac._call(n.f, Giac.Node[_canonical(a) for a in n.args])
 _rebuilt(n::Giac.Node) = n
 
+# ===========================================================================
+# Matrix algebra over rational functions
+# ===========================================================================
+#
+# The determinant, inverse, rank and linear solves of a matrix whose entries are rational
+# functions of its variables, in Nemo. A method returns nothing when an entry is anything else
+# (a function call, a floating-point number, a root), and GIAC does the work instead.
+
+# the entries as one Nemo ring's elements: the polynomial ring in their variables, or its fraction
+# field with `field` or when an entry has a denominator; nothing if an entry is not a rational
+# function
+function _nemo_entries(es; field = false)
+    vals = try
+        Giac.to_nemo(GiacExpr[convert(GiacExpr, e) for e in es])
+    catch err
+        err isa ErrorException || rethrow()
+        return nothing
+    end
+    isempty(vals) && return nothing
+    F = parent(first(vals))
+    field && !(F isa FracField) && (F = fraction_field(F))
+    return F, [F(v) for v in vals]
+end
+
+function _nemo_matrix(A::AbstractMatrix; field = false)
+    r = _nemo_entries(vec(A); field)
+    r === nothing && return nothing
+    F, vals = r
+    return matrix(F, size(A, 1), size(A, 2), vec(permutedims(reshape(vals, size(A)))))
+end
+
+# a rational function with integer coefficients above and below, without a common factor: (b²+2)/(2b)
+function _back(x::FracElem)
+    N, D = numerator(x), denominator(x)
+    is_constant(D) && return Giac.to_giac(N * inv(constant_coefficient(D)))
+    cs = vcat(collect(coefficients(N)), collect(coefficients(D)))
+    s = reduce(lcm, (denominator(c) for c in cs)) // reduce(gcd, (numerator(c) for c in cs))
+    return Giac.to_giac(N * s) / Giac.to_giac(D * s)
+end
+_back(x) = Giac.to_giac(x)
+_back(M::MatElem) = GiacExpr[_back(M[i, j]) for i in 1:nrows(M), j in 1:ncols(M)]
+
+function Giac._exact_matrix(::Val{:det}, A)
+    size(A, 1) == size(A, 2) || return nothing
+    M = _nemo_matrix(A)
+    return M === nothing ? nothing : _back(det(M))
+end
+
+function Giac._exact_matrix(::Val{:inv}, A)
+    size(A, 1) == size(A, 2) || return nothing
+    M = _nemo_matrix(A; field = true)
+    (M === nothing || iszero(det(M))) && return nothing          # GIAC reports a singular one
+    return _back(inv(M))
+end
+
+function Giac._exact_matrix(::Val{:rank}, A)
+    M = _nemo_matrix(A; field = true)
+    return M === nothing ? nothing : rank(M)
+end
+
+function Giac._exact_matrix(::Val{:solve}, A, b)
+    size(A, 1) == size(A, 2) || return nothing
+    B = b isa AbstractVector ? reshape(b, :, 1) : b
+    r = _nemo_entries(vcat(vec(A), vec(B)); field = true)
+    r === nothing && return nothing
+    F, vals = r
+    n, m = size(A, 1), size(B, 2)
+    MA = matrix(F, n, n, vec(permutedims(reshape(vals[1:(n * n)], n, n))))
+    MB = matrix(F, n, m, vec(permutedims(reshape(vals[(n * n + 1):end], n, m))))
+    iszero(det(MA)) && return nothing
+    X = _back(Nemo.solve(MA, MB; side = :right))
+    return b isa AbstractVector ? vec(X) : X
+end
+
+# Equations linear in `unknowns`, with coefficients rational functions of the other variables,
+# solved exactly: the value of each unknown by name. Nothing when they are not linear or their
+# solution is not unique (GIAC then writes the family).
+function Giac._exact_matrix(::Val{:linear}, eqs, unknowns)
+    sides(e) = Giac.iscall(e) && Giac.symb_funcname(e) == "=" ? Giac.lhs(e) - Giac.rhs(e) : e
+    r = _nemo_entries([sides(convert(GiacExpr, e)) for e in eqs])
+    r === nothing && return nothing
+    F, vals = r
+    R = F isa FracField ? base_ring(F) : F
+    names = symbols(R)
+    ui = [findfirst(==(Symbol(string(u))), names) for u in unknowns]
+    any(isnothing, ui) && return nothing                      # an unknown in no equation
+    pk = [k for k in eachindex(names) if !(k in ui)]
+    Rp, ps = polynomial_ring(QQ, names[pk]; cached = false)
+    Fp = fraction_field(Rp)
+    rows, rhs = Vector{Vector{elem_type(Fp)}}(), elem_type(Fp)[]
+    for v in vals
+        N, D = v isa FracElem ? (numerator(v), denominator(v)) : (v, one(v))
+        any(k -> degree(D, k) > 0, ui) && return nothing      # an unknown in a denominator
+        row, c0 = [zero(Fp) for _ in ui], zero(Fp)
+        for (c, ev) in zip(coefficients(N), exponent_vectors(N))
+            sum(ev[ui]) > 1 && return nothing                 # not linear
+            mono = Fp(c * prod((ps[j]^ev[k] for (j, k) in enumerate(pk)); init = one(Rp)))
+            j = findfirst(k -> ev[k] == 1, ui)
+            j === nothing ? (c0 -= mono) : (row[j] += mono)
+        end
+        push!(rows, row)
+        push!(rhs, c0)
+    end
+    A = matrix(Fp, length(rows), length(ui), reduce(vcat, rows))
+    ok, x, K = can_solve_with_solution_and_kernel(A, matrix(Fp, length(rhs), 1, rhs); side = :right)
+    ok || throw(ArgumentError("the equations have no solution for $(join(string.(unknowns), ", "))"))
+    ncols(K) == 0 || return nothing
+    return Dict(string(u) => _back(x[k, 1]) for (k, u) in enumerate(unknowns))
+end
+
 export to_giac, to_nemo
 
 end # module GiacNemoExt

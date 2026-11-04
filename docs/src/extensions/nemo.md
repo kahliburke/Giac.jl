@@ -103,6 +103,22 @@ to_giac(roots(QQBar, x^3 - 3x + 1)[2])                # a rootof of x^3-3*x+1
 
 See [Algebraic numbers](../certificates.md#Algebraic-numbers) for what is built on it.
 
+## Matrix algebra
+
+With Nemo loaded, `det`, `inv`, `rank`, `A \ b`, and `solve` for a matrix unknown (a Lyapunov
+equation, say) are computed in Nemo when every entry is a rational function of the variables,
+which is much faster than GIAC for symbolic entries. A result comes back with integer
+coefficients above and below and no common factor, its terms in the variables' declared order.
+Any other matrix (one with `sin`, a root, or a floating-point entry) is left to GIAC, as is a
+singular one, and a linear system whose solution is not unique.
+
+```julia
+@giac_var k
+@giac_matrix P[2, 2] symmetric
+A = GiacExpr[-k -1; 1 0]
+solve(P * A + A' * P ~ -I, P)          # [1/k 1/2; 1/2 (k^2+2)/(2*k)]
+```
+
 ## Round-trip fidelity
 
 Round trips are compared **by value**, never by `string`: Nemo polynomials are canonical (expanded, ring-sorted), so a Giac factored form `factor(x^2-1)` arrives in Nemo expanded as `x^2-1`, and the printed term order can differ. The variable **name** survives both crossings; the ordering does not.
