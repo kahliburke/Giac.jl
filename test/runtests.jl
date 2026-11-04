@@ -232,6 +232,8 @@ using LinearAlgebra
     include("test_nemo_multivariate.jl")
     include("test_algebraic.jl")
     include("test_nemo_matrices.jl")
+    # Oscar is not a test dependency (it requires an older AlgebraicSolving); where it is installed
+    Base.find_package("Oscar") === nothing || include("test_oscar.jl")
     include("test_positivity.jl")
     include("test_decompose.jl")
     include("test_polynomial_systems.jl")

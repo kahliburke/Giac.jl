@@ -53,6 +53,7 @@ _pages = [
          "TermInterface.jl" => "extensions/terminterface.md",
          "LibPARI.jl" => "extensions/libpari.md",
          "Nemo.jl" => "extensions/nemo.md",
+         "Oscar.jl" => "extensions/oscar.md",
     ],
     "Developer Guide" => [
         "Overview" => "developer/index.md",

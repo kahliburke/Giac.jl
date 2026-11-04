@@ -67,7 +67,8 @@ import AlgebraicSolving
         @test AlgebraicSolving.dimension([x^2 + 1, x]) == -1
     end
 
-    @testset "real root classification" begin
+    # real_root_classification needs AlgebraicSolving 0.13 (an environment with Oscar has 0.10)
+    isdefined(AlgebraicSolving, :real_root_classification) && @testset "real root classification" begin
         @giac_var a b
         # the cusp: three equilibria inside 4a³ = 27b², one outside
         rc = AlgebraicSolving.real_root_classification([x^3 - a * x + b], [x]; params = [a, b])

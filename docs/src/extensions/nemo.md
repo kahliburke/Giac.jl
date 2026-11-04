@@ -4,9 +4,12 @@ Giac.jl provides a bidirectional bridge to [Nemo.jl](https://github.com/Nemocas/
 
 The bridge is implemented as a package extension (`GiacNemoExt`) that loads automatically when both `Giac` and `Nemo` are loaded.
 
-## Why Nemo (not Oscar)
+## Nemo and Oscar
 
-Oscar.jl builds on Nemo and adds groups, algebraic geometry, polyhedral geometry, etc. — domains with **no Giac analogue** (a `GiacExpr` cannot represent a permutation group or a scheme). The Nemo element types that matter for a Giac bridge (`ZZRingElem`, `QQFieldElem`, polynomials, finite-field and number-field elements, matrices) are exactly the ones Oscar re-exports from Nemo, so a Nemo bridge covers Oscar users too. Targeting Nemo keeps the install cheap (FLINT only) and CI-viable; Oscar pulls GAP + Singular + polymake and currently fails to precompile in some environments.
+The bridge targets Nemo: the element types that matter for it (`ZZRingElem`, `QQFieldElem`,
+polynomials, finite-field and number-field elements, matrices) are the ones Oscar re-exports from
+Nemo, so it serves Oscar's rings too, and Nemo installs with FLINT alone. Oscar adds the
+decomposition of polynomial ideals, through Singular; see [Oscar.jl](oscar.md).
 
 ## The two entry points
 
