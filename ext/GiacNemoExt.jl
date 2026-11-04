@@ -1258,6 +1258,19 @@ function Giac._exact_matrix(::Val{:inv}, A)
     return _back(inv(M))
 end
 
+# the eigenvalues of a matrix of rational numbers, as `algebraic_roots` gives them
+function Giac._exact_matrix(::Val{:eigvals}, A)
+    size(A, 1) == size(A, 2) || return nothing
+    n = size(A, 1)
+    entries = [convert(GiacExpr, A[i, j]) for i in 1:n for j in 1:n]
+    all(e -> isempty(Giac._symbol_names(Giac._node(e))) && Giac._node(e) isa Giac.NumNode, entries) || return nothing
+    values = [Giac._node(e).v for e in entries]
+    all(v -> v isa Union{Integer, Rational}, values) || return nothing
+    Q = matrix(QQ, n, n, [_qq(v) for v in values])
+    λ = [l for (l, m) in eigenvalues_with_multiplicities(Nemo.QQBar, Q) for _ in 1:m]
+    return GiacExpr[Giac.to_giac(l) for l in sort!(λ; lt = _root_order)]
+end
+
 function Giac._exact_matrix(::Val{:rank}, A)
     M = _nemo_matrix(A; field = true)
     return M === nothing ? nothing : rank(M)

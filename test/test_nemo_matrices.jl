@@ -14,6 +14,12 @@ using Nemo
     @giac_matrix P[2, 2] symmetric
     A = GiacExpr[-k -1; 1 0]
     @test string.(C.solve(P * A + A' * P ~ -I, P)) == ["1/k" "1/2"; "1/2" "(k^2+2)/(2*k)"]
+    # eigenvalues of a matrix of rationals: exact, real ones in increasing order
+    @test string.(eigvals(GiacExpr[0 1; -2 -3])) == ["-2", "-1"]
+    @test string.(eigvals(GiacExpr[0 1; -1 0])) == ["-i", "i"]
+    @test string.(eigvals(GiacExpr[0 1 0; 0 0 1; -1 3 0])) ==
+          ["rootof([-1,0],[1,0,-3,-1])", "rootof([-1,-3,0],[1,6,9,1])", "rootof([1,0],[1,0,-3,1])"]
+    @test length(eigvals(GiacExpr[0 1; -k -1])) == 2                        # symbolic: GIAC
     # entries that are not rational functions go to GIAC
     @test string(det(GiacExpr[sin(a) 1; 0 1])) == "sin(a)"
     @test iszero(C.simplify(det(GiacExpr[sqrt(a) 1; 1 sqrt(a)]) - (a - 1)))

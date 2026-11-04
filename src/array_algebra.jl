@@ -357,9 +357,16 @@ end
 """
     eigvals(A::AbstractMatrix{GiacExpr}) -> Vector{GiacExpr}
 
-Eigenvalues of a symbolic matrix, with repeats for repeated eigenvalues.
+Eigenvalues of a symbolic matrix, with repeats for repeated eigenvalues. With Nemo loaded, those
+of a matrix of rational numbers are exact algebraic numbers, as from
+[`Giac.algebraic_roots`](@ref) of the characteristic polynomial.
 """
-LinearAlgebra.eigvals(A::AbstractMatrix{GiacExpr}) = (J = _jordan(A)[2]; [J[i, i] for i in axes(J, 1)])
+function LinearAlgebra.eigvals(A::AbstractMatrix{GiacExpr})
+    λ = _exact(:eigvals, A)
+    λ === nothing || return λ
+    J = _jordan(A)[2]
+    return [J[i, i] for i in axes(J, 1)]
+end
 
 """
     eigen(A::AbstractMatrix{GiacExpr}) -> Eigen
