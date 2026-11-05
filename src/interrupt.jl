@@ -57,8 +57,9 @@ Base.showerror(io::IO, e::GiacTimeout) = print(io, "GiacTimeout: the GIAC comput
     Giac.with_timeout(f, seconds)
 
 Run `f()`, stopping a GIAC computation in it that is still running after `seconds`, with a
-[`GiacTimeout`](@ref). Only this task's calls are stopped. Needs Julia started with more than one
-thread (`julia -t 2`), as the timer runs beside the computation. With a wrapper older than the
+[`GiacTimeout`](@ref). Only this task's calls are stopped. Needs GIAC on a thread of its own, as
+the timer runs beside the computation: Julia started with more than one thread (`julia -t 2`), or
+DedicatedThreads loaded. With a wrapper older than the
 one running GIAC GC-safe, a pending garbage collection makes the stop wait for the computation.
 
 ```julia
@@ -68,7 +69,7 @@ end
 ```
 """
 function with_timeout(f, seconds::Real)
-    Threads.nthreads() > 1 || @warn "with_timeout needs Julia started with more than one thread; the computation runs without a limit" maxlog = 1
+    _giac_threaded() || @warn "with_timeout needs GIAC on a thread of its own (Julia started with more than one thread, or DedicatedThreads loaded); the computation runs without a limit" maxlog = 1
     # a deadline the cancel watcher compares with the clock: Julia's timers need its event loop,
     # which may not be run while every other thread is idle
     deadline = time() + seconds

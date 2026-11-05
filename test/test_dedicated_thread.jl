@@ -14,8 +14,15 @@
     @giac_var k::positive
     simplified = string(Giac.Commands.simplify(sqrt(k^2)))
     on_pool = Threads.threadid(Giac._GIAC_TASK[]) in DedicatedThreads.threadids(pool[])
-    print(simplified, " ", on_pool, " ", Threads.nthreads())
+    slow() = giac_eval("gbasis([x^7+y^6+z^5+w^3-1, x^5+y^7+z^6+w^4-1, x^6+y^5+z^7+w^5-1, x+y+z+w^2-2], [x,y,z,w], plex)")
+    stopped = try
+        Giac.with_timeout(slow, 1); false
+    catch e
+        e isa Giac.GiacTimeout
+    end
+    print(simplified, " ", on_pool, " ", stopped, " ", Threads.nthreads())
     """
     out = read(`$(Base.julia_cmd()) -t 1 --startup-file=no -e $script`, String)
-    @test out == "k true 1"          # an assumption holds, on the pool's thread, beside one thread
+    # an assumption holds, on the pool's thread, and a timeout stops GIAC, beside one thread
+    @test out == "k true true 1"
 end
