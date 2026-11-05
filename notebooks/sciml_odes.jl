@@ -508,6 +508,43 @@ let fig = Figure(size = (900, 360))
     fig
 end
 
+#%% md id=exact_md
+@md raw"""
+## Exact solutions of linear models
+
+A model affine in its states, $\dot x = A x + b$ with $A$ and $b$ constant in time, has the exact solution $\begin{bmatrix} x \\ 1 \end{bmatrix} = e^{t \left[\begin{smallmatrix} A & b \\ 0 & 0 \end{smallmatrix}\right]} \begin{bmatrix} x_0 \\ 1 \end{bmatrix}$. With `analytic = true`, Giac checks that the model is affine, compiles the exact $A$ and $b$, and attaches the solution. SciML then reports each solution's error against it in `sol.errors`. The matrix exponential is computed numerically, so the solution holds at every parameter value, including a repeated eigenvalue, where the closed form in the parameters is singular.
+
+Initial values may be written in the parameters: here the oscillator starts at rest at twice its equilibrium deflection $f/k$. Below, the error of two solvers is measured against the requested tolerance.
+"""
+
+#%% code id=exact
+@giac_var kf cf ff
+oscillator_lin = [x2, -kf * x1 - cf * x2 + ff]
+lprob = ODEProblem(oscillator_lin, [x1 => 2ff / kf, x2 => 0], (0, 20), [kf => 4, cf => 0.3, ff => 1]; analytic = true)
+tols = 10.0 .^ (-3:-1:-12)
+final_error(alg, tol) = solve(lprob, alg; abstol = tol, reltol = tol).errors[:final]
+lerrors = Dict(name => [final_error(alg, tol) for tol in tols] for (name, alg) in (("Tsit5", Tsit5()), ("Rodas5P", Rodas5P())))
+@examples begin
+    "the start, from the parameters: twice the equilibrium deflection f/k"
+    lprob.u0
+    "the errors of one solve, against the exact solution"
+    solve(lprob, Tsit5(); abstol = 1e-8, reltol = 1e-8).errors
+    "critically damped (c² = 4k) from x₁ = 1 at rest: (1 + 2t) e^{−2t}, its difference at t = 1.5"
+    lprob.f.analytic([1.0, 0.0], [4.0, 4.0, 0.0], 1.5)[1] - 4exp(-3)
+end
+
+#%% code id=exact_plot
+let fig = Figure(size = (900, 380))
+    ax = Axis(fig[1, 1]; xscale = log10, yscale = log10, xlabel = "tolerance", ylabel = "error at t = 20",
+              title = "error against the exact solution", xreversed = true)
+    lines!(ax, tols, tols; color = :gray50, linestyle = :dash, label = "error = tolerance")
+    for (name, col) in (("Tsit5", :orange), ("Rodas5P", :deepskyblue))
+        scatterlines!(ax, tols, lerrors[name]; color = col, label = name)
+    end
+    axislegend(ax; position = :rt)
+    fig
+end
+
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
 #   BenchmarkTools 1.8.0 6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf
 #   CairoMakie 0.15.17 13f3f980-e62b-5c42-98c6-ff1f3baf88f0
