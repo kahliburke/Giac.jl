@@ -123,8 +123,8 @@ _text_row(s::AbstractString) = ("", "\\text{" * replace(s, "&" => "\\&", "%" => 
 Base.show(io::IO, d::Derivation) = print(io, "Derivation with $(length(d.rows)) step(s)")
 
 # Julia syntax → Giac syntax for typesetting a written expression unevaluated.
-const _GIAC_NAMES = Dict(:∇ => :grad, :⋅ => :dot, :tr => :trace, :jacobian => :diff, :inv => :inv, :integral => :integrate,
-                         :real => :re, :imag => :im)
+const _GIAC_NAMES = Dict(:∇ => :grad, :⋅ => :dot, :× => :cross, :⊗ => :kron, :tr => :trace, :jacobian => :diff,
+                         :inv => :inv, :integral => :integrate, :real => :re, :imag => :im)
 
 _to_giac_syntax(x) = x
 _to_giac_syntax(s::Symbol) = s === :im ? :i : Symbol(replace(string(s), GIAC_RESERVED_LETTERS...))   # Julia's im is GIAC's i

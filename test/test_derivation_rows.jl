@@ -116,6 +116,19 @@
         @test p[3].segment == 2
     end
 
+    @testset "products written between their operands" begin
+        W = Giac.written_latex
+        @test W(:(σ_a ⊗ σ_b)) == "\\sigma_{a} \\otimes \\sigma_{b}"
+        @test W(:(kron(σ_a, σ_b))) == "\\sigma_{a} \\otimes \\sigma_{b}"
+        @test W(:(A ⊗ B ⊗ C)) == "A \\otimes B \\otimes C"                 # associative: no parentheses
+        @test W(:(u × (v × w))) == "u \\times \\left(v \\times w\\right)"   # Julia's × is the cross product
+        @test W(:(σ_a ⋅ σ_b)) == "\\sigma_{a} \\cdot \\sigma_{b}"
+        @test W(:(dot(a + b, c))) == "\\left(a + b\\right) \\cdot c"
+        @test W(:(ψ' * kron(σ_a, σ_b) * ψ)) == "\\psi^{\\mathsf{T}} \\left(\\sigma_{a} \\otimes \\sigma_{b}\\right) \\psi"
+        @test W(:((A ⊗ B)^2)) == "\\left(A \\otimes B\\right)^{2}"
+        @test W(:(braket(ψ, σ_a ⊗ σ_b, ψ))) == "\\langle \\psi \\vert \\sigma_{a} \\otimes \\sigma_{b} \\vert \\psi \\rangle"
+    end
+
     @testset "conditions in brackets, and tags" begin
         imp = Giac._implication(Giac._rejoin_conditions(:(k ~ 0 => k ~ n where [n::integer, n::nonzero])))
         @test Giac._conditions(imp[2])[2] == Any[:(n::integer), :(n::nonzero)]

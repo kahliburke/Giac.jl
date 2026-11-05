@@ -156,6 +156,14 @@ struct _PBraKet <: _PNode; kind::String; args::Vector{_PNode}; end
 struct _PBar <: _PNode; f::_PNode; lower::_PNode; upper::Union{Nothing, _PNode}; end
 # items separated by commas, as the equations under an evaluation bar: f|_{a = 1, b = 2}
 struct _PList <: _PNode; items::Vector{_PNode}; end
+# a product written between its operands: u ⋅ v, u × v, A ⊗ B
+struct _PInfix <: _PNode; op::String; args::Vector{_PNode}; end
+
+# The products of `dot`, `cross` and `kron`, by the name the call has, written between their
+# operands. `kron` is no GIAC command, so a written `kron(A, B)` arrives as `of(kron, A, B)`.
+const _INFIX_TEX = Dict("dot" => "\\cdot", "cross" => "\\times", "kron" => "\\otimes")
+# the ones where (A ⊗ B) ⊗ C = A ⊗ (B ⊗ C), written without parentheses
+const _ASSOCIATIVE = ("kron",)
 
 # the equations of a substitution, `x = a` or a list `[x = a, y = b]`, or nothing
 function _equations(x::GiacExpr)
@@ -256,6 +264,10 @@ function _pnode(e::GiacExpr)
     if h == "of" && is_identifier(a[1]) && string(a[1]) in ("braket", "bra", "ket")
         return _PBraKet(string(a[1]), _PNode[_pnode(x) for x in a[2:end]])    # ⟨m|n⟩, ⟨m|, |n⟩
     end
+    if h == "of" && is_identifier(a[1]) && haskey(_INFIX_TEX, string(a[1])) && length(a) >= 3
+        return _PInfix(string(a[1]), _PNode[_pnode(x) for x in a[2:end]])
+    end
+    haskey(_INFIX_TEX, h) && length(a) == 2 && return _PInfix(h, _PNode[_pnode(x) for x in a])
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
     if h == "subst" && length(a) == 2 && (eqs = _equations(a[2])) !== nothing
@@ -656,7 +668,7 @@ function _factors_tex(k, fs, c::_Ctx)
     parts = String[]
     (isempty(fs) || !isone(k)) && push!(parts, _number_tex(k))
     for f in fs
-        t = f isa _PSum || f isa _PEq ? "\\left(" * _tex(f, c) * "\\right)" : _tex(f, c)
+        t = f isa _PSum || f isa _PEq || f isa _PInfix ? "\\left(" * _tex(f, c) * "\\right)" : _tex(f, c)
         # a number next to a number, or before a fraction, is written with a dot
         !isempty(parts) && occursin(r"^[\d.]+$", parts[end]) && occursin(r"^(\d|\\frac)", t) && (t = "\\cdot " * t)
         push!(parts, t)
@@ -665,7 +677,7 @@ function _factors_tex(k, fs, c::_Ctx)
 end
 
 # a base that needs parentheses under a power
-_needs_parens(b::_PNode) = b isa _PSum || b isa _PEq || (b isa _PProd) || (b isa _PPow) ||
+_needs_parens(b::_PNode) = b isa _PSum || b isa _PEq || (b isa _PProd) || (b isa _PPow) || (b isa _PInfix) ||
                            (b isa _PNum && (b.v < 0 || !(b.v isa Integer))) || (b isa _PCall && !b.user && b.f != "abs")
 
 function _power_tex(n::_PPow, c::_Ctx)
@@ -795,6 +807,15 @@ function _label_tex(a::_PNode, c::_Ctx)
 end
 
 _tex(n::_PList, c::_Ctx) = join((_tex(x, c) for x in n.items), ", ")
+
+# A ⊗ B ⊗ C, (a + b) ⋅ c, u × (v × w): an operand is parenthesized when it is a sum or an
+# equation, or a different product written between operands, or the same one unless it associates
+function _tex(n::_PInfix, c::_Ctx)
+    grouped(a) = a isa _PSum || a isa _PEq || (a isa _PNum && a.v < 0) ||
+                 (a isa _PInfix && !(a.op == n.op && n.op in _ASSOCIATIVE))
+    operand(a) = grouped(a) ? "\\left(" * _tex(a, c) * "\\right)" : _tex(a, c)
+    return join((operand(a) for a in n.args), " " * _INFIX_TEX[n.op] * " ")
+end
 
 function _tex(n::_PBar, c::_Ctx)
     f = n.f isa _PSum ? "\\left(" * _tex(n.f, c) * "\\right)" : _tex(n.f, c)
