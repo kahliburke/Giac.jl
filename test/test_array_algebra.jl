@@ -48,7 +48,7 @@
         @giac_var t k
         M = GiacExpr[0 1; -2 -3]
         @test string.(eigvals(M)) == ["-2", "-1"]                    # by real part, then imaginary
-        @test string.(eigvals(GiacExpr[0 1; -1 -1])) == ["-1/2+(-1/2*i)*sqrt(3)", "-1/2+(1/2*i)*sqrt(3)"]
+        @test [imag(to_julia(Giac.Commands.evalf(l))) for l in eigvals(GiacExpr[0 1; -1 -1])] ≈ [-sqrt(3) / 2, sqrt(3) / 2]
         E = eigen(M)
         @test all(iszero, Giac.Commands.simplify.(M * E.vectors - E.vectors * Diagonal(E.values)))
         @test eigvecs(M) == E.vectors

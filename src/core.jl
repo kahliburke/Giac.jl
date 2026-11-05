@@ -801,7 +801,12 @@ function _program!(io, n::NumNode, opaque)
     return io
 end
 
-_program!(io, n::SymNode, opaque) = (_put!(io, n.name in _GIAC_NAMED_VALUES ? 0x0a : 0x04); _put_str!(io, n.name); io)
+# a variable goes in as the session's identifier for its name (see `_identifier_gen`)
+function _program!(io, n::SymNode, opaque)
+    n.name in _GIAC_NAMED_VALUES || return (_put_opaque!(io, _identifier_gen(n.name), opaque); io)
+    _put!(io, 0x0a); _put_str!(io, n.name)
+    return io
+end
 _program!(io, n::GenNode, opaque) = (_put_opaque!(io, _get_gen(n.expr.ptr), opaque); io)
 
 function _program!(io, n::AddNode, opaque)
