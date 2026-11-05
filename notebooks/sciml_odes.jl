@@ -18,7 +18,7 @@ The states and parameters are the variables of the assignments `u0` and `p`, wri
 
 #%% code id=setup
 using Giac, GiacSlate, LinearAlgebra
-using SciMLBase, OrdinaryDiffEqTsit5, OrdinaryDiffEqRosenbrock, NonlinearSolve, SparseArrays
+using SciMLBase, OrdinaryDiffEqTsit5, OrdinaryDiffEqRosenbrock, StochasticDiffEq, NonlinearSolve, SparseArrays
 using CairoMakie, BenchmarkTools
 set_theme!(theme_dark())
 const C = Giac.Commands
@@ -345,6 +345,96 @@ let ts = range(0, 8; length = 1500)
     fig
 end
 
+#%% md id=noise_md
+@md raw"""
+## Noise
+
+`SDEProblem(F, G, u0, tspan, p)` is the stochastic model $ds = F\,dt + G\,dW$, built from the same drift: equations, inputs and events work as for an `ODEProblem`. The noise $G$ is compiled with the drift. A vector gives a separate noise on each state. A matrix gives a column for each noise process.
+
+Below, the push becomes a random force on the cart, $u = -Ks + \sigma_w \dot W$. A force enters the first-order system along $\partial F/\partial u$, which Giac differentiates exactly from the solved equations, so $G = \sigma_w\,\partial F/\partial u$ is a single column that depends on $\theta$. The same feedback holds the pole up through the noise.
+"""
+
+#%% code id=noise
+@giac_var σw
+cart_ps = [M => 1, m => 0.2, ℓ => 0.5, g => 9.81, σw => 0.4]
+sprob = SDEProblem(cartpole, σw .* jacobian(fo.rhs, [u]), [r => 0, D(r) => 0, θ => 0.3, D(θ) => 0], (0, 8),
+                   cart_ps; inputs = [u => feedback])
+paths = solve(EnsembleProblem(sprob), LambaEM(), EnsembleThreads(); trajectories = 40, saveat = 0.02).u
+noise_at(s) = (G = zeros(4, 1); sprob.g(G, s, sprob.p, 0.0); G)
+spread(xs) = sqrt(sum(abs2, xs .- sum(xs) / length(xs)) / (length(xs) - 1))
+@examples begin
+    "the noise: a random force, along the exact ∂F/∂u"
+    σw .* jacobian(fo.rhs, [u])
+    "compiled, at the initial state: one noise process"
+    noise_at(sprob.u0)
+    "the spread at t = 8 of θ and of r, over 40 paths"
+    [spread([p[θ][end] for p in paths]), spread([p[r][end] for p in paths])]
+end
+
+#%% code id=noise_plot
+let fig = Figure(size = (1000, 360))
+    ax1 = Axis(fig[1, 1]; xlabel = "t", ylabel = "θ, rad", title = "the pole under a random force, 40 paths")
+    ax2 = Axis(fig[1, 2]; xlabel = "t", ylabel = "r, m", title = "the cart")
+    for p in paths
+        lines!(ax1, p.t, p[θ]; color = (:orange, 0.25))
+        lines!(ax2, p.t, p[r]; color = (:deepskyblue, 0.25))
+    end
+    ts = range(0, 8; length = 800)
+    quiet = solve(ODEProblem(cartpole, [r => 0, D(r) => 0, θ => 0.3, D(θ) => 0], (0, 8), cart_ps[1:4];
+                             inputs = [u => feedback]), Rodas5P())
+    lines!(ax1, ts, quiet(ts; idxs = θ).u; color = :white, linewidth = 2, label = "without noise")
+    lines!(ax2, ts, quiet(ts; idxs = r).u; color = :white, linewidth = 2)
+    axislegend(ax1; position = :rt)
+    fig
+end
+
+#%% md id=events_md
+@md raw"""
+## Events
+
+`events` lists events `condition => affect`, which the solver locates as zero crossings. The condition `a ~ b` occurs when $a - b$ crosses zero in either direction, and an inequality `a < b` when it becomes true. Write a `~` condition in parentheses, because `~` binds more loosely than `=>`. An affect assigns states and parameters, all computed from the values just before the event, or is a Julia function of the integrator, such as `terminate!`. Both the condition and the assignments are compiled like the right-hand side.
+
+A ball bounces with restitution $\kappa$. A relay with hysteresis drives an oscillator, $\ddot\xi + c\,\dot\xi + \xi = v$, where the parameter $v$ switches to $-1$ when $\xi$ rises above $\eta$ and to $+1$ when it falls below $-\eta$. From any start the loop settles into the same limit cycle. An event's parameter changes stay within the solve, so the problem keeps $v = 1$ for the next one.
+"""
+
+#%% code id=events
+@giac_var b[1:2] κ ξ(t) v η
+ball = ODEProblem([b2, -g], [b1 => 1, b2 => 0], (0, 4), [g => 9.81, κ => 0.8];
+                  events = [b1 < 0 => [b2 => -κ * b2]])
+bsol = solve(ball, Tsit5(); abstol = 1e-10, reltol = 1e-10)
+oscillator = [D(D(ξ)) + c * D(ξ) + ξ ~ v]
+relay = [ξ > η => [v => -1], ξ < -η => [v => 1]]
+rsols = [solve(ODEProblem(oscillator, [ξ => ξ0, D(ξ) => 0], (0, 40), [c => 0.4, v => 1, η => 0.2]; events = relay),
+               Tsit5(); abstol = 1e-9, reltol = 1e-9) for ξ0 in (0.0, -2.5)]
+# an event saves the state just before and just after it, at the same time
+event_times(s) = unique(s.t[i] for i in 1:length(s.t)-1 if s.t[i] == s.t[i+1])
+@examples begin
+    "the first impacts"
+    event_times(bsol)[1:3]
+    "exactly: (1, 1 + 2κ, 1 + 2κ + 2κ²) √(2/g)"
+    cumsum([1, 2 * 0.8, 2 * 0.8^2]) * sqrt(2 / 9.81)
+    "bounces before t = 4, approaching the limit (1 + 2κ/(1 − κ)) √(2/g) ≈ 4.06"
+    length(event_times(bsol))
+    "the time between relay switches, settling to half the cycle"
+    diff(event_times(rsols[1]))[[1, 2, 3, end]]
+    "the problem keeps its value of v"
+    rsols[1].prob.ps[v]
+end
+
+#%% code id=events_plot
+let fig = Figure(size = (1000, 380))
+    ax1 = Axis(fig[1, 1]; xlabel = "t", ylabel = "height", title = "a bouncing ball, κ = 0.8")
+    ts = range(0, 4; length = 2000)
+    lines!(ax1, ts, bsol(ts; idxs = b1).u; color = :deepskyblue)
+    ax2 = Axis(fig[1, 2]; xlabel = "ξ", ylabel = "ξ′", title = "relay feedback: two starts, one limit cycle")
+    vlines!(ax2, [-0.2, 0.2]; color = :gray50, linestyle = :dash)
+    for (s, col) in zip(rsols, (:orange, :mediumpurple))
+        τ = range(0, 40; length = 8000)
+        lines!(ax2, s(τ; idxs = ξ).u, s(τ; idxs = D(ξ)).u; color = (col, 0.8))
+    end
+    fig
+end
+
 #%% md id=generated_md
 @md"""
 ## The generated code
@@ -385,6 +475,7 @@ end
 #   OrdinaryDiffEqTsit5 2.1.5 b1df2697-797e-41e3-8120-5422d3b24e4a
 #   SciMLBase 3.58.0 0bca4576-84f4-4d90-8ffe-ffa030f20462
 #   SparseArrays 1.13.0 2f01184e-e22b-5df5-ae63-d93ebab69eaf
+#   StochasticDiffEq 7.2.0 789caeaf-c7a9-5a7d-9973-96adeb23e2a0
 # ╚═╡
 # ╔═╡ Slate.config · per-notebook settings (Settings panel)
 #   docid = e3a4f5a1-22e7-4f29-b4c1-0af2f0ac56fc
