@@ -47,6 +47,7 @@ using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
     end
 
     @testset "variables named like the functions' arguments" begin
+        local out, u, p                 # not the outer `u, p`
         @giac_var out u p
         fn = ODEFunction([p, -u * out, u], [u, p, out])
         d = zeros(3)
