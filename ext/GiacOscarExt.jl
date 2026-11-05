@@ -10,8 +10,8 @@
 #   radical(eqs)                 the polynomials vanishing on the solution set
 #   saturation(eqs, g)           the components on which g is not identically zero
 #
-# Each result is generators as `GiacExpr`s. All the names in `eqs` are variables, parameters
-# included, so a component may be a relation among parameters and states (a branch of
+# Each result is a reduced Gröbner basis, as `GiacExpr`s. All the names in `eqs` are variables,
+# parameters included, so a component may be a relation among parameters and states (a branch of
 # equilibria, say).
 # ---------------------------------------------------------------------------
 
@@ -35,7 +35,9 @@ function _ideal(eqs)
     return ideal(parent(first(polys)), polys)
 end
 
-_generators(I) = GiacExpr[Giac.to_giac(g) for g in gens(I)]
+# an ideal's generators: its reduced Gröbner basis, in which each component reads as a system
+# solved as far as it goes (`z - ρ + 1, x - y, y^2 - ρβ + β`)
+_generators(I) = GiacExpr[Giac.to_giac(g) for g in groebner_basis(I; complete_reduction = true)]
 
 """
     minimal_primes(eqs::Vector{GiacExpr})

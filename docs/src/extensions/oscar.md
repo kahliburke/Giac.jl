@@ -3,8 +3,8 @@
 With [Oscar](https://www.oscar-system.org/) loaded, the ideal of a system of polynomial
 expressions can be taken apart in Singular. The extension (`GiacOscarExt`) adds methods to
 Oscar's own functions for a vector of expressions or equations `a ~ b`; the system crosses by the
-[Nemo bridge](nemo.md), variables by name, and the results come back as generators, each a
-`GiacExpr`.
+[Nemo bridge](nemo.md), variables by name, and each ideal comes back as its reduced Gröbner basis,
+of `GiacExpr`s, so a component reads as a system solved as far as it goes.
 
 ```julia
 using Giac, Oscar
@@ -32,7 +32,7 @@ above one:
 ```julia
 @giac_var x y
 primary_decomposition([x^2, x*y])
-# [(primary = [x], prime = [x]), (primary = [y, x^2], prime = [x, y])]
+# [(primary = [x], prime = [x]), (primary = [y, x^2], prime = [y, x])]
 ```
 
 `saturation` removes a degenerate case: the equilibria of a system away from `g = 0`,
@@ -48,5 +48,12 @@ on its own ideals are not covered by the lock.
 
 ## Versions
 
-Oscar 1.8 requires AlgebraicSolving 0.10, which has no `real_root_classification`; with it, the
-[msolve extension](../polynomial_systems.md) provides every other function.
+The released Oscar 1.8 requires AlgebraicSolving 0.10 and Nemo 0.56; with AlgebraicSolving 0.10
+the [msolve extension](../polynomial_systems.md) provides every function but
+`real_root_classification`. Oscar's development version (1.9) uses AlgebraicSolving 0.13 and Nemo
+0.57, so all of them load together:
+
+```julia
+import Pkg
+Pkg.add(url = "https://github.com/oscar-system/Oscar.jl", rev = "master")
+```

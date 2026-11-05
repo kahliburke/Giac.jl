@@ -10,7 +10,12 @@ using Oscar
     @test Set(Set(string.(c)) for c in minimal_primes([x^2 * y ~ 0, x * y^2 ~ 0])) == Set([Set(["x"]), Set(["y"])])
     pd = primary_decomposition([x^2, x * y])
     @test length(pd) == 2 && all(c -> c.prime isa Vector{GiacExpr}, pd)
-    @test Set(string.(c.prime) for c in pd) == Set([["x"], ["x", "y"]])
+    @test Set(Set(string.(c.prime)) for c in pd) == Set([Set(["x"]), Set(["x", "y"])])
+    # generators are reduced: the Lorenz equilibria away from the origin, z = ρ - 1 and y = x
+    @giac_var y z σ ρ β
+    lorenz = [σ * (y - x), x * (ρ - z) - y, x * y - β * z]
+    @test Set(Set(string.(c)) for c in minimal_primes(saturation(lorenz, σ * β))) ==
+          Set([Set(["z-ρ+1", "x-y", "y^2-ρ*β+β"]), Set(["x", "y", "z"])])
     @test string.(radical([x^2 * y^2])) == ["x*y"]
     @test Set(string.(saturation([a * x, a * y - x], a))) == Set(["x", "y"])
     # calls from parallel tasks take turns in Singular
