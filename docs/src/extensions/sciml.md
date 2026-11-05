@@ -43,6 +43,7 @@ nonzeros. Keywords:
 | `jac`, `tgrad`, `paramjac` | `true` | compile that derivative |
 | `sparse` | `false` | the Jacobian as a sparse matrix with the symbolic one's structure (needs SparseArrays) |
 | `inplace` | `true` | in-place functions `f!(du, u, p, t)`; `false` for `f(u, p, t)` |
+| `static` | `false` | (for a problem) static arrays for the state and parameters, with out-of-place functions that return static arrays (needs StaticArrays) |
 | `mass_matrix` | | passed to `ODEFunction`, for a semi-explicit DAE |
 
 The other keywords of `ODEProblem` (`callback`, …) go to the problem.

@@ -180,9 +180,9 @@ end
 (w::_WithInputs)(a, b, c) = w.f(a, b, c, w.inputs)
 (w::_WithInputs)(a, b, c, d) = w.f(a, b, c, d, w.inputs)
 
-# `out = codes(u, p, t)` in place, or `codes(u, p, t)` as a new array, with subexpressions they
-# share computed once. A zero entry is not written in place: it is set by `fill!` for a dense
-# array, and is not stored in a sparse prototype.
+# `out = codes(u, p, t)` in place, or `codes(u, p, t)` as a new array of the kind of `u`, with
+# subexpressions they share computed once. A zero entry is not written in place: it is set by
+# `fill!` for a dense array, and is not stored in a sparse prototype.
 function _generate(codes::AbstractArray, m::_Model; inplace::Bool, dense_zeros::Bool = true)
     a = _arguments(m)
     prelude, outs = _prelude(codes, m, a)
@@ -193,8 +193,8 @@ function _generate(codes::AbstractArray, m::_Model; inplace::Bool, dense_zeros::
                     :(return nothing))
         args = Symbol[a.out, a.u, a.p, a.t]
     else
-        entries = Expr(:vect, vec(outs)...)
-        body = Expr(:block, prelude..., codes isa AbstractVector ? entries : :(reshape($entries, $(size(codes)))))
+        entries = Expr(:tuple, vec(outs)...)
+        body = Expr(:block, prelude..., :($(GlobalRef(Giac, :_array_like))($(a.u), $(Val(size(codes))), $entries)))
         args = Symbol[a.u, a.p, a.t]
     end
     return _function(args, body, m, a)
@@ -207,15 +207,11 @@ function _generate_scalar(code, m::_Model)
     return _function(Symbol[a.u, a.p, a.t], Expr(:block, prelude..., only(outs)), m, a)
 end
 
-# `(u, p, t)` setting each target, `(:u, i)` or `(:p, i)`, to its code, all computed from the
-# values before any is set
-function _generate_assignments(targets, codes, m::_Model)
+# `(u, p, t)` giving the values of `codes` as a tuple
+function _generate_tuple(codes, m::_Model)
     a = _arguments(m)
     prelude, outs = _prelude(codes, m, a)
-    writes = [:($(k === :u ? a.u : a.p)[$i] = $o) for ((k, i), o) in zip(targets, outs)]
-    body = Expr(:block, prelude..., Expr(:macrocall, Symbol("@inbounds"), nothing, Expr(:block, writes...)),
-                :(return nothing))
-    return _function(Symbol[a.u, a.p, a.t], body, m, a)
+    return _function(Symbol[a.u, a.p, a.t], Expr(:block, prelude..., Expr(:tuple, outs...)), m, a)
 end
 
 # A nonlinear problem's functions take `(u, p)`: the same code with no time argument
@@ -447,8 +443,18 @@ function _affect(a::Union{Pair, AbstractVector{<:Pair}}, m::_Model)
               throw(ArgumentError("an event assigns states and parameters, and $var is neither")))
         push!(codes, Giac.to_expr(_in_states(val, m)))
     end
-    f = _generate_assignments(targets, codes, m)
-    return integ -> f(integ.u, integ.p, integ.t), any(t -> first(t) === :p, targets)
+    f = _generate_tuple(codes, m)
+    affect!(integ) = _assign!(integ, targets, f(integ.u, integ.p, integ.t))
+    return affect!, any(t -> first(t) === :p, targets)
+end
+
+# Set each target `(:u, i)` or `(:p, i)` of the integrator to its value: in place in a mutable
+# array, else by replacing the array
+function _assign!(integ, targets, vals)
+    for (k, (s, i)) in enumerate(targets)
+        x = getproperty(integ, s)
+        ismutable(x) ? (x[i] = vals[k]) : setproperty!(integ, s, Base.setindex(x, vals[k], i))
+    end
 end
 _affected(x::AbstractArray) = vec(x)
 _affected(x) = (x,)
@@ -489,12 +495,19 @@ _value(v) = v
 _values(v) = (w = map(_value, vec(collect(v))); isempty(w) ? Float64[] : float.(collect(promote(w...))))
 
 # Keywords that build the function; the rest are the problem's
-const _FUNCTION_KEYWORDS = (:jac, :tgrad, :paramjac, :sparse, :inplace, :mass_matrix, :inputs)
+const _FUNCTION_KEYWORDS = (:jac, :tgrad, :paramjac, :sparse, :inplace, :mass_matrix, :inputs, :static)
 
 function _split(kwargs)
     fkw = Dict{Symbol, Any}(k => v for (k, v) in kwargs if k in _FUNCTION_KEYWORDS)
     pkw = Dict{Symbol, Any}(k => v for (k, v) in kwargs if !(k in _FUNCTION_KEYWORDS))
     return fkw, pkw
+end
+
+# With `static = true`, the state and parameters as static arrays, for out-of-place functions
+function _static!(fkw, u, pv)
+    pop!(fkw, :static, false) || return u, pv
+    fkw[:inplace] = false
+    return Giac._static(u), isempty(pv) ? pv : Giac._static(pv)
 end
 
 """
@@ -564,6 +577,7 @@ function _problem_model(F, u0, p, t, kwargs)
         states, u = _assignment(u0)
         m = _vector_model(F, _vector(states), _vector(params), t, inputs)
     end
+    u, pv = _static!(fkw, u, pv)
     events = pop!(pkw, :events, ())
     if !isempty(events)
         cbs = _callbacks(events, m)
@@ -587,6 +601,7 @@ function SciMLBase.NonlinearProblem(F::AbstractVector{GiacExpr}, u0, p = (); kwa
     states, u = _assignment(u0)
     params, pv = _assignment(p)
     fkw, pkw = _split(kwargs)
+    u, pv = _static!(fkw, u, pv)
     f = NonlinearFunction(F, _vector(states); p = _vector(params), fkw...)
     return NonlinearProblem(f, u, pv; pkw...)
 end

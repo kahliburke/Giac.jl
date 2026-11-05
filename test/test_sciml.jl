@@ -1,6 +1,6 @@
-# SciML problems from symbolic models (GiacSciMLBaseExt, with GiacSparseArraysExt)
+# SciML problems from symbolic models (GiacSciMLBaseExt, with GiacSparseArraysExt and GiacStaticArraysExt)
 
-using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
+using SciMLBase, SparseArrays, StaticArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
 using SciMLBase.SymbolicIndexingInterface: variable_symbols
 
 @testset "SciML problems from Giac expressions" begin
@@ -240,6 +240,33 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
         e.g(d2, [1.0, 2.0], e.p, 0.0)
         @test d2 == [0, 1.0]
         @test_throws DimensionMismatch SDEProblem([x2, -x1], [σ], [x1 => 1, x2 => 0], (0, 1), [σ => 0.5])
+    end
+
+    @testset "static arrays" begin
+        local r, k
+        @giac_var r k
+        tol = (; abstol = 1e-10, reltol = 1e-10)
+        sp = ODEProblem(F, u0, (0, 10), ps; static = true)
+        @test sp.u0 isa SVector{2, Float64} && sp.p isa SVector{3, Float64} && !SciMLBase.isinplace(sp)
+        us, pst = SVector(0.1, 0.2), SVector(9.81, 1.0, 0.2)
+        @test @inferred(sp.f(us, pst, 0.0)) isa SVector{2, Float64}
+        @test sp.f(us, pst, 0.0) ≈ rhs(u, p)
+        @test sp.f.jac(us, pst, 0.0) isa SMatrix{2, 2, Float64}
+        @test sp.f.paramjac(us, pst, 0.0) isa SMatrix{2, 3, Float64}
+        @test (@allocated sp.f(us, pst, 0.0)) == 0
+        ref = solve(ODEProblem(F, u0, (0, 10), ps), Rodas5P(); tol...)
+        @test solve(sp, Rodas5P(); tol...)(10.0) ≈ ref(10.0) atol = 1e-7
+
+        # events replace an immutable state or parameter vector
+        tb = sqrt(2 / 9.81)
+        ball = solve(ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 3), [g => 9.81, r => 0.8]; static = true,
+                                events = [x1 < 0 => [x2 => -r * x2]]), Rodas5P(); tol...)
+        @test ball(tb + 2 * 0.8 * tb)[1] ≈ 0 atol = 1e-8
+        sw = ODEProblem([-k * x1], [x1 => 1], (0, 2), [k => 1]; static = true, events = [(x1 ~ 1 // 2) => [k => 5]])
+        @test solve(sw, Rodas5P(); tol...)(2.0)[1] ≈ 0.5 * exp(-5 * (2 - log(2)))
+        @test sw.p == [1]
+
+        @test NonlinearProblem(F, [x1 => 3.0, x2 => 0.1], ps; static = true).u0 isa SVector{2}
     end
 
     @testset "errors" begin

@@ -210,3 +210,14 @@ end
 # A sparse matrix with nonzeros where `mask` is true: the structure of a symbolic Jacobian, as a
 # prototype for a solver. Defined when SparseArrays is loaded.
 _sparse_pattern(mask) = throw(ArgumentError("a sparse Jacobian needs SparseArrays: `using SparseArrays`"))
+
+# An array of size `dims` holding `entries`, of the kind of `u`: an `Array`, or a static array
+# for a static `u` (defined when StaticArrays is loaded). Generated out-of-place code builds its
+# results with it.
+function _array_like(u, ::Val{dims}, entries::Tuple) where {dims}
+    v = [entries...]                        # promoted to a common type
+    return length(dims) == 1 ? v : reshape(v, dims)
+end
+
+# `v` as a static array. Defined when StaticArrays is loaded.
+_static(v) = throw(ArgumentError("static arrays need StaticArrays: `using StaticArrays`"))
