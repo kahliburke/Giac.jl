@@ -488,13 +488,14 @@ periods = [2 * s.t[end] for s in swings]
 agm(a, b) = (while abs(a - b) > 1e-15 * a; a, b = (a + b) / 2, sqrt(a * b); end; a)
 exact_periods = [2π * sqrt(1 / 9.81) / agm(1, cos(θ0 / 2)) for θ0 in amplitudes]
 heap, regs = (ODEProblem(undamped, [x1 => 1, x2 => 0], (0, 10), [g => 9.81, ℓ => 1]; static) for static in (false, true))
+μs(q) = round(1e6 * @belapsed(solve($q, Tsit5(); abstol = 1e-8, reltol = 1e-8)); digits = 1)
 @examples begin
     "the static right-hand side"
     code(swing.f.f)
     "the largest error in the period, against the exact one"
     maximum(abs, periods .- exact_periods)
-    "ten seconds of swinging, on the heap and static, in ms"
-    ms(@belapsed solve($heap, Tsit5(); abstol = 1e-8, reltol = 1e-8)), ms(@belapsed solve($regs, Tsit5(); abstol = 1e-8, reltol = 1e-8))
+    "ten seconds of swinging with Tsit5, on the heap and static, in μs"
+    μs(heap), μs(regs)
 end
 
 #%% code id=static_plot

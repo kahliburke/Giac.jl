@@ -413,6 +413,12 @@ end
 
 _residual(e::GiacExpr) = Giac._is_equation(e) ? Giac.lhs(e) - Giac.rhs(e) : e
 
+# `solve` is shared with Giac's equation solver, which takes numbers, vectors and expressions:
+# with a SciML algorithm, the first argument should have been a problem
+function SciMLBase.solve(x::Giac.GiacInput, alg::SciMLBase.AbstractSciMLAlgorithm, args...; kwargs...)
+    throw(ArgumentError("solve(x, $(nameof(typeof(alg)))) solves a SciML problem, and x is a $(typeof(x))"))
+end
+
 # ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------

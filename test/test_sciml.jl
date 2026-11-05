@@ -274,5 +274,7 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
         @test_throws ArgumentError ODEFunction([x2, -k * x1], x)              # k: not a parameter
         @test_throws DimensionMismatch ODEFunction([x2], x)
         @test_throws ArgumentError ODEProblem(F, x => [1, 0], (0, 1), [g => 1])
+        @test_throws "solves a SciML problem, and x is a Float64" solve(0.5, Rodas5P())
+        @test_throws "solves a SciML problem" solve([1.0, 2.0], Rodas5P())
     end
 end
