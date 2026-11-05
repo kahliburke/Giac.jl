@@ -294,11 +294,62 @@ let
     fig
 end
 
+#%% md id=cartpole_md
+@md raw"""
+## Equations of motion, feedback and inputs
+
+A model can also be written as its equations, in unknown functions of time (`@giac_var r(t) θ(t)`) and their derivatives, to any order. `first_order` brings them to a first-order system: each function and its derivatives below the highest are states, written $r, r'$, and Giac solves the equations for the highest derivatives. A problem takes the equations directly, with initial values given by the functions and derivatives themselves: `[θ => 0.3, D(θ) => 0]`.
+
+The cart–pole below is driven by a force $u$ on the cart:
+
+$(M + m)\ddot r + m\ell\cos\theta\,\ddot\theta - m\ell\sin\theta\,\dot\theta^2 = u, \qquad \cos\theta\,\ddot r + \ell\ddot\theta - g\sin\theta = 0$
+
+Linearized about the upright position, it is $\dot s = A s + B u$. Giac places every pole of $A - BK$ at $-2$ by matching the characteristic polynomial with $(\sigma + 2)^4$, which gives the gains exactly in terms of the physical parameters.
+
+An `inputs` entry gives a model's input variable a value. An expression, such as the feedback law $u = -K s + w$, is substituted into the model, so the exact Jacobian includes the closed loop. A Julia function of time, here a push $w(t)$ on the cart, is called by the compiled code.
+"""
+
+#%% code id=cartpole
+@giac_var r(t) θ(t) M m u w kg[1:4] σ
+D = Differential(t)
+cartpole = [(M + m) * D(D(r)) + m * ℓ * cos(θ) * D(D(θ)) - m * ℓ * sin(θ) * D(θ)^2 ~ u,
+            cos(θ) * D(D(r)) + ℓ * D(D(θ)) - g * sin(θ) ~ 0]
+upright(e) = C.simplify(substitute(e, (v => 0 for v in first_order(cartpole).states)..., u => 0))
+@examples begin
+    "the equations, to first order"
+    fo = first_order(cartpole)
+    "linearized upright, exactly"
+    A = upright.(jacobian(fo.rhs, fo.states))
+    B = upright.(jacobian(fo.rhs, [u]))
+    "the gains that put every pole at −2"
+    charpoly = C.expand(det(σ * Matrix{GiacExpr}(I, 4, 4) - (A - B * permutedims(kg))))
+    gains = collect(GiacExpr, C.solve([C.coeff(charpoly - (σ + 2)^4, σ, j) for j in 0:3], collect(kg))[1])
+end
+
+#%% code id=cartpole_sim
+feedback = -(gains[1] * r + gains[2] * D(r) + gains[3] * θ + gains[4] * D(θ))
+push(τ) = 3exp(-((τ - 4) / 0.05)^2)
+cprob = ODEProblem(cartpole, [r => 0, D(r) => 0, θ => 0.3, D(θ) => 0], (0, 8),
+                   [M => 1, m => 0.2, ℓ => 0.5, g => 9.81]; inputs = [u => feedback + w, w => push])
+csol = solve(cprob, Rodas5P(); abstol = 1e-9, reltol = 1e-9, tstops = [4.0])
+let ts = range(0, 8; length = 1500)
+    fig = Figure(size = (1000, 520))
+    ax1 = Axis(fig[1, 1]; ylabel = "θ, rad", title = "the pole, from θ = 0.3 and pushed at t = 4")
+    lines!(ax1, ts, csol(ts; idxs = θ).u; color = :orange)
+    ax2 = Axis(fig[1, 2]; ylabel = "r, m", title = "the cart")
+    lines!(ax2, ts, csol(ts; idxs = r).u; color = :deepskyblue)
+    ax3 = Axis(fig[2, 1:2]; xlabel = "t", ylabel = "N", title = "the force u = −Ks + w, and the push w")
+    lines!(ax3, ts, csol(ts; idxs = feedback + w).u; color = :mediumpurple, label = "u")
+    lines!(ax3, ts, csol(ts; idxs = w).u; color = :gray70, linestyle = :dash, label = "w")
+    axislegend(ax3; position = :rb)
+    fig
+end
+
 #%% md id=generated_md
 @md"""
 ## The generated code
 
-Each function is ordinary Julia, generated from Giac's expressions by `Giac.to_expr` and compiled with RuntimeGeneratedFunctions. The states and parameters are read into local variables of the same names, and a Jacobian writes only its nonzero entries. The functions are compiled as ordinary Julia, so a problem built and solved in the same cell needs no `invokelatest`, and they allocate nothing. Here are the pendulum's Jacobian and the Duffing oscillator's right-hand side and time gradient.
+Each function is ordinary Julia, generated from Giac's expressions by `Giac.to_expr` and compiled as a runtime-generated function. The states and parameters are read into local variables of the same names, a subexpression that several entries share is computed once into a local `s1, s2, …`, and a Jacobian writes only its nonzero entries. The functions are compiled as ordinary Julia, so a problem built and solved in the same cell needs no `invokelatest`, and they allocate nothing. Here are the pendulum's Jacobian, the Duffing oscillator's right-hand side and time gradient, and one cell of the Brusselator, where $u_1^2 v_1$ is shared by two rows.
 
 A function from `@giac_function` makes a problem too, with its arguments read as SciML's `(u, p, t)`.
 """
@@ -308,13 +359,17 @@ code(f) = Base.Text(string(SciMLBase.RuntimeGeneratedFunctions.get_expression(f)
 allocations(f, args...) = (f(args...); @allocated f(args...))
 @giac_function pendulum(q[1:2], k[1:2]) = [q2, -k1 * sin(q1) - k2 * q2]
 gprob = ODEProblem(pendulum, [π / 2, 0], (0, 20), [9.81, 0.25])
-du, u = zeros(2), [0.1, 0.2]
+du, u_ = zeros(2), [0.1, 0.2]
+small = let (F3, u03, p3) = brusselator(3)
+    ODEProblem(F3, u03, (0, 1), p3)
+end
 @examples begin
     "the generated functions"
     code(prob.f.jac)
     code(dprob.f.f)
     code(dprob.f.tgrad)
-    allocations(prob.f, du, u, prob.p, 0.0), allocations(prob.f.jac, J, u, prob.p, 0.0)
+    code(small.f.f)
+    allocations(prob.f, du, u_, prob.p, 0.0), allocations(prob.f.jac, J, u_, prob.p, 0.0)
     "from @giac_function"
     pendulum
     gprob.f.sys
