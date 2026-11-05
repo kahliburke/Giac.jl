@@ -55,6 +55,26 @@ end
     @test_throws ArgumentError build_function([x], x; backend = :nope)
 end
 
+# built and called in one function: no newer world needed, and the result type is inferred
+_build_and_call(e, x, v) = build_function(e, x; backend = :julia)(v)
+
+@testset "compiled functions: common subexpressions, called directly" begin
+    @giac_var x y
+    @test _build_and_call(x^2 + 1, x, 3.0) == 10.0
+    f = build_function(x^2 + 1, x; backend = :julia)
+    @test @inferred(f(2.0)) == 5.0
+
+    # sin(x*y) is computed once, into a local variable, for both entries
+    g = build_function([sin(x * y) + x, sin(x * y)^2], x, y; backend = :julia)
+    @test g(0.5, 2.0) ≈ [sin(1.0) + 0.5, sin(1.0)^2]
+    @test count(ex -> ex isa Expr && ex.head === :(=), g.code.args[2].args) == 1
+
+    codes = Any[:(sin(a) + cos(a)), :(sin(a) * b)]
+    assignments, outs = Giac._common_subexpressions(codes; taken = Set([:s1]))
+    @test assignments == [:(s2 = sin(a))]                  # s1 is taken
+    @test outs == Any[:(s2 + cos(a)), :(s2 * b)]
+end
+
 @testset "array ~ scalar" begin
     @giac_var q[1:2]
     G = [q1 * (1 - q1 - q2), q2 * (2q1 - 1)]

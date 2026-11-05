@@ -81,6 +81,57 @@ function _product_expr(factors)
     return isempty(den) ? product(num) : Expr(:call, :/, product(num), product(den))
 end
 
+using RuntimeGeneratedFunctions
+RuntimeGeneratedFunctions.init(@__MODULE__)
+
+"""
+    _runtime_function(args, body)
+
+The function `(args...) -> body`, compiled now and callable directly, also from code compiled
+before it existed.
+"""
+_runtime_function(args, body) =
+    RuntimeGeneratedFunction(@__MODULE__, @__MODULE__, Expr(:->, Expr(:tuple, args...), body))
+
+_symbols!(s, ex::Symbol) = push!(s, ex)
+_symbols!(s, ex::Expr) = (foreach(a -> _symbols!(s, a), ex.args); s)
+_symbols!(s, ex::AbstractArray) = (foreach(a -> _symbols!(s, a), ex); s)
+_symbols!(s, _) = s
+
+"""
+    _common_subexpressions(codes; taken = Set{Symbol}()) -> (assignments, outputs)
+
+Julia code for the array of expressions `codes` in which every call that occurs more than once
+is computed once, into a local variable: the assignments, in order, and the outputs in terms of
+them. The local variables are named `s1`, `s2`, … avoiding every name in `codes` and `taken`.
+"""
+function _common_subexpressions(codes::AbstractArray; taken = Set{Symbol}())
+    counts = Dict{Expr, Int}()
+    function count!(ex)
+        ex isa Expr && ex.head === :call || return
+        n = counts[ex] = get(counts, ex, 0) + 1
+        n == 1 && foreach(count!, ex.args[2:end])          # inside a repeat, computed once anyway
+        return
+    end
+    foreach(count!, codes)
+    taken = _symbols!(copy(taken), codes)
+    names, assignments, k = Dict{Expr, Symbol}(), Expr[], Ref(0)
+    function fresh()
+        s = Symbol("s", k[] += 1)
+        return s in taken ? fresh() : s
+    end
+    function rewrite(ex)
+        ex isa Expr && ex.head === :call || return ex
+        haskey(names, ex) && return names[ex]
+        new = Expr(:call, ex.args[1], map(rewrite, ex.args[2:end])...)
+        counts[ex] > 1 || return new
+        s = names[ex] = fresh()
+        push!(assignments, :($s = $new))
+        return s
+    end
+    return assignments, map(rewrite, codes)
+end
+
 """
 A numeric function compiled from Giac expressions by [`build_function`](@ref) with
 `backend = :julia`. `code` holds the generated Julia function.
@@ -90,13 +141,9 @@ struct CompiledFunction{F} <: Function
     code::Expr
 end
 
-# The function is defined at run time, so calls go through `invokelatest` to reach it from code
-# compiled before it existed.
-(c::CompiledFunction)(args...) = Base.invokelatest(c.f, args...)
+(c::CompiledFunction)(args...) = c.f(args...)
 
 Base.show(io::IO, c::CompiledFunction) = print(io, "CompiledFunction", c.code.args[1])
-
-module _Generated end
 
 """
 Compile `exprs` (one expression or an array) into a Julia function of the variable groups
@@ -121,11 +168,14 @@ function _compile(exprs, groups)
     free = Set(string(s) for e in (exprs isa GiacExpr ? (exprs,) : exprs) for s in free_symbols(e))
     unbound = setdiff(free, bound, keys(_JULIA_CONSTANTS))
     isempty(unbound) || throw(ArgumentError("the expression has variables that are not arguments: $(join(sort!(collect(unbound)), ", "))"))
-    body = exprs isa GiacExpr ? to_expr(exprs) :
-           exprs isa AbstractVector ? Expr(:vect, map(to_expr, exprs)...) :
-           :(reshape($(Expr(:vect, map(to_expr, vec(exprs))...)), $(size(exprs))))
-    code = Expr(:function, Expr(:tuple, args...), Expr(:block, prelude..., body))
-    return CompiledFunction(Core.eval(_Generated, code), code)
+    codes = exprs isa GiacExpr ? [to_expr(exprs)] : map(to_expr, exprs)
+    assignments, outputs = _common_subexpressions(codes; taken = Set(args))
+    value = exprs isa GiacExpr ? only(outputs) :
+            exprs isa AbstractVector ? Expr(:vect, outputs...) :
+            :(reshape($(Expr(:vect, vec(outputs)...)), $(size(exprs))))
+    body = Expr(:block, prelude..., assignments..., value)
+    code = Expr(:->, Expr(:tuple, args...), body)
+    return CompiledFunction(_runtime_function(args, body), code)
 end
 
 """
