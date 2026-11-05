@@ -47,11 +47,13 @@
     @testset "spectra, rank, null space, exp" begin
         @giac_var t k
         M = GiacExpr[0 1; -2 -3]
-        @test string.(eigvals(M)) == ["-1", "-2"]
+        @test string.(eigvals(M)) == ["-2", "-1"]                    # by real part, then imaginary
+        @test string.(eigvals(GiacExpr[0 1; -1 -1])) == ["-1/2+(-1/2*i)*sqrt(3)", "-1/2+(1/2*i)*sqrt(3)"]
         E = eigen(M)
         @test all(iszero, Giac.Commands.simplify.(M * E.vectors - E.vectors * Diagonal(E.values)))
         @test eigvecs(M) == E.vectors
-        @test startswith(sprint(show, MIME("text/latex"), E), "\$\$\\Lambda = " * Giac.giac_latex(GiacExpr[-1 0; 0 -2]))
+        @test startswith(sprint(show, MIME("text/latex"), E), "\$\$\\Lambda = " * Giac.giac_latex(GiacExpr[-2 0; 0 -1]))
+        @test E.values == eigvals(M)
         @test length(eigvals(GiacExpr[0 1; -k -3])) == 2
         @test string.(eigvals(GiacExpr[1 1; 0 1])) == ["1", "1"]
         @test_throws ArgumentError eigen(GiacExpr[1 1; 0 1])     # not diagonalizable

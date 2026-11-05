@@ -1258,7 +1258,7 @@ function Giac._exact_matrix(::Val{:inv}, A)
     return _back(inv(M))
 end
 
-# the eigenvalues of a matrix of rational numbers, as `algebraic_roots` gives them
+# the eigenvalues of a matrix of rational numbers, by real part, then imaginary part
 function Giac._exact_matrix(::Val{:eigvals}, A)
     size(A, 1) == size(A, 2) || return nothing
     n = size(A, 1)
@@ -1268,7 +1268,8 @@ function Giac._exact_matrix(::Val{:eigvals}, A)
     all(v -> v isa Union{Integer, Rational}, values) || return nothing
     Q = matrix(QQ, n, n, [_qq(v) for v in values])
     λ = [l for (l, m) in eigenvalues_with_multiplicities(Nemo.QQBar, Q) for _ in 1:m]
-    return GiacExpr[Giac.to_giac(l) for l in sort!(λ; lt = _root_order)]
+    sort!(λ; lt = (a, b) -> real(a) == real(b) ? imag(a) < imag(b) : real(a) < real(b))
+    return GiacExpr[Giac.to_giac(l) for l in λ]
 end
 
 function Giac._exact_matrix(::Val{:rank}, A)

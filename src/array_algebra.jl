@@ -354,30 +354,41 @@ function _jordan(A::AbstractMatrix{GiacExpr})
     return V, J, diagonal
 end
 
+# The order of eigenvalues that are all numbers: by real part, then imaginary part, as
+# LinearAlgebra orders those of a real matrix. Symbolic ones keep GIAC's order.
+function _eigen_order(λ::AbstractVector{GiacExpr})
+    all(l -> isempty(free_symbols(l)), λ) || return collect(eachindex(λ))
+    z = [complex(float(to_julia(Commands.evalf(l)))) for l in λ]
+    return sortperm(z; by = w -> (real(w), imag(w)))
+end
+
 """
     eigvals(A::AbstractMatrix{GiacExpr}) -> Vector{GiacExpr}
 
-Eigenvalues of a symbolic matrix, with repeats for repeated eigenvalues. With Nemo loaded, those
-of a matrix of rational numbers are exact algebraic numbers, as from
-[`Giac.algebraic_roots`](@ref) of the characteristic polynomial.
+Eigenvalues of a symbolic matrix, with repeats for repeated eigenvalues. Numeric ones are in
+increasing order of real part, then imaginary part. With Nemo loaded, those of a matrix of
+rational numbers are exact algebraic numbers, as from [`Giac.algebraic_roots`](@ref) of the
+characteristic polynomial.
 """
 function LinearAlgebra.eigvals(A::AbstractMatrix{GiacExpr})
-    λ = _exact(:eigvals, A)
+    λ = _exact(:eigvals, A)            # in order already
     λ === nothing || return λ
     J = _jordan(A)[2]
-    return [J[i, i] for i in axes(J, 1)]
+    return [J[i, i] for i in _eigen_order([J[i, i] for i in axes(J, 1)])]
 end
 
 """
     eigen(A::AbstractMatrix{GiacExpr}) -> Eigen
 
-Eigenvalues and eigenvectors (columns of `vectors`, matching the order of `values`). Throws if
-`A` is not diagonalizable; `Giac.Commands.jordan` gives the Jordan form instead.
+Eigenvalues and eigenvectors (columns of `vectors`, matching the order of `values`), the values
+ordered as [`eigvals`](@ref) orders them. Throws if `A` is not diagonalizable;
+`Giac.Commands.jordan` gives the Jordan form instead.
 """
 function LinearAlgebra.eigen(A::AbstractMatrix{GiacExpr})
     V, J, diagonal = _jordan(A)
     diagonal || throw(ArgumentError("the matrix is not diagonalizable; use Giac.Commands.jordan for its Jordan form"))
-    return Eigen([J[i, i] for i in axes(J, 1)], V)
+    p = _eigen_order([J[i, i] for i in axes(J, 1)])
+    return Eigen([J[i, i] for i in p], V[:, p])
 end
 
 LinearAlgebra.eigvecs(A::AbstractMatrix{GiacExpr}) = eigen(A).vectors
