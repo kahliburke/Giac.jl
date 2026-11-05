@@ -85,6 +85,25 @@ A Julia function has no symbolic derivatives: one of the state leaves out the Ja
 parameter Jacobian, and one of time the time gradient, so the solver differentiates the
 compiled right-hand side itself.
 
+## Events
+
+`events` lists events `condition => affect`. The solver finds where each condition happens by
+locating a zero crossing. `a ~ b` occurs when `a - b` crosses zero in either direction. An
+inequality `a < b` occurs when it becomes true. Write a `~` condition in parentheses, because
+`~` binds more loosely than `=>`. An affect is either assignments to states and parameters,
+computed from the values at the event, or a Julia function of the integrator:
+
+```julia
+@giac_var x[1:2] g r k
+ball = ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 5), [g => 9.81, r => 0.8];
+                  events = [x1 < 0 => [x1 => 0, x2 => -r * x2]])
+ODEProblem([-k * x1], [x1 => 1], (0, 2), [k => 1]; events = [(x1 ~ 1 // 2) => [k => 5]])
+ODEProblem(eqs, u0, tspan, p; events = [(D(q) ~ 0) => terminate!])
+```
+
+A parameter that an event changes is changed only within that solve. The problem's own
+parameter values do not change. A `callback` given to the problem is kept alongside the events.
+
 ## Symbolic indexing
 
 The problem carries its variables, so the problem and its solution are indexed by them, and an

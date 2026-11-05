@@ -123,21 +123,36 @@ function _arguments(m::_Model)
             t = m.t === nothing ? fresh("t") : Symbol(string(m.t)), inputs = fresh("inputs"))
 end
 
-# The model's states, parameters and inputs, bound to the arguments
-function _bindings(a, m::_Model)
+# The model's states, parameters and inputs that the code uses, bound to the arguments
+function _bindings(a, m::_Model, used)
     b = Expr[]
     for (i, v) in enumerate(m.states)
-        push!(b, :($(Symbol(string(v))) = $(a.u)[$i]))
+        Symbol(string(v)) in used && push!(b, :($(Symbol(string(v))) = $(a.u)[$i]))
     end
     for (i, v) in enumerate(m.params)
-        push!(b, :($(Symbol(string(v))) = $(a.p)[$i]))
+        Symbol(string(v)) in used && push!(b, :($(Symbol(string(v))) = $(a.p)[$i]))
     end
     for (i, input) in enumerate(m.inputs)
-        call = input.state ? :($(a.inputs)[$i]($(a.u), $(a.p), $(a.t))) : :($(a.inputs)[$i]($(a.t)))
         names = Symbol.(string.(input.vars))
+        any(in(used), names) || continue
+        call = input.state ? :($(a.inputs)[$i]($(a.u), $(a.p), $(a.t))) : :($(a.inputs)[$i]($(a.t)))
         push!(b, length(names) == 1 ? :($(only(names)) = $call) : :($(Expr(:tuple, names...)) = $call))
     end
     return b
+end
+
+# The bindings and shared subexpressions of `codes`, and the codes in terms of them
+function _prelude(codes::AbstractArray, m::_Model, a)
+    taken = union(Set(Symbol.(string.(_all_vars(m)))), values(a))
+    assignments, outs = Giac._common_subexpressions(codes; taken)
+    used = Giac._symbols!(Giac._symbols!(Set{Symbol}(), assignments), outs)
+    return vcat(_bindings(a, m, used), assignments), outs
+end
+
+# `(args...) -> body`, given the model's Julia inputs as a last argument
+function _function(args, body, m::_Model, a)
+    isempty(m.inputs) && return Giac._runtime_function(args, body)
+    return _WithInputs(Giac._runtime_function(push!(args, a.inputs), body), Tuple(i.f for i in m.inputs))
 end
 
 _is_zero(c) = c isa Number && iszero(c)
@@ -170,9 +185,7 @@ end
 # array, and is not stored in a sparse prototype.
 function _generate(codes::AbstractArray, m::_Model; inplace::Bool, dense_zeros::Bool = true)
     a = _arguments(m)
-    taken = union(Set(Symbol.(string.(_all_vars(m)))), values(a))
-    assignments, outs = Giac._common_subexpressions(codes; taken)
-    prelude = vcat(_bindings(a, m), assignments)
+    prelude, outs = _prelude(codes, m, a)
     if inplace
         writes = [:($(a.out)[$(Tuple(I)...)] = $(outs[I])) for I in CartesianIndices(codes) if !_is_zero(codes[I])]
         fill = dense_zeros && any(_is_zero, codes) ? [:(fill!($(a.out), zero(eltype($(a.out)))))] : Expr[]
@@ -184,8 +197,25 @@ function _generate(codes::AbstractArray, m::_Model; inplace::Bool, dense_zeros::
         body = Expr(:block, prelude..., codes isa AbstractVector ? entries : :(reshape($entries, $(size(codes)))))
         args = Symbol[a.u, a.p, a.t]
     end
-    isempty(m.inputs) && return Giac._runtime_function(args, body)
-    return _WithInputs(Giac._runtime_function(push!(args, a.inputs), body), Tuple(i.f for i in m.inputs))
+    return _function(args, body, m, a)
+end
+
+# `code(u, p, t)`, a scalar
+function _generate_scalar(code, m::_Model)
+    a = _arguments(m)
+    prelude, outs = _prelude(Any[code], m, a)
+    return _function(Symbol[a.u, a.p, a.t], Expr(:block, prelude..., only(outs)), m, a)
+end
+
+# `(u, p, t)` setting each target, `(:u, i)` or `(:p, i)`, to its code, all computed from the
+# values before any is set
+function _generate_assignments(targets, codes, m::_Model)
+    a = _arguments(m)
+    prelude, outs = _prelude(codes, m, a)
+    writes = [:($(k === :u ? a.u : a.p)[$i] = $o) for ((k, i), o) in zip(targets, outs)]
+    body = Expr(:block, prelude..., Expr(:macrocall, Symbol("@inbounds"), nothing, Expr(:block, writes...)),
+                :(return nothing))
+    return _function(Symbol[a.u, a.p, a.t], body, m, a)
 end
 
 # A nonlinear problem's functions take `(u, p)`: the same code with no time argument
@@ -264,14 +294,20 @@ SII.is_observed(::GiacSystem, sym) = false
 # is its solved expression.
 function SII.observed(s::GiacSystem, sym::Union{GiacExpr, DerivativeExpr})
     get!(s.observed, string(sym)) do
-        m = s.model
-        e = Giac._as_states(_giac(sym))
-        isempty(m.derived) || (e = substitute(e, (Giac.giac_identifier(k) => v for (k, v) in m.derived)...))
-        _check_free((e,), m)
-        f = _generate(Any[Giac.to_expr(e)], m; inplace = false)
-        s.timed ? ((u, p, t) -> f(u, p, t)[1]) : ((u, p) -> f(u, p, nothing)[1])
+        f = _generate_scalar(Giac.to_expr(_in_states(sym, s.model)), s.model)
+        s.timed ? f : ((u, p) -> f(u, p, nothing))
     end
 end
+
+# An expression of the model in its state variables: unknown functions of time and their
+# derivatives by their variables, highest derivatives by their solved expressions
+function _in_states(e, m::_Model)
+    e = Giac._as_states(_giac(e))
+    isempty(m.derived) || (e = substitute(e, (Giac.giac_identifier(k) => v for (k, v) in m.derived)...))
+    _check_free((e,), m)
+    return e
+end
+_in_states(e::Number, ::_Model) = convert(GiacExpr, e)
 
 # ---------------------------------------------------------------------------
 # Functions
@@ -376,6 +412,62 @@ end
 _residual(e::GiacExpr) = Giac._is_equation(e) ? Giac.lhs(e) - Giac.rhs(e) : e
 
 # ---------------------------------------------------------------------------
+# Events
+# ---------------------------------------------------------------------------
+
+# The function whose zero crossings are the event, and whether only its upward crossings count:
+# `a ~ b` at either crossing of `a - b`, and `a > b` (`a < b`, `a ≥ b`) when it becomes true.
+# Giac writes every inequality with `>` or `>=`.
+function _crossing(c)
+    c = _giac(c)
+    Giac._is_equation(c) && return Giac.lhs(c) - Giac.rhs(c), false
+    if Giac.iscall(c) && Giac.symb_funcname(c) in (">", ">=")
+        a, b = Giac.arguments(c)
+        return a - b, true
+    end
+    return c, false
+end
+
+# The affect of an event: assignments to states and parameters, computed from the values at
+# the event, or a Julia function of the integrator. Also whether it assigns parameters.
+_affect(f, m::_Model) = (f, false)
+function _affect(a::Union{Pair, AbstractVector{<:Pair}}, m::_Model)
+    index(vs) = Dict(string(v) => i for (i, v) in enumerate(vs))
+    states, params = index(m.states), index(m.params)
+    targets, codes = Tuple{Symbol, Int}[], Any[]
+    for (k, v) in _pairs(a), (var, val) in zip(_affected(k), _affected(v))
+        n = _name(var)
+        push!(targets, haskey(states, n) ? (:u, states[n]) : haskey(params, n) ? (:p, params[n]) :
+              throw(ArgumentError("an event assigns states and parameters, and $var is neither")))
+        push!(codes, Giac.to_expr(_in_states(val, m)))
+    end
+    f = _generate_assignments(targets, codes, m)
+    return integ -> f(integ.u, integ.p, integ.t), any(t -> first(t) === :p, targets)
+end
+_affected(x::AbstractArray) = vec(x)
+_affected(x) = (x,)
+
+# A continuous callback for each event `condition => affect`
+function _callbacks(events, m::_Model)
+    cbs = SciMLBase.ContinuousCallback[]
+    for (condition, affect) in _pairs(events)
+        e, upward = _crossing(condition)
+        c = _generate_scalar(Giac.to_expr(_in_states(e, m)), m)
+        a!, assigns_p = _affect(affect, m)
+        push!(cbs, SciMLBase.ContinuousCallback((u, t, integ) -> c(u, integ.p, t), a!, upward ? nothing : a!;
+                                                initialize = assigns_p ? _own_parameters : SciMLBase.INITIALIZE_DEFAULT))
+    end
+    return cbs
+end
+
+# A solver's integrator shares the problem's parameter values: an event that assigns parameters
+# gives it its own copy, so the problem keeps them
+function _own_parameters(c, u, t, integ)
+    integ.p = copy(integ.p)
+    SciMLBase.u_modified!(integ, false)
+end
+
+# ---------------------------------------------------------------------------
 # Problems
 # ---------------------------------------------------------------------------
 
@@ -400,8 +492,8 @@ function _split(kwargs)
 end
 
 """
-    ODEProblem(F, u0, tspan, p = (); t = nothing, inputs = [], kwargs...)
-    ODEProblem(eqs, u0, tspan, p = (); inputs = [], kwargs...)
+    ODEProblem(F, u0, tspan, p = (); t = nothing, inputs = [], events = [], kwargs...)
+    ODEProblem(eqs, u0, tspan, p = (); inputs = [], events = [], kwargs...)
 
 The initial-value problem `ẋ = F(x, p, t)`, `x(t₀) = u0`, with the states and parameters taken
 from the assignments `u0` and `p`, each written `x => values` or `[x1 => v1, x2 => v2]`:
@@ -428,7 +520,21 @@ sol[D(q)], sol[D(D(q))]
 
 Equations without derivatives are algebraic constraints on unknowns that appear without
 derivatives, and make the problem a DAE with a mass matrix. `inputs` is described under
-[`ODEFunction`](@ref). `F` may also be a function from `@giac_function` with arguments
+[`ODEFunction`](@ref).
+
+`events` lists events `condition => affect`, located by the solver as zero crossings. The
+condition `a ~ b` occurs when `a - b` crosses zero either way, and an inequality `a < b` when
+it becomes true. The affect assigns states and parameters, all computed from the values at the
+event, or is a Julia function of the integrator, such as `terminate!`:
+
+```julia
+@giac_var x[1:2] r
+events = [x1 < 0 => [x1 => 0, x2 => -r * x2]]      # a bouncing ball, x1 its height
+```
+
+An event's parameter changes are the solve's own: the problem keeps its values.
+
+`F` may also be a function from `@giac_function` with arguments
 `(u, p, t)`. The keywords of `ODEFunction` build the function; the others go to
 `SciMLBase.ODEProblem`.
 """
@@ -442,6 +548,11 @@ function SciMLBase.ODEProblem(F::AbstractVector{GiacExpr}, u0, tspan, p = (); t 
     else
         states, u = _assignment(u0)
         m = _vector_model(F, _vector(states), _vector(params), t, inputs)
+    end
+    events = pop!(pkw, :events, ())
+    if !isempty(events)
+        cbs = _callbacks(events, m)
+        pkw[:callback] = SciMLBase.CallbackSet(get(pkw, :callback, nothing), cbs...)
     end
     return ODEProblem(_ode_function(m; fkw...), u, _tspan(tspan), pv; pkw...)
 end

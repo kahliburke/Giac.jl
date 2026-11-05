@@ -170,6 +170,48 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
         @test sol(0.5; idxs = u) ≈ sin(0.5)
     end
 
+    @testset "events" begin
+        local t, q, r, k
+        @giac_var r k
+        tb, tol = sqrt(2 / 9.81), (; abstol = 1e-10, reltol = 1e-10)
+        # a bouncing ball: the event when the inequality becomes true, the velocity from before it
+        ball = ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 3), [g => 9.81, r => 0.8];
+                          events = [x1 < 0 => [x1 => 0, x2 => -r * x2]])
+        sol = solve(ball, Rodas5P(); tol...)
+        @test sol(tb + 2 * 0.8 * tb; idxs = x1) ≈ 0 atol = 1e-8
+        @test sol(tb + 0.8 * tb; idxs = x1) ≈ 0.64
+        cond = only(ball.kwargs[:callback].continuous_callbacks).condition
+        ub, integ = [0.5, 1.0], (; p = ball.p)
+        cond(ub, 0.0, integ)
+        @test (@allocated cond(ub, 0.0, integ)) == 0
+
+        # a parameter switched at an equation's crossing; the problem keeps its values
+        sw = ODEProblem([-k * x1], [x1 => 1], (0, 2), [k => 1]; events = [(x1 ~ 1 // 2) => [k => 5]])
+        s = solve(sw, Rodas5P(); tol...)
+        @test s(2.0)[1] ≈ 0.5 * exp(-5 * (2 - log(2)))
+        @test sw.p == [1]
+
+        # a Julia function of the integrator, alongside a callback of the problem's own
+        seen = Ref(0)
+        own = SciMLBase.DiscreteCallback((u, t, i) -> true, i -> (seen[] += 1; SciMLBase.u_modified!(i, false)))
+        st = solve(ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 3), [g => 9.81];
+                              events = [x1 < 0 => SciMLBase.terminate!], callback = own), Rodas5P())
+        @test st.t[end] ≈ tb && seen[] > 0
+
+        # in an equation model, by the unknown functions and their derivatives
+        @giac_var t q(t)
+        D = Differential(t)
+        eqs = [D(D(q)) ~ -9.81]
+        bq = solve(ODEProblem(eqs, [q => 1, D(q) => 0], (0, 3), [r => 0.8];
+                              events = [q < 0 => [D(q) => -r * D(q)]]), Rodas5P(); tol...)
+        @test bq(tb + 2 * 0.8 * tb; idxs = q) ≈ 0 atol = 1e-8
+        top = solve(ODEProblem(eqs, [q => 0, D(q) => 3], (0, 3); events = [(D(q) ~ 0) => SciMLBase.terminate!]), Rodas5P())
+        @test top.t[end] ≈ 3 / 9.81
+
+        @test_throws ArgumentError ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 3), [g => 9.81];
+                                              events = [x1 < 0 => [g * x1 => 0]])
+    end
+
     @testset "errors" begin
         @giac_var k
         @test_throws ArgumentError ODEFunction([x2, -k * x1], x)              # k: not a parameter
