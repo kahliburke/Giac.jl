@@ -545,17 +545,57 @@ let fig = Figure(size = (900, 380))
     fig
 end
 
+#%% md id=sensitivity_md
+@md"""
+## Gradients with respect to the parameters
+
+Fitting a model to data needs the gradient of a loss with respect to the parameters, through the solve. SciMLSensitivity computes it by forward sensitivities or by adjoints. With `autojacvec = false` they use the problem's own Jacobian and parameter Jacobian, which here are Giac's exact ones, compiled. Forward-mode AD runs dual numbers through the same generated code, since it is ordinary generic Julia.
+
+The loss is the sum of squares of the pendulum's states, saved every 0.1 s over 10 s, as a function of $(g, \ell, c)$. Every method agrees with finite differences. With three parameters forward mode is the fastest. An adjoint's cost does not grow with the number of parameters, so it wins for large models.
+
+A forward-sensitivity or interpolating-adjoint solve with an implicit solver such as `Rodas5P` needs that solver's own automatic differentiation turned off, `Rodas5P(autodiff = AutoFiniteDiff())`. The solver differentiates SciMLSensitivity's augmented system, whose work arrays hold plain `Float64`s. The quadrature adjoint has no such restriction.
+"""
+
+#%% code id=sensitivity
+using SciMLSensitivity, Zygote, ForwardDiff
+sprob_p = remake(prob; tspan = (0.0, 10.0))
+loss(q, sensealg = nothing; alg = Tsit5()) =
+    sum(abs2, Array(solve(remake(sprob_p; p = q), alg; abstol = 1e-10, reltol = 1e-10, saveat = 0.1, sensealg)))
+p0 = collect(sprob_p.p)
+e_(i) = 1:3 .== i
+fd = [(loss(p0 .+ 1e-5e_(i)) - loss(p0 .- 1e-5e_(i))) / 2e-5 for i in 1:3]
+adjoint_gradient(sensealg; kw...) = Zygote.gradient(q -> loss(q, sensealg; kw...), p0)[1]
+ms_(f) = round(1e3 * @belapsed($f()); digits = 2)
+@examples begin
+    "∂loss/∂(g, ℓ, c): finite differences, the reference"
+    fd
+    "forward-mode AD through the solver"
+    ForwardDiff.gradient(loss, p0)
+    "forward sensitivities, interpolating and quadrature adjoints, with the exact jac and paramjac"
+    adjoint_gradient(ForwardSensitivity(autojacvec = false))
+    adjoint_gradient(InterpolatingAdjoint(autojacvec = false))
+    adjoint_gradient(QuadratureAdjoint(autojacvec = false))
+    "an implicit solver, with its own differentiation by finite differences"
+    adjoint_gradient(InterpolatingAdjoint(autojacvec = false); alg = Rodas5P(autodiff = SciMLBase.ADTypes.AutoFiniteDiff()))
+    "time per gradient, in ms: forward AD, forward sensitivities, interpolating, quadrature"
+    ms_(() -> ForwardDiff.gradient(loss, p0)), ms_(() -> adjoint_gradient(ForwardSensitivity(autojacvec = false))),
+        ms_(() -> adjoint_gradient(InterpolatingAdjoint(autojacvec = false))), ms_(() -> adjoint_gradient(QuadratureAdjoint(autojacvec = false)))
+end
+
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
 #   BenchmarkTools 1.8.0 6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf
 #   CairoMakie 0.15.17 13f3f980-e62b-5c42-98c6-ff1f3baf88f0
+#   ForwardDiff 1.4.7 f6369f11-7733-5829-9624-2563aa707210
 #   GiacSlate 0.1.2 f4c9f34b-fa6a-4506-9309-e8c0bac809fa path=~/devel/GiacSlate.jl
 #   NonlinearSolve 4.32.0 8913a72c-1f9b-4ce2-8d82-65094dcecaec
 #   OrdinaryDiffEqRosenbrock 2.7.5 43230ef6-c299-4910-a778-202eb28ce4ce
 #   OrdinaryDiffEqTsit5 2.1.5 b1df2697-797e-41e3-8120-5422d3b24e4a
 #   SciMLBase 3.58.0 0bca4576-84f4-4d90-8ffe-ffa030f20462
+#   SciMLSensitivity 7.119.14 1ed8b502-d754-442c-8d5d-10ac956f44a1
 #   SparseArrays 1.13.0 2f01184e-e22b-5df5-ae63-d93ebab69eaf
 #   StaticArrays 1.9.24 90137ffa-7385-5640-81b9-e52037218182
 #   StochasticDiffEq 7.2.0 789caeaf-c7a9-5a7d-9973-96adeb23e2a0
+#   Zygote 0.7.15 e88e6eb3-aa80-5325-afca-941959d7151f
 # ╚═╡
 # ╔═╡ Slate.config · per-notebook settings (Settings panel)
 #   docid = e3a4f5a1-22e7-4f29-b4c1-0af2f0ac56fc
