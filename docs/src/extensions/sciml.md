@@ -31,7 +31,9 @@ Values may be exact (`π`, `1//3`, a `GiacExpr`); they become floating-point num
 By default the function carries the exact Jacobian `∂F/∂x`, the time gradient `∂F/∂t` (with a
 time variable) and the parameter Jacobian `∂F/∂p` (with parameters), each differentiated by Giac
 and compiled. Implicit solvers such as `Rodas5P` and `FBDF` use the Jacobian in place of automatic
-differentiation or finite differences. Keywords:
+differentiation or finite differences. A right-hand side is differentiated only by the variables
+it contains, so building a large sparse model costs time in proportion to the Jacobian's
+nonzeros. Keywords:
 
 | Keyword | Default | |
 |---------|---------|---|
