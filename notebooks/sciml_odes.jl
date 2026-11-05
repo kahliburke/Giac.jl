@@ -18,7 +18,8 @@ The states and parameters are the variables of the assignments `u0` and `p`, wri
 
 #%% code id=setup
 using Giac, GiacSlate, LinearAlgebra
-using SciMLBase, OrdinaryDiffEqTsit5, OrdinaryDiffEqRosenbrock, StochasticDiffEq, NonlinearSolve, SparseArrays
+using SciMLBase, OrdinaryDiffEqTsit5, OrdinaryDiffEqRosenbrock, StochasticDiffEq, NonlinearSolve
+using SparseArrays, StaticArrays
 using CairoMakie, BenchmarkTools
 set_theme!(theme_dark())
 const C = Giac.Commands
@@ -466,6 +467,46 @@ end
     solve(gprob, Rodas5P(); abstol = 1e-9, reltol = 1e-9)(20.0) ≈ sol(20.0)
 end
 
+#%% md id=static_md
+@md raw"""
+## Static arrays, for many small solves
+
+With StaticArrays loaded, `static = true` gives a problem static vectors for its state and parameters, with out-of-place functions that return static arrays. A small model then lives in registers rather than on the heap, which is the fast path for batches of solves.
+
+An undamped pendulum released from rest at $\theta_0$ comes back to rest at half its period, so the event `x2 > 0 => terminate!` ends each solve there. An ensemble of 200 amplitudes measures the period, which grows without bound towards $\theta_0 = \pi$. The exact period is $2\pi\sqrt{\ell/g}\,/\,\mathrm{agm}(1, \cos\tfrac{\theta_0}{2})$.
+"""
+
+#%% code id=static
+undamped = [x2, -g / ℓ * sin(x1)]
+swing = ODEProblem(undamped, [x1 => 1, x2 => 0], (0, 100), [g => 9.81, ℓ => 1];
+                   static = true, events = [x2 > 0 => terminate!])
+amplitudes = range(0.05, 3.1; length = 200)
+swings = solve(EnsembleProblem(swing; prob_func = (q, ctx) -> remake(q; u0 = SVector(amplitudes[ctx.sim_id], 0.0))),
+               Tsit5(), EnsembleThreads(); trajectories = length(amplitudes), abstol = 1e-10, reltol = 1e-10,
+               save_everystep = false).u
+periods = [2 * s.t[end] for s in swings]
+agm(a, b) = (while abs(a - b) > 1e-15 * a; a, b = (a + b) / 2, sqrt(a * b); end; a)
+exact_periods = [2π * sqrt(1 / 9.81) / agm(1, cos(θ0 / 2)) for θ0 in amplitudes]
+heap, regs = (ODEProblem(undamped, [x1 => 1, x2 => 0], (0, 10), [g => 9.81, ℓ => 1]; static) for static in (false, true))
+@examples begin
+    "the static right-hand side"
+    code(swing.f.f)
+    "the largest error in the period, against the exact one"
+    maximum(abs, periods .- exact_periods)
+    "ten seconds of swinging, on the heap and static, in ms"
+    ms(@belapsed solve($heap, Tsit5(); abstol = 1e-8, reltol = 1e-8)), ms(@belapsed solve($regs, Tsit5(); abstol = 1e-8, reltol = 1e-8))
+end
+
+#%% code id=static_plot
+let fig = Figure(size = (900, 360))
+    T0 = 2π * sqrt(1 / 9.81)
+    ax = Axis(fig[1, 1]; xlabel = "amplitude θ₀", ylabel = "T / 2π√(ℓ/g)", title = "the pendulum's period, from 200 solves ended by an event")
+    lines!(ax, amplitudes, exact_periods ./ T0; color = :gray70, linewidth = 2, label = "exact, through the AGM")
+    scatter!(ax, amplitudes[1:4:end], periods[1:4:end] ./ T0; color = :orange, markersize = 7, label = "measured")
+    axislegend(ax; position = :lt)
+    fig
+end
+
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
 #   BenchmarkTools 1.8.0 6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf
 #   CairoMakie 0.15.17 13f3f980-e62b-5c42-98c6-ff1f3baf88f0
@@ -475,6 +516,7 @@ end
 #   OrdinaryDiffEqTsit5 2.1.5 b1df2697-797e-41e3-8120-5422d3b24e4a
 #   SciMLBase 3.58.0 0bca4576-84f4-4d90-8ffe-ffa030f20462
 #   SparseArrays 1.13.0 2f01184e-e22b-5df5-ae63-d93ebab69eaf
+#   StaticArrays 1.9.24 90137ffa-7385-5640-81b9-e52037218182
 #   StochasticDiffEq 7.2.0 789caeaf-c7a9-5a7d-9973-96adeb23e2a0
 # ╚═╡
 # ╔═╡ Slate.config · per-notebook settings (Settings panel)

@@ -106,8 +106,9 @@ ODEProblem(eqs, u0, tspan, p; events = [(D(q) ~ 0) => terminate!])
 
 Don't let an affect place the state exactly on the event's own surface, for example by setting
 the ball's height to 0. The solver then misses the next crossing. A parameter that an event
-changes is changed only within that solve. The problem's own
-parameter values do not change. A `callback` given to the problem is kept alongside the events.
+changes is changed only within that solve. The problem's own parameter values do not change. A
+`callback` given to the problem is kept alongside the events. With `static = true`, an affect
+replaces the immutable state or parameter vector.
 
 ## Stochastic models
 
