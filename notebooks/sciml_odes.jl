@@ -134,24 +134,24 @@ $\dot x_1 = x_2, \quad \dot x_2 = -\tfrac{g}{\ell}\sin x_1 - c\,x_2$. The model 
 @giac_var x[1:2] g ℓ c
 F = [x2, -g / ℓ * sin(x1) - c * x2]
 E = x2^2 / 2 + g / ℓ * (1 - cos(x1))
+prob = ODEProblem(F, [x1 => π / 2, x2 => 0], (0, 20), [g => 9.81, ℓ => 1, c => 0.25])
+sol = solve(prob, Rodas5P(); abstol = 1e-9, reltol = 1e-9)
+moon = remake(prob; p = [g => 1.62])
 J = zeros(2, 2)
+jacobian_at(u) = (prob.f.jac(J, u, prob.p, 0.0); J)
 @examples begin
     "the problem"
-    prob = ODEProblem(F, [x1 => π / 2, x2 => 0], (0, 20), [g => 9.81, ℓ => 1, c => 0.25])
     prob.f.sys
     prob.u0, prob.p
     "the exact Jacobian, and its compiled form"
     jacobian(F, x)
-    (prob.f.jac(J, [0.1, 0.0], prob.p, 0.0); J)
+    jacobian_at([0.1, 0.0])
     "the solution, indexed by the model's variables"
-    sol = solve(prob, Rodas5P(); abstol = 1e-9, reltol = 1e-9)
-    sol.stats.njacs
-    last(sol[x1])
+    string(sol.retcode), length(sol.t), sol.stats.njacs
     sol(2.5; idxs = [x1, x2])
     sol(0.0; idxs = E), sol(20.0; idxs = E)
     "parameters and values by name"
     prob.ps[g]
-    moon = remake(prob; p = [g => 1.62])
     moon.p
     solve(moon, Rodas5P())(20.0; idxs = x1)
 end
@@ -263,15 +263,16 @@ The same vector of expressions gives Giac's exact equilibria, a `NonlinearProble
 @giac_var z[1:2] K a b d
 P = [z1 * (1 - z1 / K) - a * z1 * z2 / (1 + z1), a * b * z1 * z2 / (1 + z1) - d * z2]
 pvals = [K => 2, a => 1, b => 1//2, d => 1//5]
+zstar = C.factor.(C.solve(P, z)[3])
+nprob = NonlinearProblem(P, [z1 => 1, z2 => 1], pvals)
+Jstar = map(e -> substitute(e, z1 => zstar[1], z2 => zstar[2]), jacobian(P, z))
 @examples begin
-    "the equilibria, exactly"
-    zstar = C.factor.(C.solve(P, z)[3])
+    "the coexistence equilibrium, exactly"
+    zstar
     C.simplify.(substitute(zstar, pvals...))
-    "the coexistence equilibrium, by NonlinearSolve"
-    nprob = NonlinearProblem(P, [z1 => 1, z2 => 1], pvals)
+    "and by NonlinearSolve, from (1, 1)"
     solve(nprob).u
-    "where it loses stability"
-    Jstar = map(e -> substitute(e, z1 => zstar[1], z2 => zstar[2]), jacobian(P, z))
+    "where it loses stability: the trace of the Jacobian there"
     trace = C.factor(C.simplify(tr(Jstar)))
     KH = only(C.solve(trace ~ 0, K))
     C.simplify(substitute(KH, a => 1, b => 1//2, d => 1//5))
@@ -306,6 +307,7 @@ A function from `@giac_function` makes a problem too, with its arguments read as
 code(f) = Base.Text(string(SciMLBase.RuntimeGeneratedFunctions.get_expression(f)))
 allocations(f, args...) = (f(args...); @allocated f(args...))
 @giac_function pendulum(q[1:2], k[1:2]) = [q2, -k1 * sin(q1) - k2 * q2]
+gprob = ODEProblem(pendulum, [π / 2, 0], (0, 20), [9.81, 0.25])
 du, u = zeros(2), [0.1, 0.2]
 @examples begin
     "the generated functions"
@@ -315,7 +317,6 @@ du, u = zeros(2), [0.1, 0.2]
     allocations(prob.f, du, u, prob.p, 0.0), allocations(prob.f.jac, J, u, prob.p, 0.0)
     "from @giac_function"
     pendulum
-    gprob = ODEProblem(pendulum, [π / 2, 0], (0, 20), [9.81, 0.25])
     gprob.f.sys
     solve(gprob, Rodas5P(); abstol = 1e-9, reltol = 1e-9)(20.0) ≈ sol(20.0)
 end
