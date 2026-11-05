@@ -156,3 +156,7 @@ function build_function(exprs::Union{GiacExpr, AbstractArray{GiacExpr}},
         r isa GiacExpr ? to_julia(r) : map(to_julia, r)
     end
 end
+
+# A sparse matrix with nonzeros where `mask` is true: the structure of a symbolic Jacobian, as a
+# prototype for a solver. Defined when SparseArrays is loaded.
+_sparse_pattern(mask) = throw(ArgumentError("a sparse Jacobian needs SparseArrays: `using SparseArrays`"))

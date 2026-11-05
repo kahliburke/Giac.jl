@@ -54,6 +54,7 @@ _pages = [
          "LibPARI.jl" => "extensions/libpari.md",
          "Nemo.jl" => "extensions/nemo.md",
          "Oscar.jl" => "extensions/oscar.md",
+         "SciML" => "extensions/sciml.md",
     ],
     "Developer Guide" => [
         "Overview" => "developer/index.md",
