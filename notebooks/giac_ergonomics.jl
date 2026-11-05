@@ -1606,6 +1606,63 @@ let
     end
 end
 
+#%% md id=algebraic_md
+@md"""
+## 12. Exact numbers and exact linear algebra
+
+With Nemo loaded, a constant built from integers, radicals, `i`, `rootof`, and `cos`, `sin`, `tan` or `exp` of rational multiples of π is an algebraic number. Nemo's `QQBar` holds one exactly, as its minimal polynomial with a box isolating the root. `to_nemo(e, Nemo.QQBar)` converts a constant to it, and `to_giac` brings it back in the simplest form found: a rational, `a + b√d`, a radical such as `2^(1/3)`, or a `rootof`. That settles what floating point can only suggest: whether a constant is zero, and its sign.
+
+A `rootof` is typeset as the root near a value of its minimal polynomial, with as many digits as it takes to tell it from the other roots.
+"""
+
+#%% code id=algebraic_demo
+let
+    @giac_var x
+    r2, r3, r5, π_ = sqrt(GiacExpr(2)), sqrt(GiacExpr(3)), sqrt(GiacExpr(5)), GiacExpr(π)
+    @examples begin
+        "a canonical form, kept when it is no longer than what was written"
+        Giac.simplify_algebraic((2 + r5)^(1 // 3))
+        Giac.simplify_algebraic(r2 * r3 - sqrt(GiacExpr(6)))
+        Giac.simplify_algebraic(sin(π_ / 12)), Giac.simplify_algebraic(cos(π_ / 5))
+        "signs of constants, exactly; then of a polynomial with one as a coefficient"
+        sign_of(r2 + r3 - sqrt(GiacExpr(10)))
+        sign_of(x^2 + r2 - 1)
+        "minimal polynomials, and roots that have no radical form"
+        Giac.minimal_polynomial(cos(π_ / 7), x)
+        Giac.algebraic_roots(x^5 - x - 1, x)
+    end
+end
+
+#%% md id=nemo_matrices_md
+@md raw"""
+### Matrix algebra in Nemo
+
+When every entry of a matrix is a rational function of the variables, `det`, `inv`, `rank`, `\` and `solve` for a matrix of unknowns are computed by Nemo, over the field of rational functions, and the result comes back with its numerators and denominators cleared to integer coefficients. Anything else goes to GIAC, as do singular matrices, so that GIAC reports them. Eigenvalues of a matrix of rationals are exact algebraic numbers: those of an irreducible cubic are `rootof`s of its own characteristic polynomial. Numeric eigenvalues come in increasing order of real part, then imaginary part, whichever engine computed them.
+"""
+
+#%% code id=nemo_matrices_demo
+let
+    @giac_var s k::positive c::positive m₁::positive m₂::positive a b
+    @giac_matrix P[2, 2] symmetric
+    A = GiacExpr[-k -1; 1 0]
+    # two masses joined by a spring k and a damper c: states (x₁, ẋ₁, x₂, ẋ₂)
+    F = GiacExpr[0 1 0 0; -k/m₁ -c/m₁ k/m₁ c/m₁; 0 0 0 1; k/m₂ c/m₂ -k/m₂ -c/m₂]
+    @examples begin
+        "a Lyapunov equation over the rational functions of k"
+        solve(P * A + A' * P ~ -I, P)
+        "a characteristic polynomial, with the rigid-body mode s² in front"
+        C.factor(det(s * I - F))
+        "its time in Nemo, beside GIAC's own det"
+        (@elapsed det(s * I - F)), (@elapsed C.invoke_cmd(:det, GiacMatrix(s * I - F)))
+        "an inverse, a rank"
+        inv(GiacExpr[a b; -b a])
+        rank(GiacExpr[1 a; a a^2])
+        "exact eigenvalues: rationals, complex, and the roots of an irreducible cubic"
+        eigvals(GiacExpr[0 1; -2 -3]), eigvals(GiacExpr[0 1; -1 -1])
+        eigvals(GiacExpr[0 1 0; 0 0 1; -1 3 0])
+    end
+end
+
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
 #   AlgebraicSolving 0.13.0 66b61cbe-0446-4d5d-9090-1ff510639f9d
 #   BlockArrays 1.10.3 8e7c35d0-a365-5155-bbbb-fb81a777f24e
