@@ -193,6 +193,21 @@ function _written_partial(name::AbstractString, x::AbstractString)
     return length(vars) > 1
 end
 
+# The functions an expression calls, by name
+_called(ex) = _called!(Symbol[], ex)
+function _called!(out, ex::Expr)
+    ex.head === :call && ex.args[1] isa Symbol && !(ex.args[1] in out) && push!(out, ex.args[1])
+    foreach(a -> _called!(out, a), ex.args)
+    return out
+end
+_called!(out, x) = out
+
+function _shown_only_message(f::Symbol, left)
+    call = string(left)
+    return "`$f` is not defined: the step `$call ~ …` shows an equation and binds nothing. " *
+           "Write `$call = …` to define the function `$f` for the steps after it."
+end
+
 # The names an expression uses, other than the functions it calls
 _names_used(ex) = _names_used!(Symbol[], ex)
 _names_used!(out, s::Symbol) = (s in out || push!(out, s); out)
@@ -464,6 +479,7 @@ function _derivation(simplifier, block)
     rows, rules = gensym(:rows), gensym(:rules)
     out = Any[:($rows = Tuple{String, String}[]), :($rules = GiacExpr[])]
     bound = Symbol[]                  # the names the derivation has bound so far
+    shown = Dict{Symbol, Any}()       # functions only shown so far, `S(θ) ~ …`: name => that left side
     # each row is typeset right after its step runs, so a later reassignment can't change it;
     # its value has the results established so far substituted in
     row(lhs, value; written = ()) =
@@ -471,8 +487,14 @@ function _derivation(simplifier, block)
                                           String[$((:(written_latex($(QuoteNode(w)), $(_values_code(w)))) for w in written)...)],
                                           _apply_rules($value, $rules), $simplifier)))
     bind(name, value) = (name in bound || push!(bound, name); :($(esc(name)) = _apply_rules($value, $rules)))
-    # the code of a value: π, √2 and 1/2 kept exact rather than computed as floats by Julia
-    valued(ex) = esc(_exact_literals(ex))
+    # the code of a value: π, √2 and 1/2 kept exact rather than computed as floats by Julia. A
+    # function an earlier row only showed (`S(θ) ~ …` binds nothing) is checked for first, so
+    # using it says how to define it rather than failing on an undefined name.
+    function valued(ex)
+        checks = [:($(esc(:(@isdefined $f))) || throw(ArgumentError($(_shown_only_message(f, shown[f])))))
+                  for f in _called(ex) if haskey(shown, f) && !(f in bound)]
+        return isempty(checks) ? esc(_exact_literals(ex)) : Expr(:block, checks..., esc(_exact_literals(ex)))
+    end
     # `cond => result where conditions`: shown as cond ⇒ result, conditions; the conditions are
     # declared, and with `apply` the result is substituted into every later value and binding
     function implication(cond, result, name = nothing)
@@ -533,6 +555,9 @@ function _derivation(simplifier, block)
                 rest = rest.args[3]
             end
             push!(out, row(terms[1], valued(rest); written = terms[2:end]))
+            lead = terms[1]
+            lead isa Expr && lead.head === :call && lead.args[1] isa Symbol && !(lead.args[1] in bound) &&
+                (shown[lead.args[1]] = lead)
         else
             push!(out, row(st, valued(st)))
         end

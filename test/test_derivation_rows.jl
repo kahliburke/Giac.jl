@@ -129,6 +129,34 @@
         @test W(:(braket(ψ, σ_a ⊗ σ_b, ψ))) == "\\langle \\psi \\vert \\sigma_{a} \\otimes \\sigma_{b} \\vert \\psi \\rangle"
     end
 
+    @testset "a function only shown, then used" begin
+        @giac_var θ
+        S_θ = cos(3θ) - 3cos(θ)
+        # `S(θ) ~ …` binds nothing: using S says how to define it
+        err = try
+            @derivation begin
+                S(θ) ~ S_θ
+                diff(S(θ), θ) ~ 0 => θ
+            end
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError && occursin("Write `S(θ) = …`", err.msg)
+        # written on a left side only, it is fine
+        d = @derivation begin
+            S(θ) ~ S_θ
+            S(π / 4) ~ substitute(S_θ, θ => Giac.giac_eval("pi") / 4)
+        end
+        @test rows(d)[2] == "S\\left(\\frac{\\pi}{4}\\right) = -2 \\sqrt{2}"
+        # bound with `=`, it is a function the later steps can use
+        d = @derivation begin
+            S(θ) = S_θ
+            diff(S(θ), θ) ~ 0 => θ ~ π / 4
+        end
+        @test endswith(rows(d)[2], "\\quad\\Rightarrow\\quad \\theta = \\frac{\\pi}{4}")
+    end
+
     @testset "conditions in brackets, and tags" begin
         imp = Giac._implication(Giac._rejoin_conditions(:(k ~ 0 => k ~ n where [n::integer, n::nonzero])))
         @test Giac._conditions(imp[2])[2] == Any[:(n::integer), :(n::nonzero)]
