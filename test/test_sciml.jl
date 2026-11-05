@@ -1,6 +1,7 @@
 # SciML problems from symbolic models (GiacSciMLBaseExt, with GiacSparseArraysExt)
 
 using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
+using SciMLBase.SymbolicIndexingInterface: variable_symbols
 
 @testset "SciML problems from Giac expressions" begin
     @giac_var x[1:2] g ℓ c t A ω
@@ -81,7 +82,7 @@ using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
 
         # states in the order of the assignment
         r = ODEProblem(F, [x2 => 0, x1 => 1], (0, 1), ps)
-        @test r.f.sys.states == [x2, x1] && r.u0 == [0, 1]
+        @test string.(variable_symbols(r)) == ["x2", "x1"] && r.u0 == [0, 1]
     end
 
     @testset "functions from @giac_function" begin
@@ -90,7 +91,7 @@ using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
         ref = solve(ODEProblem(F, u0, (0, 10), [g => 9.81, ℓ => 1, c => 0.2]), Rodas5P(); abstol = 1e-10, reltol = 1e-10)
         sol = solve(prob, Rodas5P(); abstol = 1e-10, reltol = 1e-10)
         @test sol(10.0) ≈ ref(10.0) atol = 1e-7
-        @test string.(prob.f.sys.states) == ["q1", "q2"]
+        @test string.(variable_symbols(prob)) == ["q1", "q2"]
         @test_throws ArgumentError ODEProblem(P, [π / 2, 0.0], (0, 10))
     end
 
@@ -109,7 +110,7 @@ using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
         D = Differential(t)
         eqs = [D(D(q)) + c * D(q) + k * sin(q) ~ 0]
         prob = ODEProblem(eqs, [q => π / 2, D(q) => 0], (0, 10), [c => 0.2, k => 9.81])
-        @test string.(prob.f.sys.model.states) == ["q", "q′"]
+        @test string.(variable_symbols(prob)) == ["q", "q′"]
         sol = solve(prob, Rodas5P(); abstol = 1e-10, reltol = 1e-10)
         ref = solve(ODEProblem(F, u0, (0, 10), ps), Rodas5P(); abstol = 1e-10, reltol = 1e-10)
         @test sol(10.0) ≈ ref(10.0) atol = 1e-7
@@ -120,7 +121,7 @@ using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
 
         # coupled, of different orders: the states in order of appearance
         two = ODEProblem([D(D(q)) ~ -q + w, D(w) ~ -w], [w => 1, q => 1, D(q) => 0], (0, 1))
-        @test string.(two.f.sys.model.states) == ["q", "q′", "w"]
+        @test string.(variable_symbols(two)) == ["q", "q′", "w"]
         @test two.u0 == [1, 0, 1]
         du = zeros(3)
         two.f(du, [1.0, 2.0, 3.0], two.p, 0.0)
