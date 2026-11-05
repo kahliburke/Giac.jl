@@ -30,6 +30,9 @@
 !examples/*.jl
 !examples/*.png
 
+!notebooks/
+!notebooks/*.jl
+
 !docs/
 !docs/**
 
