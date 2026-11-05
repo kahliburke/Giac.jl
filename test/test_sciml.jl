@@ -43,11 +43,22 @@ using SciMLBase, SparseArrays, OrdinaryDiffEqRosenbrock, SimpleNonlinearSolve
         Js = copy(fs.jac_prototype)
         fs.jac(Js, u, p, 0.0)
         @test Matrix(Js) ≈ J
+
+    end
+
+    @testset "variables named like the functions' arguments" begin
+        @giac_var out u p
+        fn = ODEFunction([p, -u * out, u], [u, p, out])
+        d = zeros(3)
+        fn(d, [1.0, 2.0, 3.0], nothing, 0.0)
+        @test d == [2, -3, 1]
     end
 
     @testset "problems, solutions and symbolic indexing" begin
         prob = ODEProblem(F, u0, (0, 10), ps)
         @test prob.u0 == [π / 2, 0] && prob.p == [9.81, 1, 0.2] && prob.tspan == (0.0, 10.0)
+        # exact values become floating-point numbers
+        @test ODEProblem(F, [x1 => 1, x2 => 0], (0, 1), [g => 981//100, ℓ => 1, c => 1//5]).p == [9.81, 1, 0.2]
         sol = solve(prob, Rodas5P(); abstol = 1e-10, reltol = 1e-10)
         @test SciMLBase.successful_retcode(sol)
         @test sol.stats.njacs > 0

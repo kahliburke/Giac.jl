@@ -12,7 +12,7 @@
 module GiacSciMLBaseExt
 
 using Giac
-using Giac: GiacExpr, GiacFunction, jacobian
+using Giac: GiacExpr, GiacFunction
 import SciMLBase
 using SciMLBase: ODEFunction, ODEProblem, NonlinearFunction, NonlinearProblem, NullParameters
 import SciMLBase.SymbolicIndexingInterface as SII
@@ -31,19 +31,23 @@ _vector(x::Tuple) = GiacExpr[v for v in x]
 # Code generation
 # ---------------------------------------------------------------------------
 
-# Argument names that cannot clash with a variable of the model
-const _OUT, _U, _P, _T = Symbol("##out"), Symbol("##u"), Symbol("##p"), Symbol("##t")
+# The functions' arguments: `out`, `u`, `p` and `t`, renamed where the model has a variable of
+# that name. A time variable of the model is the time argument itself.
+function _arguments(states, params, t)
+    taken = Set(string(v) for v in Iterators.flatten((states, params, t === nothing ? () : (t,))))
+    fresh(n) = (while n in taken; n *= "_"; end; Symbol(n))
+    return (out = fresh("out"), u = fresh("u"), p = fresh("p"), t = t === nothing ? fresh("t") : Symbol(string(t)))
+end
 
-# The model's variables bound to the function's arguments
-function _bindings(states, params, t)
+# The model's states and parameters, bound to entries of the arguments
+function _bindings(a, states, params)
     b = Expr[]
     for (i, v) in enumerate(states)
-        push!(b, :($(Symbol(string(v))) = $_U[$i]))
+        push!(b, :($(Symbol(string(v))) = $(a.u)[$i]))
     end
     for (i, v) in enumerate(params)
-        push!(b, :($(Symbol(string(v))) = $_P[$i]))
+        push!(b, :($(Symbol(string(v))) = $(a.p)[$i]))
     end
-    t === nothing || push!(b, :($(Symbol(string(t))) = $_T))
     return b
 end
 
@@ -59,22 +63,40 @@ _rgf(code) = RGF.RuntimeGeneratedFunction(@__MODULE__, @__MODULE__, code)
 
 _is_zero(c) = c isa Number && iszero(c)
 
-# `out = exprs(u, p, t)` in place, and `exprs(u, p, t)` as a new array. A zero entry of an array
-# is not written in place: it is set by `fill!` for a dense array, and is not stored in a sparse
+# Julia code for each entry of `exprs`
+_codes(exprs) = map(Giac.to_expr, exprs)
+
+# Julia code for each entry of `∂F/∂vars`. An entry is differentiated only where its row depends
+# on the variable, so a sparse model's Jacobian costs its nonzeros.
+function _derivatives(F, vars)
+    column = Dict(string(v) => j for (j, v) in enumerate(vars))
+    codes = Any[0 for _ in eachindex(F), _ in eachindex(vars)]
+    for (i, f) in enumerate(F), s in Giac.free_symbols(f)
+        j = get(column, string(s), nothing)
+        j === nothing || (codes[i, j] = Giac.to_expr(Giac.Commands.diff(f, vars[j])))
+    end
+    return codes
+end
+_derivatives(F, t::GiacExpr) = vec(_derivatives(F, GiacExpr[t]))
+
+# `out = codes(u, p, t)` in place, and `codes(u, p, t)` as a new array. A zero entry is not
+# written in place: it is set by `fill!` for a dense array, and is not stored in a sparse
 # prototype.
-function _inplace(exprs::AbstractArray{GiacExpr}, states, params, t; dense_zeros::Bool = true)
-    codes = map(Giac.to_expr, exprs)
-    writes = [:($_OUT[$(Tuple(I)...)] = $(codes[I])) for I in CartesianIndices(exprs) if !_is_zero(codes[I])]
-    fill = dense_zeros && any(_is_zero, codes) ? (:(fill!($_OUT, zero(eltype($_OUT)))),) : ()
-    body = Expr(:block, _bindings(states, params, t)..., fill..., :(@inbounds begin $(writes...) end), :(return nothing))
-    return _rgf(:(($_OUT, $_U, $_P, $_T) -> $body))
+function _inplace(codes::AbstractArray, states, params, t; dense_zeros::Bool = true)
+    a = _arguments(states, params, t)
+    writes = [:($(a.out)[$(Tuple(I)...)] = $(codes[I])) for I in CartesianIndices(codes) if !_is_zero(codes[I])]
+    fill = dense_zeros && any(_is_zero, codes) ? (:(fill!($(a.out), zero(eltype($(a.out))))),) : ()
+    writes = Expr(:macrocall, Symbol("@inbounds"), nothing, Expr(:block, writes...))
+    body = Expr(:block, _bindings(a, states, params)..., fill..., writes, :(return nothing))
+    return _rgf(Expr(:->, Expr(:tuple, a.out, a.u, a.p, a.t), body))
 end
 
-function _outofplace(exprs::AbstractArray{GiacExpr}, states, params, t)
-    entries = Expr(:vect, map(Giac.to_expr, vec(exprs))...)
-    value = exprs isa AbstractVector ? entries : :(reshape($entries, $(size(exprs))))
-    body = Expr(:block, _bindings(states, params, t)..., value)
-    return _rgf(:(($_U, $_P, $_T) -> $body))
+function _outofplace(codes::AbstractArray, states, params, t)
+    a = _arguments(states, params, t)
+    entries = Expr(:vect, vec(codes)...)
+    value = codes isa AbstractVector ? entries : :(reshape($entries, $(size(codes))))
+    body = Expr(:block, _bindings(a, states, params)..., value)
+    return _rgf(Expr(:->, Expr(:tuple, a.u, a.p, a.t), body))
 end
 
 # A nonlinear problem's functions take `(u, p)`: the same code with no time argument
@@ -142,7 +164,7 @@ SII.is_observed(::GiacSystem, sym) = false
 function SII.observed(s::GiacSystem, sym::GiacExpr)
     get!(s.observed, string(sym)) do
         _check_free((sym,), s.states, s.params, s.t)
-        f = _outofplace(GiacExpr[sym], s.states, s.params, s.t)
+        f = _outofplace(Any[Giac.to_expr(sym)], s.states, s.params, s.t)
         s.timed ? ((u, p, t) -> f(u, p, t)[1]) : ((u, p) -> f(u, p, nothing)[1])
     end
 end
@@ -151,7 +173,7 @@ end
 # Functions
 # ---------------------------------------------------------------------------
 
-_sparse_prototype(J) = Giac._sparse_pattern(map(e -> !_is_zero(Giac.to_expr(e)), J))
+_sparse_prototype(J) = Giac._sparse_pattern(map(!_is_zero, J))
 
 """
     ODEFunction(F, x; p = [], t = nothing, jac = true, tgrad = true, paramjac = true,
@@ -183,19 +205,19 @@ function SciMLBase.ODEFunction(F::AbstractVector{GiacExpr}, x::_Vars; p = GiacEx
         throw(DimensionMismatch("the model has $(length(F)) right-hand sides for $(length(states)) states"))
     _check_free(F, states, params, t)
     sys = GiacSystem(states, params, t; timed = true)
-    J = jac ? jacobian(F, states) : nothing
     fkw = Dict{Symbol, Any}(:sys => sys)
     if jac
+        J = _derivatives(F, states)
         fkw[:jac] = _compiled(J, states, params, t, inplace; dense_zeros = !sparse)
         sparse && (fkw[:jac_prototype] = _sparse_prototype(J))
     end
     if tgrad && t !== nothing
-        fkw[:tgrad] = _compiled(GiacExpr[Giac.Commands.diff(e, t) for e in F], states, params, t, inplace)
+        fkw[:tgrad] = _compiled(_derivatives(F, t), states, params, t, inplace)
     end
     if paramjac && !isempty(params)
-        fkw[:paramjac] = _compiled(jacobian(F, params), states, params, t, inplace)
+        fkw[:paramjac] = _compiled(_derivatives(F, params), states, params, t, inplace)
     end
-    f = _compiled(F, states, params, t, inplace)
+    f = _compiled(_codes(F), states, params, t, inplace)
     return ODEFunction{inplace, SciMLBase.FullSpecialize}(f; fkw..., kwargs...)
 end
 
@@ -229,11 +251,11 @@ function SciMLBase.NonlinearFunction(F::AbstractVector{GiacExpr}, x::_Vars; p = 
     _check_free(F, states, params, nothing)
     fkw = Dict{Symbol, Any}(:sys => GiacSystem(states, params, nothing))
     if jac
-        J = jacobian(F, states)
+        J = _derivatives(F, states)
         fkw[:jac] = _drop_time(_compiled(J, states, params, nothing, inplace; dense_zeros = !sparse), inplace)
         sparse && (fkw[:jac_prototype] = _sparse_prototype(J))
     end
-    f = _drop_time(_compiled(F, states, params, nothing, inplace), inplace)
+    f = _drop_time(_compiled(_codes(F), states, params, nothing, inplace), inplace)
     return NonlinearFunction{inplace, SciMLBase.FullSpecialize}(f; fkw..., kwargs...)
 end
 
@@ -258,7 +280,7 @@ _assignment(a) = throw(ArgumentError("values are given as `x => values` or `[x1 
 
 _value(v::GiacExpr) = Giac.to_julia(Giac.Commands.evalf(v))
 _value(v) = v
-_values(v) = (w = map(_value, vec(collect(v))); isempty(w) ? Float64[] : collect(promote(w...)))
+_values(v) = (w = map(_value, vec(collect(v))); isempty(w) ? Float64[] : float.(collect(promote(w...))))
 
 # Keywords that build the function; the rest are the problem's
 const _FUNCTION_KEYWORDS = (:jac, :tgrad, :paramjac, :sparse, :inplace, :mass_matrix)
