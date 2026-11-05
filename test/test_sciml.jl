@@ -80,6 +80,11 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
         q = remake(prob; p = [g => 3.7], u0 = [x1 => 0.3])
         @test q.p == [3.7, 1, 0.2] && q.u0 == [0.3, 0]
 
+        # values written in the parameters, computed in Julia from their exact expressions
+        w = ODEProblem(F, [x1 => π / 4 + c, x2 => sqrt(g / ℓ)], (0, 1), [g => 9.81, ℓ => 2, c => 0.1])
+        @test w.u0 == [π / 4 + 0.1, sqrt(9.81 / 2)]
+        @test_throws "uses x2: a value may be written only in the parameters" ODEProblem(F, [x1 => c + x2, x2 => 0], (0, 1), ps)
+
         # states in the order of the assignment
         r = ODEProblem(F, [x2 => 0, x1 => 1], (0, 1), ps)
         @test string.(variable_symbols(r)) == ["x2", "x1"] && r.u0 == [0, 1]
@@ -267,6 +272,29 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
         @test sw.p == [1]
 
         @test NonlinearProblem(F, [x1 => 3.0, x2 => 0.1], ps; static = true).u0 isa SVector{2}
+    end
+
+    @testset "Jacobian-vector products and exact solutions" begin
+        local k, cc, ff
+        @giac_var k cc ff
+        f = ODEFunction(F, x; p = [g, ℓ, c], jvp = true, vjp = true)
+        uu, pp, vv = [0.3, -0.2], [9.81, 1.5, 0.2], [0.7, -1.1]
+        Jm, out = zeros(2, 2), zeros(2)
+        f.jac(Jm, uu, pp, 0.0)
+        f.jvp(out, vv, uu, pp, 0.0)
+        @test out ≈ Jm * vv
+        f.vjp(out, vv, uu, pp, 0.0)
+        @test out ≈ transpose(Jm) * vv
+        @test (@allocated f.jvp(out, vv, uu, pp, 0.0)) == 0
+        @test ODEFunction(F, x; p = [g, ℓ, c], jvp = true, inplace = false).jvp(vv, uu, pp, 0.0) ≈ Jm * vv
+
+        # a model affine in its states: the solution reports its errors against the exact one
+        lin = [x2, -k * x1 - cc * x2 + ff]
+        pr = ODEProblem(lin, [x1 => 1, x2 => 0], (0, 10), [k => 4, cc => 0.4, ff => 1]; analytic = true)
+        @test solve(pr, Rodas5P(); abstol = 1e-10, reltol = 1e-10).errors[:final] < 1e-8
+        crit = ODEProblem(lin, [x1 => 1, x2 => 0], (0, 10), [k => 1, cc => 2, ff => 0]; analytic = true)
+        @test crit.f.analytic(crit.u0, crit.p, 3.0)[1] ≈ 4exp(-3)            # a repeated eigenvalue
+        @test_throws "affine in its states" ODEProblem(F, u0, (0, 1), ps; analytic = true)
     end
 
     @testset "errors" begin

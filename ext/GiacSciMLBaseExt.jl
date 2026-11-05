@@ -120,7 +120,7 @@ function _arguments(m::_Model)
     taken = Set(string.(_all_vars(m)))
     fresh(n) = (while n in taken; n *= "_"; end; Symbol(n))
     return (out = fresh("out"), u = fresh("u"), p = fresh("p"),
-            t = m.t === nothing ? fresh("t") : Symbol(string(m.t)), inputs = fresh("inputs"))
+            t = m.t === nothing ? fresh("t") : Symbol(string(m.t)), inputs = fresh("inputs"), v = fresh("v"))
 end
 
 # The model's states, parameters and inputs that the code uses, bound to the arguments
@@ -172,6 +172,16 @@ function _derivatives(F, vars)
 end
 _derivatives(F, t::GiacExpr) = vec(_derivatives(F, GiacExpr[t]))
 
+# Code for the product of the Jacobian `J`'s code with the vector argument `v`: `J * v`, or
+# `transpose(J) * v`, from the nonzero entries
+function _products(J, v::Symbol; transpose::Bool = false)
+    K = transpose ? permutedims(J) : J
+    map(eachrow(K)) do row
+        terms = [c == 1 ? :($v[$j]) : :($c * $v[$j]) for (j, c) in enumerate(row) if !_is_zero(c)]
+        isempty(terms) ? 0 : length(terms) == 1 ? only(terms) : Expr(:call, :+, terms...)
+    end
+end
+
 "A generated function, given the model's Julia inputs as its last argument."
 struct _WithInputs{F, I} <: Function
     f::F
@@ -179,23 +189,26 @@ struct _WithInputs{F, I} <: Function
 end
 (w::_WithInputs)(a, b, c) = w.f(a, b, c, w.inputs)
 (w::_WithInputs)(a, b, c, d) = w.f(a, b, c, d, w.inputs)
+(w::_WithInputs)(a, b, c, d, e) = w.f(a, b, c, d, e, w.inputs)
 
 # `out = codes(u, p, t)` in place, or `codes(u, p, t)` as a new array of the kind of `u`, with
 # subexpressions they share computed once. A zero entry is not written in place: it is set by
-# `fill!` for a dense array, and is not stored in a sparse prototype.
-function _generate(codes::AbstractArray, m::_Model; inplace::Bool, dense_zeros::Bool = true)
+# `fill!` for a dense array, and is not stored in a sparse prototype. With `vector`, the
+# functions take a vector `v` before `u`, as a Jacobian-vector product does.
+function _generate(codes::AbstractArray, m::_Model; inplace::Bool, dense_zeros::Bool = true, vector::Bool = false)
     a = _arguments(m)
+    v = vector ? Symbol[a.v] : Symbol[]
     prelude, outs = _prelude(codes, m, a)
     if inplace
         writes = [:($(a.out)[$(Tuple(I)...)] = $(outs[I])) for I in CartesianIndices(codes) if !_is_zero(codes[I])]
         fill = dense_zeros && any(_is_zero, codes) ? [:(fill!($(a.out), zero(eltype($(a.out)))))] : Expr[]
         body = Expr(:block, prelude..., fill..., Expr(:macrocall, Symbol("@inbounds"), nothing, Expr(:block, writes...)),
                     :(return nothing))
-        args = Symbol[a.out, a.u, a.p, a.t]
+        args = Symbol[a.out, v..., a.u, a.p, a.t]
     else
         entries = Expr(:tuple, vec(outs)...)
         body = Expr(:block, prelude..., :($(GlobalRef(Giac, :_array_like))($(a.u), $(Val(size(codes))), $entries)))
-        args = Symbol[a.u, a.p, a.t]
+        args = Symbol[v..., a.u, a.p, a.t]
     end
     return _function(args, body, m, a)
 end
@@ -312,21 +325,56 @@ _in_states(e::Number, ::_Model) = convert(GiacExpr, e)
 # An input given as a Julia function has no symbolic derivatives: one of the state makes the
 # Jacobians unknown, and one of time the time gradient. A solver then differentiates the
 # compiled right-hand side itself.
-function _ode_function(m::_Model; inplace::Bool = true, kwargs...)
+function _ode_function(m::_Model; inplace::Bool = true, analytic::Bool = false, kwargs...)
     f, fkw, rest = _rhs(m; inplace, kwargs...)
+    analytic && (fkw[:analytic] = _analytic(m))
     return ODEFunction{inplace, SciMLBase.FullSpecialize}(f; fkw..., rest...)
 end
 
+# The exact solution of a model affine in its states, `ẋ = A x + b` with `A` and `b` constant
+# in time: `[x; 1]` evolves by the matrix exponential of `t * [A b; 0 0]`, compiled from the
+# exact `A` and `b`
+function _analytic(m::_Model)
+    M = _affine(m)
+    M === nothing && throw(ArgumentError("an exact solution needs a model affine in its states, ẋ = A x + b, with A and b free of time and given as expressions"))
+    n = length(m.states)
+    Mf = _generate(M, m; inplace = false)
+    return (u0, p, t) -> (exp(t * Mf(nothing, p, t)) * vcat(u0, 1))[1:n]
+end
+
+# The code of `[A b; 0 0]` for `F = A x + b`, or `nothing` if `F` is not affine in the states
+function _affine(m::_Model)
+    (isempty(m.inputs) && m.mass === nothing) || return nothing
+    n = length(m.states)
+    names = Set(string.(m.states))
+    m.t === nothing || all(f -> !any(s -> string(s) == string(m.t), Giac.free_symbols(f)), m.F) || return nothing
+    M = Any[0 for _ in 1:n+1, _ in 1:n+1]
+    for (i, f) in enumerate(m.F), s in Giac.free_symbols(f)
+        j = findfirst(x -> string(x) == string(s), m.states)
+        j === nothing && continue
+        a = C.diff(f, m.states[j])
+        any(x -> string(x) in names, Giac.free_symbols(a)) && return nothing
+        M[i, j] = Giac.to_expr(a)
+    end
+    for (i, f) in enumerate(m.F)
+        M[i, n+1] = Giac.to_expr(substitute(f, (x => 0 for x in m.states)...))
+    end
+    return M
+end
+
 # The compiled right-hand side, the keywords of its derivatives and index, and the other keywords
-function _rhs(m::_Model; jac::Bool = true, tgrad::Bool = true, paramjac::Bool = true,
-              sparse::Bool = false, inplace::Bool = true, kwargs...)
+function _rhs(m::_Model; jac::Bool = true, tgrad::Bool = true, paramjac::Bool = true, jvp::Bool = false,
+              vjp::Bool = false, sparse::Bool = false, inplace::Bool = true, kwargs...)
     by_state = any(i -> i.state, m.inputs)
     fkw = Dict{Symbol, Any}(:sys => GiacSystem(m; timed = true))
+    J = (jac || jvp || vjp) && !by_state ? _derivatives(m.F, m.states) : nothing
     if jac && !by_state
-        J = _derivatives(m.F, m.states)
         fkw[:jac] = _generate(J, m; inplace, dense_zeros = !sparse)
         sparse && (fkw[:jac_prototype] = _sparse_prototype(J))
     end
+    v = _arguments(m).v
+    jvp && !by_state && (fkw[:jvp] = _generate(_products(J, v), m; inplace, vector = true))
+    vjp && !by_state && (fkw[:vjp] = _generate(_products(J, v; transpose = true), m; inplace, vector = true))
     if tgrad && m.t !== nothing && isempty(m.inputs)
         fkw[:tgrad] = _generate(_derivatives(m.F, m.t), m; inplace)
     end
@@ -348,7 +396,11 @@ states `x`, the parameters `p` and the time variable `t`; or of the equations `e
 functions of time (see [`ODEProblem`](@ref)). The right-hand side and, by default, its exact
 Jacobian `∂F/∂x`, time gradient `∂F/∂t` and parameter Jacobian `∂F/∂p` are compiled to native
 code. `sparse = true` (with SparseArrays loaded) gives the Jacobian as a sparse matrix with the
-structure of the symbolic one. Other keywords (`mass_matrix`, …) go to `SciMLBase.ODEFunction`.
+structure of the symbolic one. `jvp = true` and `vjp = true` add the products `J * v` and
+`transpose(J) * v` with the exact Jacobian, for matrix-free (Krylov) solvers. For a model affine in
+its states, `ẋ = A x + b` with `A` and `b` constant in time, `analytic = true` adds the exact
+solution, `exp(t [A b; 0 0])` applied to `[x₀; 1]` with the exact `A` and `b`, so a solution
+reports its errors (`sol.errors`). Other keywords (`mass_matrix`, …) go to `SciMLBase.ODEFunction`.
 
 `inputs` assigns the model's input variables: `u => -k * x1` substitutes an expression (a
 feedback law, part of the exact Jacobian), and `u => t -> sin(t)` or `u => (x, p, t) -> …` a
@@ -490,18 +542,36 @@ end
 # ---------------------------------------------------------------------------
 
 # Variables and their values from `x => values` or `[x1 => v1, x2 => v2]`
-_assignment(a::Pair) = (_vector(first(a)), _values(last(a)))
-_assignment(a::AbstractVector{<:Pair}) = (Any[first(q) for q in a], _values([last(q) for q in a]))
-_assignment(a::Tuple{}) = (GiacExpr[], Float64[])
-_assignment(::NullParameters) = (GiacExpr[], Float64[])
-_assignment(a) = throw(ArgumentError("values are given as `x => values` or `[x1 => v1, x2 => v2, …]`, got $(typeof(a))"))
+# Values may be expressions in `known`, the parameters' values.
+_assignment(a::Pair, known = ()) = (_vector(first(a)), _values(last(a), known))
+_assignment(a::AbstractVector{<:Pair}, known = ()) = (Any[first(q) for q in a], _values([last(q) for q in a], known))
+_assignment(a::Tuple{}, known = ()) = (GiacExpr[], Float64[])
+_assignment(::NullParameters, known = ()) = (GiacExpr[], Float64[])
+_assignment(a, known = ()) = throw(ArgumentError("values are given as `x => values` or `[x1 => v1, x2 => v2, …]`, got $(typeof(a))"))
 
-_value(v::GiacExpr) = Giac.to_julia(C.evalf(v))
-_value(v) = v
-_values(v) = (w = map(_value, vec(collect(v))); isempty(w) ? Float64[] : float.(collect(promote(w...))))
+# A value computed in Julia from its exact expression, with the parameters' values `known`
+# bound by name
+function _value(v::GiacExpr, known = ())
+    env = Dict{Symbol, Any}(Symbol(string(k)) => x for (k, x) in known)
+    free = setdiff(Set(Symbol(string(x)) for x in Giac.free_symbols(v)), keys(env), (:pi, :infinity))
+    isempty(free) || throw(ArgumentError("the value $v uses $(join(sort!(collect(free)), ", ")): a value may be written only in the parameters"))
+    return _evaluate(Giac.to_expr(v), env)
+end
+_evaluate(x, env) = x
+_evaluate(s::Symbol, env) = haskey(env, s) ? env[s] : getglobal(Base, s)
+function _evaluate(ex::Expr, env)
+    ex.head === :call || throw(ArgumentError("cannot compute the value $ex"))
+    f = ex.args[1] isa Symbol ? getglobal(Base, ex.args[1]) : ex.args[1]
+    return f((_evaluate(a, env) for a in ex.args[2:end])...)
+end
+_value(v, known = ()) = v
+_values(v, known = ()) = (w = map(x -> _value(x, known), vec(collect(v))); isempty(w) ? Float64[] : float.(collect(promote(w...))))
+
+# The parameters' values, to substitute into the initial values
+_known(params, pv) = [_giac(k) => v for (k, v) in zip(params, pv)]
 
 # Keywords that build the function; the rest are the problem's
-const _FUNCTION_KEYWORDS = (:jac, :tgrad, :paramjac, :sparse, :inplace, :mass_matrix, :inputs, :static)
+const _FUNCTION_KEYWORDS = (:jac, :tgrad, :paramjac, :jvp, :vjp, :analytic, :sparse, :inplace, :mass_matrix, :inputs, :static)
 
 function _split(kwargs)
     fkw = Dict{Symbol, Any}(k => v for (k, v) in kwargs if k in _FUNCTION_KEYWORDS)
@@ -578,9 +648,9 @@ function _problem_model(F, u0, p, t, kwargs)
     inputs = pop!(fkw, :inputs, ())
     if _is_equations(F)
         m = _equation_model(F, _vector(params), t, inputs)
-        u = last(_ordered(u0, m.states))
+        u = last(_ordered(u0, m.states, _known(params, pv)))
     else
-        states, u = _assignment(u0)
+        states, u = _assignment(u0, _known(params, pv))
         m = _vector_model(F, _vector(states), _vector(params), t, inputs)
     end
     u, pv = _static!(fkw, u, pv)
@@ -604,8 +674,8 @@ The system `F(x, p) = 0` with initial guess `u0`, written `x => values` or `[x1 
 for [`ODEProblem`](@ref).
 """
 function SciMLBase.NonlinearProblem(F::AbstractVector{GiacExpr}, u0, p = (); kwargs...)
-    states, u = _assignment(u0)
     params, pv = _assignment(p)
+    states, u = _assignment(u0, _known(params, pv))
     fkw, pkw = _split(kwargs)
     u, pv = _static!(fkw, u, pv)
     f = NonlinearFunction(F, _vector(states); p = _vector(params), fkw...)
@@ -621,11 +691,11 @@ _vector(x::AbstractVector{Any}) = GiacExpr[_giac(v) for v in x]
 
 # The values of `vars` in an assignment, in their order, matched by name (`D(q)` names the
 # state `q′`). An assignment may also be a plain vector of values in that order.
-_ordered(a::AbstractVector{<:Number}, vars) = vars => a
-_ordered(a::Tuple{}, vars) = isempty(vars) ? () : throw(ArgumentError("no values given for $(join(vars, ", "))"))
-_ordered(a::NullParameters, vars) = _ordered((), vars)
-function _ordered(a, vars)
-    keys_, vals = _assignment(a)
+_ordered(a::AbstractVector{<:Number}, vars, known = ()) = vars => a
+_ordered(a::Tuple{}, vars, known = ()) = isempty(vars) ? () : throw(ArgumentError("no values given for $(join(vars, ", "))"))
+_ordered(a::NullParameters, vars, known = ()) = _ordered((), vars)
+function _ordered(a, vars, known = ())
+    keys_, vals = _assignment(a, known)
     given = Dict(something(_name(k), string(k)) => v for (k, v) in zip(keys_, vals))
     missing_ = [v for v in vars if !haskey(given, string(v))]
     isempty(missing_) || throw(ArgumentError("no values given for $(join(missing_, ", "))"))

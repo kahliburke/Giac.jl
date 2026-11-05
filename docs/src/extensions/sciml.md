@@ -27,7 +27,9 @@ name in `F` is an error, except the time variable, given as `t = …`.
 | `NonlinearFunction(F, x; p)` | its function, with `jac` |
 
 Assignments are written `x => values` for a vector of variables, or `[x1 => v1, x2 => v2]`.
-Values may be exact (`π`, `1//3`, a `GiacExpr`); they become floating-point numbers.
+Values may be exact (`π`, `1//3`, a `GiacExpr`); they become floating-point numbers, computed
+from the exact expression. Initial values may be written in the parameters, as in
+`[x1 => π / 4, x2 => sqrt(g / ℓ)]`.
 
 ## Exact derivatives
 
@@ -41,6 +43,8 @@ nonzeros. Keywords:
 | Keyword | Default | |
 |---------|---------|---|
 | `jac`, `tgrad`, `paramjac` | `true` | compile that derivative |
+| `jvp`, `vjp` | `false` | compile the products `J * v` and `transpose(J) * v` with the exact Jacobian, for matrix-free (Krylov) solvers |
+| `analytic` | `false` | (a model affine in its states, `ẋ = A x + b`, constant in time) the exact solution, from which a solution reports its errors |
 | `sparse` | `false` | the Jacobian as a sparse matrix with the symbolic one's structure (needs SparseArrays) |
 | `inplace` | `true` | in-place functions `f!(du, u, p, t)`; `false` for `f(u, p, t)` |
 | `static` | `false` | (for a problem) static arrays for the state and parameters, with out-of-place functions that return static arrays (needs StaticArrays) |
