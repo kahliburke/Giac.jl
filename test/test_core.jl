@@ -55,4 +55,17 @@
         @test S((x ~ y) + 1) == "x+1=y+1"
         @test S(lhs(x^2 ~ y)) == "x^2"
     end
+
+    @testset "an assumption outlives the expression it was made with" begin
+        names = ["core_gc_$i" for i in 1:4]
+        for n in names
+            let v = GiacExpr(Giac.SymNode(n))
+                Giac.Commands.assume(v > 0)
+            end
+        end
+        foreach(_ -> GC.gc(true), 1:3)
+        Giac.with_giac_lock(Giac._free_doomed!)
+        @test all(n -> S(giac_eval("about($n)")) == "assume[[],[line[0,+infinity]],[0]]", names)
+        foreach(n -> giac_eval("purge($n)"), names)
+    end
 end

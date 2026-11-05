@@ -516,7 +516,7 @@ function _mathjson_to_gen(expr::SymbolExpr)
         return Giac.GiacCxxBindings.make_complex(zero_gen, one_gen)
     end
     giac_name = get(MATHJSON_CONST_TO_GIAC, name, name)
-    return Giac.GiacCxxBindings.make_identifier(giac_name)
+    return Giac._identifier_gen(giac_name)
 end
 
 """

@@ -177,7 +177,7 @@ polynomial ring's generator.
 function Giac.to_giac(e::PolyRingElem)
     R = parent(e)
     vname = string(gen(R))
-    gen_ident = Giac.GiacCxxBindings.make_identifier(vname)
+    gen_ident = Giac._identifier_gen(vname)
     coeffs = collect(coefficients(e))   # low -> high
     terms = Giac.GiacCxxBindings.Gen[]
     for (k, c) in enumerate(coeffs)
@@ -200,7 +200,7 @@ function Giac.to_giac(e::FqFieldElem)
     F = parent(e)
     d = Int(degree(F))
     vname = string(gen(F))
-    gen_ident = Giac.GiacCxxBindings.make_identifier(vname)
+    gen_ident = Giac._identifier_gen(vname)
     terms = Giac.GiacCxxBindings.Gen[]
     for k in 0:(d - 1)
         c = Nemo._coeff(e, k)            # ZZRingElem
@@ -222,7 +222,7 @@ function Giac.to_giac(e::AbsSimpleNumFieldElem)
     K = parent(e)
     d = Int(degree(K))
     vname = string(gen(K))
-    gen_ident = Giac.GiacCxxBindings.make_identifier(vname)
+    gen_ident = Giac._identifier_gen(vname)
     terms = Giac.GiacCxxBindings.Gen[]
     for k in 0:(d - 1)
         c = Nemo.coeff(e, k)             # QQFieldElem

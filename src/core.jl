@@ -883,7 +883,14 @@ function _int_gen(v::Integer)
 end
 
 _gen_from_node(n::SymNode) = n.name in _GIAC_NAMED_VALUES ? GiacCxxBindings.giac_eval(n.name) :
-                             GiacCxxBindings.make_identifier(n.name)
+                             _identifier_gen(n.name)
+
+# One GIAC identifier per name, for the session; each use gets a copy, sharing its name. A
+# context's table of assumptions and values keys an entry by the name of the identifier it was
+# made with, so that identifier must never be freed.
+const _IDENTIFIERS = Dict{String, Any}()
+_identifier_gen(name::AbstractString) =
+    with_giac_lock(() -> copy(get!(() -> GiacCxxBindings.make_identifier(name), _IDENTIFIERS, name)))
 _gen_from_node(n::GenNode) = _get_gen(n.expr.ptr)
 
 _gen_from_node(n::AddNode) = _gen_sum([_gen_from_node(_scale(m, c)) for (m, c) in n.terms])

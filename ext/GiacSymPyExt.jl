@@ -252,13 +252,13 @@ function _sympy_to_gen(ex)
         return Giac.GiacCxxBindings.make_fraction(num, den)
 
     elseif cls == "Symbol"
-        return Giac.GiacCxxBindings.make_identifier(string(ex.name))
+        return Giac._identifier_gen(string(ex.name))
 
     elseif cls == "Pi"
-        return Giac.GiacCxxBindings.make_identifier("pi")
+        return Giac._identifier_gen("pi")
 
     elseif cls == "Exp1"
-        return Giac.GiacCxxBindings.make_identifier("e")
+        return Giac._identifier_gen("e")
 
     elseif cls == "ImaginaryUnit"
         # Build the actual GIAC complex 0+1*i rather than a bare identifier,

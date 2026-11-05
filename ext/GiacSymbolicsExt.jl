@@ -192,7 +192,7 @@ function _convert_to_gen(expr)
     # Handle symbolic variables (identifiers)
     if issym(unwrapped)
         name = String(Symbolics.tosymbol(unwrapped))
-        return Giac.GiacCxxBindings.make_identifier(name)
+        return Giac._identifier_gen(name)
     end
 
     # Handle function calls / compound expressions
@@ -213,11 +213,11 @@ function _convert_to_gen(expr)
 
     # Handle special constants
     if unwrapped === π || unwrapped === Base.MathConstants.pi
-        return Giac.GiacCxxBindings.make_identifier("pi")
+        return Giac._identifier_gen("pi")
     elseif unwrapped === ℯ || unwrapped === Base.MathConstants.e
-        return Giac.GiacCxxBindings.make_identifier("e")
+        return Giac._identifier_gen("e")
     elseif unwrapped === im
-        return Giac.GiacCxxBindings.make_identifier("i")
+        return Giac._identifier_gen("i")
     end
 
     # Fallback error
