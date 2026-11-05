@@ -49,3 +49,28 @@
         @test S(x ~ 0.123456789012345) == "x=0.123456789012345"
     end
 end
+
+@testset "first_order" begin
+    @giac_var t q(t) w(t) y(t) z(t) c k
+    D = Differential(t)
+    fo = first_order([D(D(q)) + c * D(q) + k * sin(q) ~ 0])
+    @test string.(fo.states) == ["q", "q′"]
+    @test string.(fo.rhs) == ["q′", "-c*q′-k*sin(q)"]
+    @test fo.differential == 2 && string(fo.t) == "t"
+    @test string(fo.derived["q′′"]) == "-c*q′-k*sin(q)"
+    @test occursin("\\frac{d}{dt}", sprint(show, MIME("text/latex"), fo))
+
+    # coupled, of different orders, in order of appearance; the accelerations solved together
+    two = first_order([D(D(q)) + D(w) ~ w, D(w) - D(D(q)) ~ q])
+    @test string.(two.states) == ["q", "q′", "w"]
+    @test string.(Giac.Commands.simplify.(two.rhs)) == ["q′", "(-q+w)/2", "(q+w)/2"]
+
+    # an unknown without derivatives is algebraic
+    dae = first_order([D(y) ~ -y + z, z ~ y^2])
+    @test string.(dae.states) == ["y", "z"] && dae.differential == 1
+    @test string(dae.rhs[2]) == "z-y^2"
+
+    @test_throws ArgumentError first_order([D(D(q))^2 ~ q])                 # not linear in q″
+    @test_throws ArgumentError first_order([D(q) ~ q, D(q) ~ 2q])           # two equations for one unknown
+    @test_throws ArgumentError first_order([c ~ 1])                         # no unknown functions
+end

@@ -3,7 +3,8 @@
 With [SciMLBase](https://github.com/SciML/SciMLBase.jl) loaded (it comes with any SciML solver
 package), a model written as Giac expressions becomes a SciML problem. The extension
 (`GiacSciMLBaseExt`) compiles the right-hand side and its exact derivatives to native Julia code,
-so a solver calls them at the speed of hand-written functions, without allocating.
+so a solver calls them at the speed of hand-written functions, without allocating. A
+subexpression the entries share is computed once.
 
 ```julia
 using Giac, OrdinaryDiffEqRosenbrock
@@ -43,6 +44,46 @@ nonzeros. Keywords:
 | `mass_matrix` | | passed to `ODEFunction`, for a semi-explicit DAE |
 
 The other keywords of `ODEProblem` (`callback`, …) go to the problem.
+
+## Equations of motion
+
+A model may be written as equations in unknown functions of time and their derivatives, of any
+order. [`first_order`](@ref) (part of Giac itself) brings them to a first-order system: each
+function and its derivatives below the highest are states, written `q`, `q′`, and Giac solves
+the equations for the highest derivatives, so they must be linear in them.
+
+```julia
+@giac_var t q(t) c k
+D = Differential(t)
+eqs = [D(D(q)) + c * D(q) + k * sin(q) ~ 0]
+first_order(eqs)                    # d/dt [q, q′] = [q′, -c*q′-k*sin(q)]
+prob = ODEProblem(eqs, [q => π / 2, D(q) => 0], (0, 10), [c => 0.2, k => 9.81])
+sol[D(q)]                           # the state q′
+sol[D(D(q))]                        # the solved acceleration
+```
+
+Initial values are given by the functions and derivatives themselves. An equation without
+derivatives is an algebraic constraint on an unknown that appears without derivatives, and
+makes the problem a DAE, with a mass matrix whose rows for those unknowns are zero.
+
+## Inputs
+
+`inputs` gives a model's input variables their values. An expression is substituted into the
+model: a feedback law becomes part of the right-hand side and of its exact Jacobian. A Julia
+function of time (a signal, an interpolated measurement) or of `(u, p, t)` (a controller) is
+called by the compiled code:
+
+```julia
+@giac_var x[1:2] u w k1 k2
+G = [x2, -x1 + u]
+prob = ODEProblem(G, [x1 => 1, x2 => 0], (0, 10), [k1 => 2, k2 => 3];
+                  inputs = [u => -k1 * x1 - k2 * x2 + w, w => t -> sin(t)])
+sol[w]                              # an input, observed
+```
+
+A Julia function has no symbolic derivatives: one of the state leaves out the Jacobian and the
+parameter Jacobian, and one of time the time gradient, so the solver differentiates the
+compiled right-hand side itself.
 
 ## Symbolic indexing
 

@@ -110,6 +110,7 @@ include("derivation.jl")
 include("codegen.jl")
 include("assuming.jl")
 include("equations.jl")
+include("first_order.jl")
 include("functions.jl")
 include("collect.jl")
 include("integration.jl")
@@ -149,7 +150,7 @@ export giac_eval, to_julia, list_commands, help_count
 # array declarations, symbolic linear algebra and derivations (giac_identifier, giac_array,
 # giac_latex, written_latex, tidy_latex and Derivation are unexported: Giac.giac_array, …)
 export @giac_var, @giac_several_vars, @giac_matrix, express, ∇, jacobian, hessian, @derivation, assuming
-export lhs, rhs, isolate, @giac_function, taylor, collect_terms, periodic, inverse_of
+export lhs, rhs, isolate, first_order, @giac_function, taylor, collect_terms, periodic, inverse_of
 export @matsym, MatExpr, quadratic_form, differential, partial, integral, integrand, evaluated, by_parts, braket, bra, ket, kronecker_delta, derivative, vectorize, vech, typeset, typeset!, in_form
 
 # Command invocation (009-commands-submodule)

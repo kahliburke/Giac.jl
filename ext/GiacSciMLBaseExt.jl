@@ -32,47 +32,6 @@ _giac(v::GiacExpr) = v
 _giac(v::DerivativeExpr) = Giac._to_giac_expr(v)
 
 # ---------------------------------------------------------------------------
-# Unknown functions of time
-# ---------------------------------------------------------------------------
-
-# `(name, t, order)` for `q(t)` and its derivatives `diff(q(t), t, k)`, else `nothing`
-function _derivative_of(e::GiacExpr)
-    Giac.iscall(e) || return nothing
-    head, args = Giac.symb_funcname(e), Giac.arguments(e)
-    if head == "of"
-        length(args) == 2 && Giac.is_identifier(args[1]) && Giac.is_identifier(args[2]) || return nothing
-        return (string(args[1]), string(args[2]), 0)
-    elseif head == "diff" && length(args) in (2, 3)
-        d = _derivative_of(args[1])
-        (d === nothing || string(args[2]) != d[2]) && return nothing
-        return (d[1], d[2], d[3] + (length(args) == 3 ? Int(Giac.to_julia(args[3])) : 1))
-    end
-    return nothing
-end
-
-# every unknown function of time and derivative in `e`, as `(name, t, order) => node`
-function _function_forms!(found, e::GiacExpr)
-    d = _derivative_of(e)
-    d === nothing || return push!(found, d => e)
-    Giac.iscall(e) && foreach(a -> _function_forms!(found, a), Giac.arguments(e))
-    return found
-end
-_function_forms(e) = _function_forms!(Pair{Tuple{String, String, Int}, GiacExpr}[], e)
-
-# the variable standing for the `k`-th derivative of `name`: q, q′, q″, …
-_state_name(name, k) = name * "′"^k
-_state(name, k) = Giac.giac_identifier(_state_name(name, k))
-
-# `e` with each unknown function and derivative replaced by its variable (derivatives first, as
-# `q(t)` occurs inside them)
-function _as_states(e::GiacExpr, forms = _function_forms(e))
-    for (d, node) in sort(unique(first, forms); by = f -> -f.first[3])
-        e = C.subst(e, node ~ _state(d[1], d[3]))
-    end
-    return e
-end
-
-# ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
 
@@ -139,53 +98,14 @@ end
 
 _is_equations(F) = !isempty(F) && all(Giac._is_equation, F)
 
-# Equations in unknown functions of time, to first order: q and its derivatives below the highest
-# become states, and the equations with derivatives are solved for the highest ones. Equations
-# without derivatives are algebraic, for unknowns that appear without derivatives (a DAE).
+# Equations in unknown functions of time, through `first_order`: unknowns that appear without
+# derivatives make it a DAE, with a mass matrix
 function _equation_model(eqs, params, t, inputs)
     subs, fs = _inputs(inputs)
-    residuals = GiacExpr[_substitute(Giac.lhs(e) - Giac.rhs(e), subs) for e in eqs]
-    forms = reduce(vcat, map(_function_forms, residuals))
-    isempty(forms) && throw(ArgumentError("the equations have no unknown functions of time, such as q(t) from `@giac_var q(t)`"))
-    times = unique(f.first[2] for f in forms)
-    length(times) == 1 || throw(ArgumentError("the unknown functions have different arguments: $(join(times, ", "))"))
-    t === nothing || string(t) == only(times) ||
-        throw(ArgumentError("the unknown functions are functions of $(only(times)), not $t"))
-    t = Giac.giac_identifier(only(times))
-    names = unique(f.first[1] for f in forms)
-    order = Dict(n => maximum(f.first[3] for f in forms if f.first[1] == n) for n in names)
-    rs = [_as_states(r, forms) for r in residuals]
-
-    dynamic = [n for n in names if order[n] > 0]
-    algebraic = [n for n in names if order[n] == 0]
-    highest = GiacExpr[_state(n, order[n]) for n in dynamic]
-    hnames = Set(string.(highest))
-    has_highest(r) = any(s -> string(s) in hnames, Giac.free_symbols(r))
-    deqs, aeqs = filter(has_highest, rs), filter(!has_highest, rs)
-    length(deqs) == length(dynamic) ||
-        throw(ArgumentError("$(length(deqs)) equations with derivatives for the $(length(dynamic)) unknowns $(join(dynamic, ", "))"))
-    length(aeqs) == length(algebraic) ||
-        throw(ArgumentError("$(length(aeqs)) equations without derivatives for the $(length(algebraic)) unknowns $(join(algebraic, ", ")) that appear without them"))
-    solved = try
-        isempty(deqs) ? GiacExpr[] : collect(GiacExpr, C.linsolve(deqs, highest))
-    catch err
-        err isa Giac.GiacError || rethrow()
-        GiacExpr[]
-    end
-    (length(solved) == length(highest) && !any(has_highest, solved)) ||
-        throw(ArgumentError("the equations do not determine $(join(highest, ", ")): they should be linear in the highest derivatives, with a unique solution"))
-
-    states, F = GiacExpr[], GiacExpr[]
-    for (n, s) in zip(dynamic, solved), k in 0:order[n] - 1
-        push!(states, _state(n, k))
-        push!(F, k < order[n] - 1 ? _state(n, k + 1) : s)
-    end
-    append!(states, [_state(n, 0) for n in algebraic])
-    append!(F, aeqs)
-    mass = isempty(algebraic) ? nothing :
-           Diagonal(vcat(ones(length(F) - length(aeqs)), zeros(length(aeqs))))
-    derived = Dict(string(h) => s for (h, s) in zip(highest, solved))
-    m = _Model(F, states, params, t, fs, mass, derived)
+    fo = first_order([_substitute(Giac.lhs(e), subs) ~ _substitute(Giac.rhs(e), subs) for e in eqs]; t)
+    n = length(fo.states)
+    mass = fo.differential == n ? nothing : Diagonal([i <= fo.differential ? 1.0 : 0.0 for i in 1:n])
+    m = _Model(fo.rhs, fo.states, params, fo.t, fs, mass, fo.derived)
     _check_free(m.F, m)
     return m
 end
@@ -313,10 +233,10 @@ SII.getname(d::DerivativeExpr) = Symbol(_name(d))
 # expression that is not a variable
 function _name(sym::GiacExpr)
     Giac.is_identifier(sym) && return string(sym)
-    d = _derivative_of(sym)
-    return d === nothing ? nothing : _state_name(d[1], d[3])
+    d = Giac._derivative_of(sym)
+    return d === nothing ? nothing : Giac._state_name(d[1], d[3])
 end
-_name(d::DerivativeExpr) = _state_name(d.funcname, sum(last, d.steps))
+_name(d::DerivativeExpr) = Giac._state_name(d.funcname, sum(last, d.steps))
 _name(sym::Symbol) = string(sym)
 _name(sym) = nothing
 
@@ -345,7 +265,7 @@ SII.is_observed(::GiacSystem, sym) = false
 function SII.observed(s::GiacSystem, sym::Union{GiacExpr, DerivativeExpr})
     get!(s.observed, string(sym)) do
         m = s.model
-        e = _as_states(_giac(sym))
+        e = Giac._as_states(_giac(sym))
         isempty(m.derived) || (e = substitute(e, (Giac.giac_identifier(k) => v for (k, v) in m.derived)...))
         _check_free((e,), m)
         f = _generate(Any[Giac.to_expr(e)], m; inplace = false)
