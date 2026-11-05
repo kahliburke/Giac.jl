@@ -543,6 +543,10 @@ function _generate_command_functions()
                     function $(cmd)(first_arg::GiacMatrix, rest...)::GiacExpr
                         invoke_cmd($(QuoteNode(cmd)), first_arg, rest...)
                     end
+                    # a Julia matrix of expressions, as products and slices of a Giac matrix give
+                    function $(cmd)(first_arg::AbstractMatrix{GiacExpr}, rest...)::GiacExpr
+                        invoke_cmd($(QuoteNode(cmd)), GiacMatrix(first_arg), rest...)
+                    end
                     export $(cmd)
                 end
             end

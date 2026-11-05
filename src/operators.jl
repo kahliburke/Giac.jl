@@ -334,8 +334,9 @@ end
 
 Scalar multiplication of matrix.
 """
-function Base.:*(A::GiacMatrix, c::Number)::GiacMatrix
-    scalar = convert(GiacExpr, c)
+Base.:*(A::GiacMatrix, c::Number) = _scaled_matrix(A, convert(GiacExpr, c))
+
+function _scaled_matrix(A::GiacMatrix, scalar::GiacExpr)::GiacMatrix
     with_giac_lock() do
         ptr = _giac_matrix_scalar_mul(A.ptr, scalar.ptr)
         if ptr == C_NULL
@@ -346,6 +347,21 @@ function Base.:*(A::GiacMatrix, c::Number)::GiacMatrix
 end
 
 Base.:*(c::Number, A::GiacMatrix) = A * c
+
+# A symbolic scale factor keeps a Giac matrix a Giac matrix, as a number does. (These are more
+# specific than the methods for any array, which give a `Matrix{GiacExpr}`.)
+Base.:*(A::GiacMatrix, c::GiacExpr) = _scaled_matrix(A, c)
+Base.:*(c::GiacExpr, A::GiacMatrix) = A * c
+Base.:/(A::GiacMatrix, c::Number) = A * (one(GiacExpr) / convert(GiacExpr, c))   # exact: σ/2, not σ*0.5
+Base.:/(A::GiacMatrix, c::GiacExpr) = A * (one(GiacExpr) / c)
+Base.:-(A::GiacMatrix) = A * -1
+
+"""
+    kron(A::GiacMatrix, B::GiacMatrix) -> GiacMatrix
+
+The Kronecker product `A ⊗ B`: each entry of `A` times the whole of `B`.
+"""
+Base.kron(A::GiacMatrix, B::GiacMatrix) = GiacMatrix(kron(Matrix(A), Matrix(B)))
 
 # =============================================================================
 # Equation Operator (~) - 024-equation-syntax

@@ -73,6 +73,23 @@
         @test string.(Matrix(M)) == string.(A)
     end
 
+    @testset "a Giac matrix stays one" begin
+        σz, σx = GiacMatrix([1 0; 0 -1]), GiacMatrix([0 1; 1 0])
+        up, dn = GiacMatrix(reshape([1, 0], 2, 1)), GiacMatrix(reshape([0, 1], 2, 1))
+        @giac_var θ
+        σθ = cos(θ) * σz + sin(θ) * σx
+        @test σθ isa GiacMatrix && σz * θ isa GiacMatrix && -σz isa GiacMatrix
+        @test σz / 2 isa GiacMatrix && string.(collect(σz / 2)) == ["1/2", "0", "0", "-1/2"]   # exact
+        @test σz / θ isa GiacMatrix
+        @test σz + I isa GiacMatrix && string.(collect(σz + I)) == ["2", "0", "0", "0"]
+        @test I - σz isa GiacMatrix
+        ψ = (kron(up, dn) - kron(dn, up)) / sqrt(GiacExpr(2))
+        @test ψ isa GiacMatrix && size(ψ) == (4, 1)
+        @test size(kron(σz, up)) == (4, 2)
+        # a command takes a Julia matrix of expressions as it takes a Giac matrix
+        @test string(Giac.Commands.eigenvalues(Matrix(σθ))) == string(Giac.Commands.eigenvalues(σθ))
+    end
+
     @testset "generic Julia operations" begin
         @test string(Giac.Commands.expand(x' * A * x)) ==
               string(Giac.Commands.expand(a11 * x1^2 + (a12 + a21) * x1 * x2 + a22 * x2^2))

@@ -24,6 +24,10 @@ function _add_scaled_identity(A::AbstractMatrix{GiacExpr}, λ)
     return B
 end
 
+Base.:+(A::GiacMatrix, J::UniformScaling) = GiacMatrix(_add_scaled_identity(A, J.λ))
+Base.:+(J::UniformScaling, A::GiacMatrix) = A + J
+Base.:-(A::GiacMatrix, J::UniformScaling) = GiacMatrix(_add_scaled_identity(A, -J.λ))
+Base.:-(J::UniformScaling, A::GiacMatrix) = GiacMatrix(_add_scaled_identity(-A, J.λ))
 Base.:+(A::AbstractMatrix{GiacExpr}, J::UniformScaling) = _add_scaled_identity(A, J.λ)
 Base.:+(J::UniformScaling, A::AbstractMatrix{GiacExpr}) = A + J
 Base.:-(A::AbstractMatrix{GiacExpr}, J::UniformScaling) = _add_scaled_identity(A, -J.λ)
