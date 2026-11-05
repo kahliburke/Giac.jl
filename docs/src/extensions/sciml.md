@@ -21,6 +21,8 @@ name in `F` is an error, except the time variable, given as `t = …`.
 |----------|-------|
 | `ODEProblem(F, u0, tspan, p; t)` | the initial-value problem `ẋ = F(x, p, t)` |
 | `ODEFunction(F, x; p, t)` | its function, with `jac`, `tgrad` and `paramjac` |
+| `SDEProblem(F, G, u0, tspan, p; t)` | the stochastic problem `dx = F dt + G dW` |
+| `SDEFunction(F, G, x; p, t)` | its drift and noise functions |
 | `NonlinearProblem(F, u0, p)` | the system `F(x, p) = 0`, from an initial guess |
 | `NonlinearFunction(F, x; p)` | its function, with `jac` |
 
@@ -96,13 +98,29 @@ computed from the values at the event, or a Julia function of the integrator:
 ```julia
 @giac_var x[1:2] g r k
 ball = ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 5), [g => 9.81, r => 0.8];
-                  events = [x1 < 0 => [x1 => 0, x2 => -r * x2]])
+                  events = [x1 < 0 => [x2 => -r * x2]])
 ODEProblem([-k * x1], [x1 => 1], (0, 2), [k => 1]; events = [(x1 ~ 1 // 2) => [k => 5]])
 ODEProblem(eqs, u0, tspan, p; events = [(D(q) ~ 0) => terminate!])
 ```
 
-A parameter that an event changes is changed only within that solve. The problem's own
+Don't let an affect place the state exactly on the event's own surface, for example by setting
+the ball's height to 0. The solver then misses the next crossing. A parameter that an event
+changes is changed only within that solve. The problem's own
 parameter values do not change. A `callback` given to the problem is kept alongside the events.
+
+## Stochastic models
+
+`SDEProblem(F, G, u0, tspan, p)` gives `dx = F dt + G dW`. The drift `F` works as for
+`ODEProblem`, including equations, inputs and events. The noise `G` is compiled with it.
+A vector `G` gives a separate noise on each state. A matrix `G` gives a column for each noise
+process, and sets the problem's `noise_rate_prototype`:
+
+```julia
+using StochasticDiffEq
+@giac_var x θ μ σ
+ou = SDEProblem([θ * (μ - x)], [σ], [x => 1], (0, 10), [θ => 2, μ => 0, σ => 0.3])
+solve(ou, SOSRI())
+```
 
 ## Symbolic indexing
 

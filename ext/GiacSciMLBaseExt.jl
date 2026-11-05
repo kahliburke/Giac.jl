@@ -316,8 +316,14 @@ _in_states(e::Number, ::_Model) = convert(GiacExpr, e)
 # An input given as a Julia function has no symbolic derivatives: one of the state makes the
 # Jacobians unknown, and one of time the time gradient. A solver then differentiates the
 # compiled right-hand side itself.
-function _ode_function(m::_Model; jac::Bool = true, tgrad::Bool = true, paramjac::Bool = true,
-                       sparse::Bool = false, inplace::Bool = true, kwargs...)
+function _ode_function(m::_Model; inplace::Bool = true, kwargs...)
+    f, fkw, rest = _rhs(m; inplace, kwargs...)
+    return ODEFunction{inplace, SciMLBase.FullSpecialize}(f; fkw..., rest...)
+end
+
+# The compiled right-hand side, the keywords of its derivatives and index, and the other keywords
+function _rhs(m::_Model; jac::Bool = true, tgrad::Bool = true, paramjac::Bool = true,
+              sparse::Bool = false, inplace::Bool = true, kwargs...)
     by_state = any(i -> i.state, m.inputs)
     fkw = Dict{Symbol, Any}(:sys => GiacSystem(m; timed = true))
     if jac && !by_state
@@ -332,7 +338,7 @@ function _ode_function(m::_Model; jac::Bool = true, tgrad::Bool = true, paramjac
         fkw[:paramjac] = _generate(_derivatives(m.F, m.params), m; inplace)
     end
     m.mass === nothing || (fkw[:mass_matrix] = m.mass)
-    return ODEFunction{inplace, SciMLBase.FullSpecialize}(_generate(_codes(m.F), m; inplace); fkw..., kwargs...)
+    return _generate(_codes(m.F), m; inplace), fkw, kwargs
 end
 
 """
@@ -529,16 +535,25 @@ event, or is a Julia function of the integrator, such as `terminate!`:
 
 ```julia
 @giac_var x[1:2] r
-events = [x1 < 0 => [x1 => 0, x2 => -r * x2]]      # a bouncing ball, x1 its height
+events = [x1 < 0 => [x2 => -r * x2]]       # a bouncing ball, x1 its height
 ```
 
-An event's parameter changes are the solve's own: the problem keeps its values.
+An affect that puts the state exactly on the event's surface (here `x1 => 0`) hides the next
+crossing from the solver. An event's parameter changes are the solve's own: the problem keeps
+its values.
 
 `F` may also be a function from `@giac_function` with arguments
 `(u, p, t)`. The keywords of `ODEFunction` build the function; the others go to
 `SciMLBase.ODEProblem`.
 """
 function SciMLBase.ODEProblem(F::AbstractVector{GiacExpr}, u0, tspan, p = (); t = nothing, kwargs...)
+    m, u, pv, fkw, pkw, _ = _problem_model(F, u0, p, t, kwargs)
+    return ODEProblem(_ode_function(m; fkw...), u, _tspan(tspan), pv; pkw...)
+end
+
+# A problem's model, its initial state and parameter values, the keywords of its function and
+# of the problem, with the events as callbacks, and its inputs
+function _problem_model(F, u0, p, t, kwargs)
     params, pv = _assignment(p)
     fkw, pkw = _split(kwargs)
     inputs = pop!(fkw, :inputs, ())
@@ -554,7 +569,7 @@ function SciMLBase.ODEProblem(F::AbstractVector{GiacExpr}, u0, tspan, p = (); t 
         cbs = _callbacks(events, m)
         pkw[:callback] = SciMLBase.CallbackSet(get(pkw, :callback, nothing), cbs...)
     end
-    return ODEProblem(_ode_function(m; fkw...), u, _tspan(tspan), pv; pkw...)
+    return m, u, pv, fkw, pkw, inputs
 end
 
 function SciMLBase.ODEProblem(F::GiacFunction, u0, tspan, p = (); kwargs...)
@@ -600,5 +615,69 @@ end
 
 _tspan(t::Tuple) = promote(map(float ∘ _value, t)...)
 _tspan(t) = t
+
+# ---------------------------------------------------------------------------
+# Stochastic models
+# ---------------------------------------------------------------------------
+
+# The noise of a model in its state variables, with its inputs substituted: a vector for a
+# separate noise on each state, or a matrix with a column for each noise process
+function _noise(G::AbstractVecOrMat, m::_Model, inputs)
+    subs, _ = _inputs(inputs)
+    size(G, 1) == length(m.states) ||
+        throw(DimensionMismatch("the noise has $(size(G, 1)) rows for $(length(m.states)) states"))
+    return map(g -> _in_states(g isa Number ? g : _substitute(_giac(g), subs), m), G)
+end
+
+function _sde_function(m::_Model, G; inplace::Bool = true, kwargs...)
+    f, fkw, rest = _rhs(m; inplace, kwargs...)
+    g = _generate(_codes(G), m; inplace)
+    return SciMLBase.SDEFunction{inplace, SciMLBase.FullSpecialize}(f, g; fkw..., rest...)
+end
+
+"""
+    SDEFunction(F, G, x; p = [], t = nothing, inputs = [], kwargs...)
+    SDEFunction(eqs, G; p = [], inputs = [], kwargs...)
+
+The SciML function of the stochastic model `dx = F(x, p, t) dt + G(x, p, t) dW`, with the drift
+`F` as for [`ODEFunction`](@ref) and the noise `G` compiled with it. `G` is a vector for a
+separate noise on each state (diagonal noise), or a matrix with a column for each noise process.
+With equations, `G` is written in the unknown functions and their derivatives.
+"""
+function SciMLBase.SDEFunction(F::AbstractVector{GiacExpr}, G::AbstractVecOrMat, x::_Vars; p = GiacExpr[],
+                               t = nothing, inputs = (), kwargs...)
+    m = _vector_model(F, _vector(x), _vector(p), t, inputs)
+    return _sde_function(m, _noise(G, m, inputs); kwargs...)
+end
+
+function SciMLBase.SDEFunction(eqs::AbstractVector{GiacExpr}, G::AbstractVecOrMat; p = GiacExpr[], t = nothing,
+                               inputs = (), kwargs...)
+    _is_equations(eqs) || throw(ArgumentError("give the states of a vector of drifts: SDEFunction(F, G, x)"))
+    m = _equation_model(eqs, _vector(p), t, inputs)
+    return _sde_function(m, _noise(G, m, inputs); kwargs...)
+end
+
+"""
+    SDEProblem(F, G, u0, tspan, p = (); t = nothing, inputs = [], events = [], kwargs...)
+    SDEProblem(eqs, G, u0, tspan, p = (); inputs = [], events = [], kwargs...)
+
+The stochastic initial-value problem `dx = F(x, p, t) dt + G(x, p, t) dW`, `x(t₀) = u0`, with
+assignments, inputs and events as for [`ODEProblem`](@ref) and the noise `G` as for
+[`SDEFunction`](@ref):
+
+```julia
+@giac_var x θ μ σ
+SDEProblem([θ * (μ - x)], [σ], [x => 1], (0, 10), [θ => 2, μ => 0, σ => 0.3])   # Ornstein–Uhlenbeck
+```
+
+A matrix `G` sets the problem's `noise_rate_prototype`.
+"""
+function SciMLBase.SDEProblem(F::AbstractVector{GiacExpr}, G::AbstractVecOrMat, u0, tspan, p = ();
+                              t = nothing, kwargs...)
+    m, u, pv, fkw, pkw, inputs = _problem_model(F, u0, p, t, kwargs)
+    noise = _noise(G, m, inputs)
+    noise isa AbstractMatrix && !haskey(pkw, :noise_rate_prototype) && (pkw[:noise_rate_prototype] = zeros(size(noise)))
+    return SciMLBase.SDEProblem(_sde_function(m, noise; fkw...), u, _tspan(tspan), pv; pkw...)
+end
 
 end # module

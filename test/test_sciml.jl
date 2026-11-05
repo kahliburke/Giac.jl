@@ -176,7 +176,7 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
         tb, tol = sqrt(2 / 9.81), (; abstol = 1e-10, reltol = 1e-10)
         # a bouncing ball: the event when the inequality becomes true, the velocity from before it
         ball = ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 3), [g => 9.81, r => 0.8];
-                          events = [x1 < 0 => [x1 => 0, x2 => -r * x2]])
+                          events = [x1 < 0 => [x2 => -r * x2]])
         sol = solve(ball, Rodas5P(); tol...)
         @test sol(tb + 2 * 0.8 * tb; idxs = x1) ≈ 0 atol = 1e-8
         @test sol(tb + 0.8 * tb; idxs = x1) ≈ 0.64
@@ -210,6 +210,36 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
 
         @test_throws ArgumentError ODEProblem([x2, -g], [x1 => 1, x2 => 0], (0, 3), [g => 9.81];
                                               events = [x1 < 0 => [g * x1 => 0]])
+    end
+
+    @testset "stochastic models" begin
+        local t, q, θ, μ, σ
+        @giac_var θ μ σ
+        # diagonal noise: one per state
+        ou = SDEProblem([θ * (μ - x1)], [σ * x1], [x1 => 1], (0, 10), [θ => 2, μ => 0, σ => 0.3])
+        d, u1 = zeros(1), [2.0]
+        ou.f(d, u1, ou.p, 0.0)
+        @test d == [-4.0]
+        ou.g(d, u1, ou.p, 0.0)
+        @test d ≈ [0.6]
+        @test ou.f.jac !== nothing && string.(variable_symbols(ou)) == ["x1"]
+        @test (@allocated ou.g(d, u1, ou.p, 0.0)) == 0
+
+        # a matrix: a column for each noise process, and the problem's noise prototype
+        m = SDEProblem([x2, -x1], [0 0; σ σ * x1], [x1 => 1, x2 => 0], (0, 1), [σ => 0.5])
+        G = fill(NaN, 2, 2)
+        m.g(G, [2.0, 1.0], m.p, 0.0)
+        @test G == [0 0; 0.5 1.0] && size(m.noise_rate_prototype) == (2, 2)
+        @test SDEProblem([x2, -x1], [0 0; σ σ * x1], [x1 => 1, x2 => 0], (0, 1), [σ => 0.5]; inplace = false).g([2.0, 1.0], [0.5], 0.0) == G
+
+        # equations, with the noise in the unknown function's derivative
+        @giac_var t q(t)
+        D = Differential(t)
+        e = SDEProblem([D(D(q)) ~ -q], [0, σ * D(q)], [q => 1, D(q) => 2], (0, 1), [σ => 0.5])
+        d2 = zeros(2)
+        e.g(d2, [1.0, 2.0], e.p, 0.0)
+        @test d2 == [0, 1.0]
+        @test_throws DimensionMismatch SDEProblem([x2, -x1], [σ], [x1 => 1, x2 => 0], (0, 1), [σ => 0.5])
     end
 
     @testset "errors" begin
