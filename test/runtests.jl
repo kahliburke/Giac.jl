@@ -38,6 +38,7 @@ using LinearAlgebra
     include("test_presentation_physics.jl")
     include("test_derivation_rows.jl")
     include("test_threads.jl")
+    VERSION >= v"1.12" && include("test_dedicated_thread.jl")
     include("test_core.jl")
     include("test_roots.jl")
     include("test_normal_forms.jl")

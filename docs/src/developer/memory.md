@@ -29,7 +29,7 @@ graph LR
 1. **Every C++ allocation has a corresponding deallocation**
 2. **Finalizers ensure cleanup when Julia objects are garbage collected**
 3. **Raw pointers are never exposed in the public API**
-4. **Thread safety is ensured via locks**
+4. **Every GIAC call runs on one thread** (see Thread Safety)
 
 ## GiacExpr Lifecycle
 
@@ -151,54 +151,35 @@ end
 
 ## Thread Safety
 
-GIAC is not inherently thread-safe, so Giac.jl uses locks to prevent concurrent access.
+GIAC is not thread-safe, and it keeps some of its state per OS thread: an assumption made on one
+thread is not there for a call on another. So every GIAC call runs on one thread, in one task that
+does one job at a time. `with_giac_lock(f)` hands `f` to that task and waits for its result; code
+already running there (a GIAC call made from inside another) runs at once.
 
-### The `with_giac_lock` Pattern
+### Which thread
 
-All evaluation operations use `with_giac_lock`:
+| Setup | Where GIAC runs |
+|-------|-----------------|
+| `-t 1` | in place, in the calling task, under `GIAC_LOCK` |
+| several threads | a task pinned to the last thread of the default pool, which other tasks share |
+| DedicatedThreads loaded (Julia 1.12+) | a pool of one OS thread that runs nothing else, with any `-t` |
 
-```julia
-function with_giac_lock(f::Function, ctx::GiacContext=DEFAULT_CONTEXT)
-    lock(ctx.lock)
-    try
-        return f()
-    finally
-        unlock(ctx.lock)
-    end
-end
-```
-
-### Usage in Code
+With [DedicatedThreads.jl](https://github.com/kahliburke/DedicatedThreads.jl), GIAC is not slowed
+down by other work scheduled on its thread and does not take a thread from the default pool. The
+thread is chosen when the task starts, at the first GIAC computation, so load it first:
 
 ```julia
-# In command_utils.jl
-function giac_cmd(cmd::Symbol, args...)::GiacExpr
-    # ... argument processing ...
-
-    return with_giac_lock() do
-        giac_eval(cmd_string)
-    end
-end
+using Giac, DedicatedThreads
 ```
 
-### GiacContext Lock
+Loaded later, it leaves GIAC where it is, with a warning.
 
-Each `GiacContext` contains a `ReentrantLock`:
+### Identifiers
 
-```julia
-mutable struct GiacContext
-    ptr::Ptr{Cvoid}
-    lock::ReentrantLock  # For thread safety
-
-    function GiacContext(ptr::Ptr{Cvoid})
-        ctx = new(ptr, ReentrantLock())
-        finalizer(_finalize_giaccontext, ctx)
-        return ctx
-    end
-end
-```
-
-**Why ReentrantLock?**: Allows the same thread to acquire the lock multiple times (nested calls), which is necessary for complex expression evaluation.
+A GIAC context records an assumption or a value under the name of the identifier it was made
+with, without copying the name. Giac.jl therefore keeps one identifier per name for the session
+(`_identifier_gen`) and hands out copies of it, so the identifier behind a context's entry is never
+freed. Code that builds GIAC objects directly must take identifiers from there.
 
 ## Best Practices
 

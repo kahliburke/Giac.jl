@@ -319,6 +319,8 @@ Command generation is triggered here (not in Commands.__init__) because nested
 module __init__ functions run BEFORE parent module __init__ in Julia.
 """
 function __init__()
+    # in place, so the GIAC thread starts at the first call after loading (see `_giac_task`)
+    _INITIALIZING[] = true
     try
         init_giac_library()
         empty!(_IDENTIFIERS)
@@ -333,6 +335,8 @@ function __init__()
     catch e
         @error "Failed to initialize GIAC library" exception=e
         rethrow()
+    finally
+        _INITIALIZING[] = false
     end
 end
 

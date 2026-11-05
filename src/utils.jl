@@ -15,29 +15,41 @@ const GIAC_LOCK = ReentrantLock()
 # one of them, in a task pinned there that does one job at a time. That also serializes GIAC,
 # which isn't thread-safe. With a single thread, or while precompiling, calls run where they are,
 # under `GIAC_LOCK`.
+#
+# The task is pinned to the last thread of the default pool, which other tasks share. With
+# DedicatedThreads loaded, GiacDedicatedThreadsExt sets `_GIAC_TASK_STARTER` to start it on an OS
+# thread of its own instead, with any number of threads. The task starts at the first GIAC call
+# after loading, so the extension has to be loaded before then.
 
 const _GIAC_TASK = Ref{Union{Nothing, Task}}(nothing)
 const _GIAC_INBOX = Channel{Tuple{Any, Any, Channel{Any}, Any}}(Inf)
 const _GIAC_START_LOCK = ReentrantLock()
 const _ACTIVE_FRAME = Ref{Any}(nothing)     # the frame of the task whose job the GIAC thread is running
 const _INLINE_DEPTH = Ref(0)                # how deeply `GIAC_LOCK` is held when calls run in place
+const _GIAC_TASK_STARTER = Ref{Any}(nothing) # `serve -> task` running `serve` on a thread of its own
+const _INITIALIZING = Ref(false)            # `__init__` runs its calls in place, starting no task
 
 _on_giac_thread() = current_task() === _GIAC_TASK[]
-_giac_threaded() = Threads.maxthreadid() > 1 && ccall(:jl_generating_output, Cint, ()) == 0
+_giac_threaded() = (Threads.maxthreadid() > 1 || _GIAC_TASK_STARTER[] !== nothing) && !_INITIALIZING[] &&
+                   ccall(:jl_generating_output, Cint, ()) == 0
 
-# The GIAC thread's task, started on first use on the last thread of the default pool
+# The GIAC thread's task, started on first use
 function _giac_task()
     t = _GIAC_TASK[]
     t === nothing || return t
     return lock(_GIAC_START_LOCK) do
         _GIAC_TASK[] === nothing || return _GIAC_TASK[]
-        t = Task(_giac_serve)
-        t.sticky = true
-        ccall(:jl_set_task_tid, Cint, (Any, Cint), t, last(Threads.threadpooltids(:default)) - 1)
-        _GIAC_TASK[] = t
-        schedule(t)
-        t
+        start = _GIAC_TASK_STARTER[]
+        _GIAC_TASK[] = start === nothing ? _start_on_default_pool(_giac_serve) : start(_giac_serve)
     end
+end
+
+# `serve` in a task pinned to the last thread of the default pool
+function _start_on_default_pool(serve)
+    t = Task(serve)
+    t.sticky = true
+    ccall(:jl_set_task_tid, Cint, (Any, Cint), t, last(Threads.threadpooltids(:default)) - 1)
+    return schedule(t)
 end
 
 # A job runs in the latest world: this task outlives the methods defined after it started (a

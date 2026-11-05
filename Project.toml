@@ -16,6 +16,7 @@ libgiac_julia_jll = "ec39d2da-6bdf-580b-ada4-cd6e059515c9"
 [weakdeps]
 Clarabel = "61c947e1-3e6d-4ee4-985a-eec8c727bd6e"
 AlgebraicSolving = "66b61cbe-0446-4d5d-9090-1ff510639f9d"
+DedicatedThreads = "9d6577c3-9664-4440-a53f-cec765ebc045"
 KaimonGate = "5ee84a8c-75bd-412f-a7b8-4e6463aa635f"
 HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
@@ -32,6 +33,7 @@ TermInterface = "8ea1fca8-c5ef-4a55-8b96-4e9afe9c9a3c"
 [extensions]
 GiacClarabelExt = ["JuMP", "Clarabel", "Nemo"]
 GiacAlgebraicSolvingExt = ["AlgebraicSolving", "Nemo"]
+GiacDedicatedThreadsExt = "DedicatedThreads"
 GiacKaimonGateExt = "KaimonGate"
 GiacJuMPExt = ["JuMP", "HiGHS", "Nemo"]
 GiacBlockArraysExt = "BlockArrays"
@@ -53,6 +55,7 @@ CSV = "0.10"
 CommonSolve = "0.2"
 CxxWrap = "0.17"
 DataFrames = "1.6, 1.7, 1.8"
+DedicatedThreads = "0.1"
 Documenter = "1"
 ForwardDiff = "0.10, 1"
 GIAC_jll = "2.0.3"
