@@ -337,11 +337,23 @@ sp = py(() -> NamedTuple(n => SP.symbols(string(n)) for n in (:x, :y, :z, :t, :a
 
 Expanding, factoring and greatest common divisors: the core of any computer algebra system. Each cell gives the answer, shortened, and below it the time. Symbolics has no public `factor`, and its `gcd` takes numbers only.
 
-GIAC factors further than the others: by default (its `withsqrt` mode) it splits a quadratic factor with square roots, so $x^4 + 1 = (x^2 - \sqrt2 x + 1)(x^2 + \sqrt2 x + 1)$, where the other systems factor over the rationals and stop at the cyclotomic polynomials.
+By default GIAC factors further than the others: its `withsqrt` mode splits a quadratic factor with square roots, so $x^4 + 1 = (x^2 - \sqrt2 x + 1)(x^2 + \sqrt2 x + 1)$. The tasks here run with that mode off (`over_rationals`), so GIAC factors over the rationals, as the other systems do.
 """
 
 #%% code id=algebra
-algebra = compare("algebra", [
+# GIAC's `factor` over the rationals, as the other systems factor: its `withsqrt` mode (the tenth
+# entry of `cas_setup`), which splits quadratic factors with square roots, is off while `f` runs
+function over_rationals(f)
+    saved = string(Giac.giac_eval("cas_setup()"))
+    Giac.giac_eval("cas_setup(op(subsop(cas_setup(), 9 = 0)))")
+    try
+        f()
+    finally
+        Giac.giac_eval("cas_setup(op($saved))")
+    end
+end
+algebra = over_rationals() do
+    compare("algebra", [
     "expand (1 + x + y + z)²⁰: the number of terms, 1771" => (
         () -> length(Giac.arguments(C.expand((1 + x + y + z)^20))),
         () -> length(Sym.arguments(Sym.value(Sym.expand((1 + sy.x + sy.y + sy.z)^20)))),
@@ -364,6 +376,7 @@ algebra = compare("algebra", [
     "Factor[Expand[(x^3 y + 2 x z - y^2 + 1)^3 (x - y^4 + 3 z)^2]]",
     "Factor[PolynomialGCD[Expand[(x + y + 1)^10 (x - y)^5], Expand[(x + y + 1)^7 (x + 2 y)^6]]]",
 ])
+end
 
 #%% md id=calculus_md
 @md raw"""
