@@ -79,9 +79,9 @@
         @giac_var θ
         σθ = cos(θ) * σz + sin(θ) * σx
         @test σθ isa GiacMatrix && σz * θ isa GiacMatrix && -σz isa GiacMatrix
-        @test σz / 2 isa GiacMatrix && string.(collect(σz / 2)) == ["1/2", "0", "0", "-1/2"]   # exact
+        @test σz / 2 isa GiacMatrix && string.(Matrix(σz / 2)) == ["1/2" "0"; "0" "-1/2"]   # exact
         @test σz / θ isa GiacMatrix
-        @test σz + I isa GiacMatrix && string.(collect(σz + I)) == ["2", "0", "0", "0"]
+        @test σz + I isa GiacMatrix && string.(Matrix(σz + I)) == ["2" "0"; "0" "0"]
         @test I - σz isa GiacMatrix
         ψ = (kron(up, dn) - kron(dn, up)) / sqrt(GiacExpr(2))
         @test ψ isa GiacMatrix && size(ψ) == (4, 1)

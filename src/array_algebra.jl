@@ -113,8 +113,10 @@ P★ = solve(P*A + A'*P ~ -I, P)
 ```
 """
 Commands.solve(eqs::AbstractArray{GiacExpr}, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix(eqs, X)
-# the generated `solve(::GiacInput, …)` and `solve(::GiacMatrix, …)` also accept these arguments
+# the generated `solve(::GiacInput, …)`, `solve(::GiacMatrix, …)` and `solve(::AbstractMatrix{GiacExpr}, …)`
+# also accept these arguments
 Commands.solve(eqs::AbstractVector{GiacExpr}, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix(eqs, X)
+Commands.solve(eqs::AbstractMatrix{GiacExpr}, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix(eqs, X)
 Commands.solve(eqs::GiacMatrix, X::AbstractMatrix{GiacExpr}) = _solve_for_matrix(eqs, X)
 
 function _solve_for_matrix(eqs, X)
