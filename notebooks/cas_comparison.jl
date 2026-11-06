@@ -9,24 +9,30 @@ How the Giac.jl of this branch compares with Symbolics.jl and ModelingToolkit, S
 Each Julia system is timed after a first run that compiles, as the best of three runs. Mathematica runs through `wolframscript`, one kernel per section, timed inside the kernel with `AbsoluteTiming` after a first run and with its caches cleared.
 
 SymPy has two columns. **SymPy, from Julia** calls it through SymPyPythonCall, on a thread of its own, after a first run and with its cache cleared; a task that may not end runs instead in a separate Python process with a time limit, since a call into Python can't be interrupted. **SymPy, in Python** is the same task run natively by `cas_comparison_sympy.py`, beside this notebook: a first run, then the best of three with the cache cleared, each task under an alarm. Its results are kept in `~/.cache/giac/benchmarks/` and read here; the script runs again only when it changes.
+
+Answers are typeset, each system's in its own notation, and checked against one another by their values at one point, $x = 7/10$, $y = 2/5$, $z = 3/10$, $a = 13/10$: an antiderivative by its change from $x = 2/5$ to $x = 7/10$, a series by its polynomial part, and solutions as a set. Where a task states its value, answers are checked against it; otherwise against the value that most systems agree on, if at least two do. An answer that differs is marked wrong. Closed-form ODE solutions aren't checked, since each system names and places its constants differently.
 """
 
-#%% code id=python nocache
+#%% code id=python nocache eval_barrier
 using DedicatedThreads: DedicatedPool, spawn
 # Python belongs to the OS thread that starts it, and a cell may run on any thread. So SymPy gets a
 # thread of its own: SymPyPythonCall is loaded there, which starts Python on it, and every SymPy
 # call is sent there with `py`. The module is bound from that load rather than by an `import`,
 # which the notebook would run early, on another thread. The pool is kept in `Main`, so that a
-# re-run of this cell sends its calls to the same thread, where Python already runs.
+# re-run of this cell sends its calls to the same thread, where Python already runs. An error is
+# written out there and raised again as text: a Python exception shown on another thread crashes.
 PYTHON = isdefined(Main, :PYTHON_POOL) ? Main.PYTHON_POOL :
          Core.eval(Main, :(const PYTHON_POOL = $(DedicatedPool(1; name = :python))))
-py(f) = fetch(spawn(f, PYTHON))
+function py(f)
+    ok, r = fetch(spawn(() -> try (true, f()) catch e; (false, sprint(showerror, e)) end, PYTHON))
+    ok ? r : error(r)
+end
 const SP = py(() -> Base.require(Base.PkgId(Base.UUID("bc8888f7-b21e-4b7c-a06a-5d9c9496438c"), "SymPyPythonCall")))
 py(() -> Threads.threadid()), py(() -> string(SP.sympy.factor(SP.sympy.sympify("x^12 - 1"))))
 
 #%% code id=setup
 using Giac, GiacSlate, LinearAlgebra, BenchmarkTools
-import Symbolics as Sym, Groebner
+import Symbolics as Sym, Groebner, Latexify
 const C = Giac.Commands
 # `wolframscript` with `args`, its output as text: one kernel at a time, and a run that crashes is
 # tried again, up to three times
@@ -150,12 +156,19 @@ end
 capabilities
 
 #%% code id=harness collapsed
-"One system's answer to a task, shortened, the seconds it took, and whether it is an answer."
-struct Trial
+"""
+One system's answer to a task: shortened as text, typeset, the seconds it took, whether it is an
+answer, its values at the comparison point, and how they compare with the other systems'.
+"""
+mutable struct Trial
     answer::String
     seconds::Union{Nothing, Float64}
-    status::Symbol               # :ok, :unevaluated, :error or :absent
+    status::Symbol               # :ok, :unevaluated, :error, :absent, or a judgement below
+    latex::String                # empty when there is none
+    values::Union{Nothing, Vector{Vector{ComplexF64}}}   # solutions, each a vector of components
+    check::String                # "agrees", "differs", "2 of 6 solutions", or empty if unchecked
 end
+Trial(answer, seconds, status; latex = "", values = nothing) = Trial(answer, seconds, status, latex, values, "")
 Trial(::Nothing) = Trial("not available", nothing, :absent)
 
 "Tasks run in each system: rows of `task => [trial in each system]`."
@@ -165,12 +178,17 @@ end
 
 shorten(s; n = 160) = (s = replace(string(s), r"\s+" => " "); length(s) <= n ? s : first(s, n) * " … ($(length(s)) characters)")
 
+# The point at which answers are compared, exact. An antiderivative is compared by its change from
+# x0 to x, a series by its polynomial part, solutions as a set.
+POINT = Dict("x" => 7//10, "x0" => 2//5, "xr" => 7//10, "y" => 2//5, "z" => 3//10, "t" => 3//5, "a" => 13//10, "n" => 3)
+_text(v) = v isa Rational ? "$(numerator(v))/$(denominator(v))" : string(v)
+
 # The answer of `f` and its time: a first run compiles and fills caches, then the best of three
 # runs, or one run when it takes more than half a second. `reset` clears a system's cache of
 # results before each timed run. `unevaluated` tells an answer from the question given back.
-# With a `limit`, a first run that takes longer is abandoned (Julia can't interrupt it, so it
-# finishes in the background).
-function measure(f; reset = () -> nothing, unevaluated = _ -> false, show = string, limit = 60)
+# `describe` gives the answer typeset and its values, untimed. With a `limit`, a first run that
+# takes longer is abandoned (Julia can't interrupt it, so it finishes in the background).
+function measure(f; reset = () -> nothing, unevaluated = _ -> false, show = string, describe = _ -> ("", nothing), limit = 60)
     try
         if limit === nothing
             r = f()
@@ -186,25 +204,78 @@ function measure(f; reset = () -> nothing, unevaluated = _ -> false, show = stri
             end)
         end
         s = show(r)
-        Trial(shorten(s), t, unevaluated(s) ? :unevaluated : :ok)
+        latex, values = try describe(r) catch; ("", nothing) end
+        Trial(shorten(s), t, unevaluated(s) ? :unevaluated : :ok; latex, values)
     catch e
         Trial(shorten("error: " * sprint(showerror, e); n = 120), nothing, :error)
     end
 end
 
+# ── Giac: the answer at the point, by exact substitution and 20-digit evaluation
+_giac_tex(r) = r isa GiacExpr ? String(strip(sprint(show, MIME"text/latex"(), r), ['$', '\n', ' '])) : string(r)
+function _giac_at(e; over...)
+    e isa Number && return e
+    p = merge(POINT, Dict(string(k) => v for (k, v) in over))
+    names = [string(n) for n in C.lname(e)]
+    isempty(names) || (e = C.subst(e, Giac.giac_eval("[" * join(names, ",") * "]"), Giac.giac_eval("[" * join(_text.(getindex.(Ref(p), names)), ",") * "]")))
+    to_julia(C.evalf(e, 20))
+end
+function giac_values(r, kind)
+    kind === :at && return [[_giac_at(r)]]
+    kind === :antiderivative && return [[_giac_at(r) - _giac_at(r; x = POINT["x0"])]]
+    kind === :series && return [[_giac_at(C.convert(r, Giac.giac_eval("polynom")))]]
+    kind === :solutions && return [s isa AbstractVector ? collect(s) : [s] for s in _giac_at(r)]
+    nothing
+end
+
+# ── Symbolics: the answer at the point, in floating point; typeset by Latexify
+function _symbolics_at(e)
+    e isa Union{Integer, AbstractFloat, Rational} && return e
+    v = Sym.value(Sym.substitute(e, Dict(v => float(POINT[string(v)]) for v in Sym.get_variables(e))))
+    v isa Number ? v : Sym.symbolic_to_float(v)
+end
+function symbolics_values(r, kind)
+    kind in (:at, :series) && return [[_symbolics_at(r)]]
+    kind === :solutions && return [s isa AbstractDict ? [_symbolics_at(s[k]) for k in sort!(collect(keys(s)); by = string)] :
+                                   s isa AbstractVector ? _symbolics_at.(s) : [_symbolics_at(s)] for s in r]
+    nothing
+end
+_symbolics_tex(r) = r === nothing ? "" : String(strip(Latexify.latexify(r; env = :raw)))
+
+# ── SymPy: typeset and evaluated by `describe` in the script beside this notebook, on Python's
+# thread. `_sympy_describe` must be called there; `sympy_describe` sends it there.
+# (imported again on a re-run, so that an edit to the script takes effect)
+const SCRIPT = py(() -> (sys = SP.PythonCall.pyimport("sys");
+                         dir = joinpath(pkgdir(Giac), "notebooks");
+                         dir in SP.PythonCall.pyconvert(Vector{String}, sys.path) || sys.path.insert(0, dir);
+                         SP.PythonCall.pyimport("importlib").reload(SP.PythonCall.pyimport("cas_comparison_sympy"))))
+const PY_POINT = py(() -> SCRIPT.point(Dict(k => _text(v) for (k, v) in POINT)))
+# SymPyPythonCall's own wrapper of a Python object, unwrapped
+_python(r) = r isa SP.SymPyCore.SymbolicObject ? getfield(r, :o) : r isa Union{AbstractArray, Tuple} ? map(_python, r) : r
+function _sympy_describe(r, kind)
+    d = TOML.parse(SP.PythonCall.pyconvert(String, SCRIPT.describe(_python(r), string(kind), PY_POINT)))
+    d["latex"], haskey(d, "values") ? [[ComplexF64(c[1], c[2]) for c in s] for s in d["values"]] : nothing
+end
+sympy_describe(srepr, kind) = try py(() -> _sympy_describe(SCRIPT.revive(srepr), kind)) catch; ("", nothing) end
+
 # The comparison tables' columns: SymPy twice, called from Julia and run natively in Python
 COLUMNS = ["Giac.jl", "Symbolics / MTK", "SymPy, from Julia", "SymPy, in Python", "Mathematica"]
 
+# an answer's values from `f`, as complex numbers, or none if they can't be found
+_values(f) = r -> try (v = f(r); v === nothing ? nothing : [ComplexF64.(s) for s in v]) catch; nothing end
 _sympy_unevaluated(s) = occursin(r"\b(Integral|Limit)\(", s)
-giac(f) = measure(f; unevaluated = s -> occursin(r"\b(integrate|limit|desolve|int)\(|Unable to|^(list)?\[\]$", s))
-symbolics(f) = measure(f; unevaluated = s -> s == "nothing")
+giac(f, kind) = measure(f; unevaluated = s -> occursin(r"\b(integrate|limit|desolve|int)\(|Unable to|^(list)?\[\]$", s),
+                        describe = r -> (_giac_tex(r), _values(r -> giac_values(r, kind))(r)))
+symbolics(f, kind) = measure(f; unevaluated = s -> s == "nothing",
+                             describe = r -> (try _symbolics_tex(r) catch; "" end, _values(r -> symbolics_values(r, kind))(r)))
 # on Python's own thread, without a limit: a task spawned from there would leave the thread
-sympy(f) = py(() -> measure(f; reset = () -> SP.sympy.core.cache.clear_cache(), unevaluated = _sympy_unevaluated, limit = nothing))
+sympy(f, kind) = py(() -> measure(f; reset = () -> SP.sympy.core.cache.clear_cache(), unevaluated = _sympy_unevaluated,
+                                     describe = r -> _sympy_describe(r, kind), limit = nothing))
 
 # SymPy code run in a separate Python process with a time limit, for a task that may not end
 # (a call into Python can't be interrupted): its answer and the time of a run after a first one,
 # with SymPy's cache cleared, or none within the limit. `x, y, z, t, a` are symbols.
-function sympy(code::String; limit = 30)
+function sympy(code::String, kind; limit = 30)
     python = SP.PythonCall.C.CTX.exe_path
     script = """
     import time
@@ -216,28 +287,42 @@ function sympy(code::String; limit = 30)
     t0 = time.time()
     r = $code
     print(time.time() - t0)
+    print(srepr(r))
     print(r)
     """
     out, err = IOBuffer(), IOBuffer()
     p = run(pipeline(`$python -c $script`; stdout = out, stderr = err); wait = false)
     timedwait(() -> process_exited(p), limit; pollint = 0.1) === :ok || (kill(p); return Trial("no answer within $limit s", nothing, :error))
     success(p) || return Trial(shorten("error: " * last(split(strip(String(take!(err))), '\n')); n = 120), nothing, :error)
-    t, answer = split(strip(String(take!(out))), '\n'; limit = 2)
-    Trial(shorten(answer), parse(Float64, t), _sympy_unevaluated(answer) ? :unevaluated : :ok)
+    t, srepr, answer = split(strip(String(take!(out))), '\n'; limit = 3)
+    latex, values = sympy_describe(srepr, kind)
+    Trial(shorten(answer), parse(Float64, t), _sympy_unevaluated(answer) ? :unevaluated : :ok; latex, values)
 end
 
 # Each task's Wolfram Language code, run in one kernel with a time limit, timed inside it after
-# a first run, with the kernel's caches cleared before each run and its messages silenced
-function mathematica(codes::Vector{String}; limit = 120)
+# a first run, with the kernel's caches cleared before each run and its messages silenced; then
+# typeset, and evaluated at the point for the comparison of its kind
+function mathematica(codes::Vector{String}, kinds; limit = 120)
+    rules = join(("$k -> $(_text(v))" for (k, v) in POINT if k != "x0"), ", ")
     script = """
     \$Messages = {};
-    SetAttributes[time, HoldAll];
-    time[e_] := Module[{r, t},
+    point = {$rules};
+    num[e_] := With[{v = N[e /. point]}, If[NumericQ[v], {Re[v], Im[v]}, {Indeterminate, 0}]];
+    vals["at", r_] := {{num[r]}};
+    vals["antiderivative", r_] := {{num[r] - num[r /. x -> $(_text(POINT["x0"]))]}};
+    vals["series", r_] := {{num[Normal[r]]}};
+    vals["solutions", r_] := Map[num, Values[r], {2}];
+    vals[_, _] := None;
+    (* TeXForm without a front end leaves a Root empty: written root_k(p(z)) instead *)
+    tex[r_] := StringReplace[ToString[TeXForm[r /. Root[p_, k_, ___] :> Subscript["root", k][p[z]]]], "\\n" -> " "];
+    SetAttributes[time, HoldFirst];
+    time[e_, kind_] := Module[{r, t},
         ClearSystemCache[]; r = TimeConstrained[e, $limit, \$Aborted];
-        If[r === \$Aborted, Return["\$Aborted\\t-"]];
+        If[r === \$Aborted, Return["\$Aborted\\t\\t\\t-"]];
         ClearSystemCache[]; {t, r} = AbsoluteTiming[TimeConstrained[e, $limit, \$Aborted]];
-        ToString[r, InputForm] <> "\\t" <> ToString[t, InputForm]];
-    Print[StringRiffle[{$(join(("time[" * c * "]" for c in codes), ", "))}, "\\n%%%\\n"]]
+        StringRiffle[{ToString[r, InputForm], tex[r],
+                      ToString[N[vals[kind, r]], InputForm], ToString[t, InputForm]}, "\\t"]];
+    Print[StringRiffle[{$(join(("time[$c, \"$k\"]" for (c, k) in zip(codes, kinds)), ", "))}, "\\n%%%\\n"]]
     """
     file = tempname() * ".wls"
     write(file, script)
@@ -247,11 +332,56 @@ function mathematica(codes::Vector{String}; limit = 120)
         return fill(Trial(shorten("Mathematica failed: " * sprint(showerror, e); n = 120), nothing, :error), length(codes))
     end
     map(split(out, "\n%%%\n")) do entry
-        answer, t = rsplit(entry, '\t'; limit = 2)
+        answer, latex, vals, t = split(entry, '\t')
         answer == "\$Aborted" && return Trial("no answer within $(limit) s", nothing, :error)
         Trial(shorten(answer), parse(Float64, replace(t, r"`.*" => "")),
-              occursin(r"^(Integrate|Limit|DSolve)\[", answer) ? :unevaluated : :ok)
+              occursin(r"^(Integrate|Limit|DSolve)\[", answer) ? :unevaluated : :ok;
+              latex = String(latex), values = _wolfram_values(vals))
     end
+end
+# values written by Mathematica, `{{{re, im}, …}, …}` in InputForm, read as TOML
+function _wolfram_values(s)
+    s == "None" && return nothing
+    s = replace(s, "{" => "[", "}" => "]", "*^" => "e", "Indeterminate" => "nan", r"(\d)\.(?!\d)" => s"\1.0")
+    [[ComplexF64(c[1], c[2]) for c in sol] for sol in TOML.parse("v = " * s)["v"]]
+end
+
+# ── Agreement: answers are compared by their values at the point, solutions as sets
+_close(u, v) = abs(u - v) <= 1e-6 * max(1, abs(u), abs(v))
+_same(p, q) = length(p) == length(q) && all(_close.(p, q))
+# how many of the solutions `vs` are among `ref`, each matched once
+function _matched(vs, ref)
+    free = trues(length(ref))
+    count(vs) do v
+        j = findfirst(k -> free[k] && _same(v, ref[k]), eachindex(ref))
+        j === nothing ? false : (free[j] = false; true)
+    end
+end
+function _check(vs, ref)
+    m = _matched(vs, ref)
+    m == length(vs) == length(ref) ? "agrees" : m == length(vs) ? "$m of $(length(ref)) solutions" : "differs"
+end
+_SYSTEM = [1, 2, 3, 3, 4]        # the columns' systems: SymPy is two of them
+
+# Each answer's values compared with the `expected` value, or else with the values most systems
+# support (Mathematica's on a tie), when at least two systems do: a system supports values it
+# gives, or of which it gives some solutions. An answer that differs is wrong.
+function agree!(trials, expected)
+    usable = [i for (i, t) in enumerate(trials) if t.values !== nothing && t.status === :ok]
+    isempty(usable) && return trials
+    ref = if expected !== nothing
+        [[ComplexF64(expected)]]
+    else
+        support(i) = length(unique(_SYSTEM[j] for j in usable if _check(trials[j].values, trials[i].values) != "differs"))
+        best = argmax(i -> (support(i), i == 5), usable)
+        support(best) >= 2 || return trials
+        trials[best].values
+    end
+    for i in usable
+        trials[i].check = _check(trials[i].values, ref)
+        trials[i].check == "differs" && (trials[i].status = :wrong)
+    end
+    trials
 end
 
 _timefmt(t) = t === nothing ? "" : t < 1e-6 ? "$(round(Int, t * 1e9)) ns" : t < 1e-3 ? "$(round(t * 1e6; digits = 1)) μs" : t < 1 ? "$(round(t * 1e3; digits = 2)) ms" : "$(round(t; digits = 2)) s"
@@ -259,13 +389,13 @@ _STATUS = Dict(:ok => ("✓", "#7ec699"), :unevaluated => ("unevaluated", "#e5c0
                :error => ("✗", "#e06c75"), :absent => ("—", "#888"),
                :wrong => ("wrong", "#e06c75"), :approximate => ("approximate", "#e5c07b"),
                :unsimplified => ("not simplified", "#e5c07b"))
+_check_colour(c) = c == "agrees" ? "#7ec699" : c == "differs" ? "#e06c75" : "#e5c07b"
 
 # A judgement the status can't make by itself: the answer of `system` to the task starting with
 # `task` is `:wrong`, `:approximate` or `:unsimplified`
 function judge!(c::Comparison, task, system, status)
     row = c.rows[findfirst(r -> startswith(r.first, task), c.rows)].second
-    col = findfirst(==(system), COLUMNS)
-    row[col] = Trial(row[col].answer, row[col].seconds, status)
+    row[findfirst(==(system), COLUMNS)].status = status
     return c
 end
 
@@ -275,8 +405,8 @@ _normal(s) = lowercase(replace(replace(s, "**" => "^"), r"[\s*]" => "", "[" => "
 
 # Each answer given that is not one of its task's expected forms, marked not simplified
 function expect!(c::Comparison, forms)
-    for ((_, trials), ok) in zip(c.rows, forms), (i, tr) in enumerate(trials)
-        tr.status === :ok && !(_normal(tr.answer) in _normal.(ok)) && (trials[i] = Trial(tr.answer, tr.seconds, :unsimplified))
+    for ((_, trials), ok) in zip(c.rows, forms), tr in trials
+        tr.status === :ok && !(_normal(tr.answer) in _normal.(ok)) && (tr.status = :unsimplified)
     end
     return c
 end
@@ -286,15 +416,20 @@ function Base.show(io::IO, ::MIME"text/html", c::Comparison)
       table.cmp { border-collapse: collapse; margin: 6px 0; font-size: .9em; table-layout: fixed; width: 100%; }
       table.cmp th, table.cmp td { padding: 6px 10px; border-bottom: 1px solid rgba(128,128,128,.22); text-align: left; vertical-align: top; }
       table.cmp td.ans { font-family: var(--mono, monospace); font-size: .86em; overflow-wrap: anywhere; }
+      table.cmp .tex { font-family: initial; font-size: 1.05em; max-height: 9em; overflow: auto; }
       table.cmp .t { display: block; margin-top: 3px; font-family: inherit; font-weight: 600; }
-    </style><table class="cmp"><tr><th style="width:18%">Task</th>""")
+      table.cmp .k { font-weight: 400; }
+    </style><table class="cmp"><tr><th style="width:16%">Task</th>""")
     foreach(s -> print(io, "<th>", s, "</th>"), COLUMNS)
     print(io, "</tr>")
     for (task, trials) in c.rows
         print(io, "<tr><td>", _esc(task), "</td>")
         for tr in trials
             mark, colour = _STATUS[tr.status]
-            print(io, "<td class=\"ans\">", _esc(tr.answer), "<span class=\"t\" style=\"color:$colour\">", mark, " ", _timefmt(tr.seconds), "</span></td>")
+            body = isempty(tr.latex) || tr.status in (:error, :absent) ? _esc(tr.answer) :
+                   "<div class=\"tex\">\$\\displaystyle " * _esc(tr.latex) * "\$</div>"
+            check = isempty(tr.check) ? "" : " · <span class=\"k\" style=\"color:$(_check_colour(tr.check))\">$(tr.check)</span>"
+            print(io, "<td class=\"ans\">", body, "<span class=\"t\" style=\"color:$colour\">", mark, " ", _timefmt(tr.seconds), check, "</span></td>")
         end
         print(io, "</tr>")
     end
@@ -304,27 +439,35 @@ end
 function Base.show(io::IO, ::MIME"text/markdown", c::Comparison)
     println(io, "| Task | ", join(COLUMNS, " | "), " |\n|", repeat(":--|", length(COLUMNS) + 1))
     for (task, trials) in c.rows
-        cells = [replace(first(tr.answer, 60), "|" => "\\|") * " (" * first(_STATUS[tr.status]) * " " * _timefmt(tr.seconds) * ")" for tr in trials]
+        cells = [replace(first(tr.answer, 60), "|" => "\\|") * " (" * join(filter(!isempty, [first(_STATUS[tr.status]), _timefmt(tr.seconds), tr.check]), " ") * ")" for tr in trials]
         println(io, "| ", task, " | ", join(cells, " | "), " |")
     end
 end
 
-# SymPy's result for a task of `section` from its native run, by the task's label
+# SymPy's result for a task of `section` from its native run, by the task's label, typeset and
+# evaluated from its `srepr`
 native_sections = native["sections"]
-function native_trial(section, label)
+function native_trial(section, label, kind = :none)
     r = get(get(native_sections, section, Dict()), label, nothing)
     r === nothing && return Trial("not in the native run", nothing, :absent)
     haskey(r, "build") && return Trial("first call: " * _timefmt(r["first_call"]) * ", evaluate: " * _timefmt(r["evaluate"]), r["build"], :ok)
-    Trial(shorten(r["answer"]), get(r, "seconds", nothing), Symbol(r["status"]))
+    latex, values = haskey(r, "srepr") ? sympy_describe(r["srepr"], kind) : ("", nothing)
+    Trial(shorten(r["answer"]), get(r, "seconds", nothing), Symbol(r["status"]); latex, values)
 end
 
-# Rows of `section` from tasks given as `label => (giac, symbolics, sympy)`: functions, `nothing`
+# Rows of `section` from tasks given as `label => (check, giac, symbolics, sympy)`. `check` is how
+# answers are compared: `:at` (a value at the point), `:antiderivative`, `:series`, `:solutions`
+# or `:none`, or `kind => expected` with the value the task states. Then functions, `nothing`
 # where a system has no such operation, or for SymPy a string of Python code run in its own
-# process; the Mathematica code for each task; and SymPy's native run of the same tasks
+# process; the Mathematica code for each task; and SymPy's native run of the same tasks.
+_kind(c::Symbol) = (c, nothing)
+_kind(c::Pair) = (c.first, c.second)
 function compare(section, tasks, wolfram::Vector{String})
-    ms = mathematica(wolfram)
-    Comparison([label => [giac(g), s === nothing ? Trial(nothing) : symbolics(s), sympy(p), native_trial(section, label), m]
-                for ((label, (g, s, p)), m) in zip(tasks, ms)])
+    checks = [_kind(first(t)) for (_, t) in tasks]
+    ms = mathematica(wolfram, string.(first.(checks)))
+    Comparison([label => agree!([giac(g, kind), s === nothing ? Trial(nothing) : symbolics(s, kind), sympy(p, kind),
+                                 native_trial(section, label, kind), m], expected)
+                for ((label, (_, g, s, p)), m, (kind, expected)) in zip(tasks, ms, checks)])
 end
 
 #%% code id=symbols
@@ -356,19 +499,19 @@ function over_rationals(f)
 end
 algebra = over_rationals() do
     compare("algebra", [
-    "expand (1 + x + y + z)²⁰: the number of terms, 1771" => (
+    "expand (1 + x + y + z)²⁰: the number of terms, 1771" => (:at => 1771,
         () -> length(Giac.arguments(C.expand((1 + x + y + z)^20))),
         () -> length(Sym.arguments(Sym.value(Sym.expand((1 + sy.x + sy.y + sy.z)^20)))),
         () -> length(SP.sympy.expand((1 + sp.x + sp.y + sp.z)^20).args)),
-    "factor x¹²⁰ − 1" => (
+    "factor x¹²⁰ − 1" => (:at,
         () -> C.factor(x^120 - 1),
         nothing,
         () -> SP.sympy.factor(sp.x^120 - 1)),
-    "factor (x³y + 2xz − y² + 1)³ (x − y⁴ + 3z)², expanded" => (
+    "factor (x³y + 2xz − y² + 1)³ (x − y⁴ + 3z)², expanded" => (:at,
         () -> C.factor(C.expand((x^3 * y + 2x * z - y^2 + 1)^3 * (x - y^4 + 3z)^2)),
         nothing,
         () -> SP.sympy.factor(SP.sympy.expand((sp.x^3 * sp.y + 2sp.x * sp.z - sp.y^2 + 1)^3 * (sp.x - sp.y^4 + 3sp.z)^2))),
-    "gcd of (x + y + 1)¹⁰(x − y)⁵ and (x + y + 1)⁷(x + 2y)⁶, expanded" => (
+    "gcd of (x + y + 1)¹⁰(x − y)⁵ and (x + y + 1)⁷(x + 2y)⁶, expanded" => (:at,
         () -> C.factor(C.gcd(C.expand((x + y + 1)^10 * (x - y)^5), C.expand((x + y + 1)^7 * (x + 2y)^6))),
         () -> gcd(Sym.expand((sy.x + sy.y + 1)^10 * (sy.x - sy.y)^5), Sym.expand((sy.x + sy.y + 1)^7 * (sy.x + 2sy.y)^6)),
         () -> SP.sympy.factor(SP.sympy.gcd(SP.sympy.expand((sp.x + sp.y + 1)^10 * (sp.x - sp.y)^5), SP.sympy.expand((sp.x + sp.y + 1)^7 * (sp.x + 2sp.y)^6)))),
@@ -392,33 +535,33 @@ GIAC's integrator is the fastest here by one to two orders of magnitude, and ans
 #%% code id=calculus
 ∞ = Giac.giac_eval("+infinity")
 calculus = compare("calculus", [
-    "∫ x³ eˣ sin x dx" => (
+    "∫ x³ eˣ sin x dx" => (:antiderivative,
         () -> C.integrate(x^3 * exp(x) * sin(x), x), nothing,
         () -> SP.sympy.integrate(sp.x^3 * exp(sp.x) * sin(sp.x), sp.x)),
-    "∫ 1 / (x⁴ + 1) dx" => (
+    "∫ 1 / (x⁴ + 1) dx" => (:antiderivative,
         () -> C.integrate(1 / (x^4 + 1), x), nothing,
         () -> SP.sympy.integrate(1 / (sp.x^4 + 1), sp.x)),
-    "∫ sec³ x dx" => (
+    "∫ sec³ x dx" => (:antiderivative,
         () -> C.integrate(1 / cos(x)^3, x), nothing,
         () -> SP.sympy.integrate(1 / cos(sp.x)^3, sp.x)),
-    "∫₀^∞ sin x / x dx = π/2" => (
+    "∫₀^∞ sin x / x dx = π/2" => (:at => π/2,
         () -> C.integrate(sin(x) / x, x, 0, ∞), nothing,
         () -> SP.sympy.integrate(sin(sp.x) / sp.x, (sp.x, 0, SP.sympy.oo))),
-    "∫₀^∞ e^(−x²) dx = √π / 2" => (
+    "∫₀^∞ e^(−x²) dx = √π / 2" => (:at => √π / 2,
         () -> C.integrate(exp(-x^2), x, 0, ∞), nothing,
         () -> SP.sympy.integrate(exp(-sp.x^2), (sp.x, 0, SP.sympy.oo))),
-    "∫₀¹ log x log(1 − x) dx = 2 − π²/6" => (
+    "∫₀¹ log x log(1 − x) dx = 2 − π²/6" => (:at => 2 - π^2 / 6,
         () -> C.integrate(log(x) * log(1 - x), x, 0, 1), nothing,
         () -> SP.sympy.integrate(log(sp.x) * log(1 - sp.x), (sp.x, 0, 1))),
-    "lim x→0 (sin x − x) / x³ = −1/6" => (
+    "lim x→0 (sin x − x) / x³ = −1/6" => (:at => -1/6,
         () -> C.limit((sin(x) - x) / x^3, x, 0),
         () -> Sym.limit(Sym.value((sin(sy.x) - sy.x) / sy.x^3), Sym.value(sy.x), 0),
         () -> SP.sympy.limit((sin(sp.x) - sp.x) / sp.x^3, sp.x, 0)),
-    "lim x→∞ (1 + a/x)ˣ = eᵃ" => (
+    "lim x→∞ (1 + a/x)ˣ = eᵃ" => (:at => exp(1.3),
         () -> C.limit((1 + a / x)^x, x, ∞),
         () -> Sym.limit(Sym.value((1 + sy.a / sy.x)^sy.x), Sym.value(sy.x), Inf),
         () -> SP.sympy.limit((1 + sp.a / sp.x)^sp.x, sp.x, SP.sympy.oo)),
-    "tan x to order x⁹" => (
+    "tan x to order x⁹" => (:series,
         () -> C.series(tan(x), x, 0, 9),
         () -> Sym.taylor(tan(sy.x), sy.x, 0, 0:9),
         () -> SP.sympy.series(tan(sp.x), sp.x, 0, 10)),
@@ -440,7 +583,7 @@ calculus = compare("calculus", [
 
 A Gröbner basis of the cyclic-5 system, in the graded reverse lexicographic order (its number of elements), a polynomial system, a transcendental equation whose solution is Lambert's W, and a linear system with a parameter.
 
-All four find the 20-element Gröbner basis; GIAC is fastest, then Groebner.jl behind Symbolics, then Mathematica, with SymPy a hundred times slower. For $x^2 + y^2 = 1,\ x^3 = y$, GIAC's `solve` gives the two real solutions numerically, of the six; Mathematica gives all six exactly as `Root` objects and Symbolics as roots of a polynomial, while SymPy finds nothing in 30 seconds (in an earlier run, nothing in 15 minutes). Symbolics' `symbolic_solve` cannot take $x e^x = 2$.
+All four find the 20-element Gröbner basis; GIAC is fastest, then Groebner.jl behind Symbolics, then Mathematica, with SymPy a hundred times slower. For $x^2 + y^2 = 1,\ x^3 = y$, GIAC's `solve` gives the two real solutions numerically, of the six, and they match two of Mathematica's; Mathematica gives all six exactly as `Root` objects and Symbolics as roots of a polynomial, while SymPy finds nothing in 30 seconds (in an earlier run, nothing in 15 minutes). Symbolics' `symbolic_solve` cannot take $x e^x = 2$.
 """
 
 #%% code id=equations
@@ -451,21 +594,22 @@ equations = let
     wolfram_cyclic = "{" * join(string.(cyclic(gv)), ", ") * "}"
     sympy_cyclic = "[" * join(replace.(string.(cyclic(gv)), "^" => "**"), ", ") * "]"
     compare("equations", [
-        "Gröbner basis of cyclic-5, graded reverse lexicographic: the number of elements" => (
+        "Gröbner basis of cyclic-5, graded reverse lexicographic: the number of elements" => (:at => 20,
             () -> length(C.gbasis(cyclic(gv), gv, Giac.giac_eval("revlex"))),
             () -> length(Sym.groebner_basis(cyclic(sv))),
             "(lambda c1, c2, c3, c4, c5: len(groebner($sympy_cyclic, c1, c2, c3, c4, c5, order='grevlex').exprs))(*symbols('c1:6'))"),
-        "x² + y² = 1, x³ = y: the solutions" => (
+        "x² + y² = 1, x³ = y: the solutions" => (:solutions,
             () -> C.solve([x^2 + y^2 ~ 1, x^3 ~ y], [x, y]),
             () -> Sym.symbolic_solve([sy.x^2 + sy.y^2 ~ 1, sy.x^3 ~ sy.y], [sy.x, sy.y]),
             "solve([x**2 + y**2 - 1, x**3 - y], [x, y])"),
-        "x eˣ = 2" => (
+        "x eˣ = 2" => (:solutions,
             () -> C.solve(x * exp(x) ~ 2, x),
             () -> Sym.symbolic_solve(sy.x * exp(sy.x) ~ 2, sy.x),
             "solve(x*exp(x) - 2, x)"),
-        "a x + y = 1, x − a y = 2" => (
+        "a x + y = 1, x − a y = 2" => (:solutions,
             () -> C.solve([a * x + y ~ 1, x - a * y ~ 2], [x, y]),
-            () -> Sym.symbolic_linear_solve([sy.a * sy.x + sy.y ~ 1, sy.x - sy.a * sy.y ~ 2], [sy.x, sy.y]),
+            # its one solution, in a list as the others give it
+            () -> [Sym.symbolic_linear_solve([sy.a * sy.x + sy.y ~ 1, sy.x - sy.a * sy.y ~ 2], [sy.x, sy.y])],
             "solve([a*x + y - 1, x - a*y - 2], [x, y])"),
     ], [
         "Length[GroebnerBasis[$wolfram_cyclic, {c1, c2, c3, c4, c5}, MonomialOrder -> DegreeReverseLexicographic]]",
@@ -494,23 +638,23 @@ odes = let
     # SymPy's dsolve of `lhs = rhs` in f(t), written with `f`
     dsolve(lhs, rhs) = "(lambda f: dsolve(Eq($lhs, $rhs), f))(Function('f')(t))"
     compare("odes", [
-        "y″ + y = sin t" => (
+        "y″ + y = sin t" => (:none,
             () -> C.desolve(Dg(Dg(f)) + f ~ sin(t), t, f),
             () -> Sym.symbolic_solve_ode(Ds(Ds(sy.y)) + sy.y ~ sin(sy.t), sy.y, sy.t),
             dsolve("f.diff(t, 2) + f", "sin(t)")),
-        "y″ − 2y′ + y = eᵗ / t" => (
+        "y″ − 2y′ + y = eᵗ / t" => (:none,
             () -> C.desolve(Dg(Dg(f)) - 2Dg(f) + f ~ exp(t) / t, t, f),
             () -> Sym.symbolic_solve_ode(Ds(Ds(sy.y)) - 2Ds(sy.y) + sy.y ~ exp(sy.t) / sy.t, sy.y, sy.t),
             dsolve("f.diff(t, 2) - 2*f.diff(t) + f", "exp(t)/t")),
-        "y′ = y (1 − y)" => (
+        "y′ = y (1 − y)" => (:none,
             () -> C.desolve(Dg(f) ~ f * (1 - f), t, f),
             () -> Sym.symbolic_solve_ode(Ds(sy.y) ~ sy.y * (1 - sy.y), sy.y, sy.t),
             dsolve("f.diff(t)", "f*(1 - f)")),
-        "y′ = t² + y²" => (
+        "y′ = t² + y²" => (:none,
             () -> C.desolve(Dg(f) ~ t^2 + f^2, t, f),
             () -> Sym.symbolic_solve_ode(Ds(sy.y) ~ sy.t^2 + sy.y^2, sy.y, sy.t),
             dsolve("f.diff(t)", "t**2 + f**2")),
-        "y″ + t y = 0 (Airy)" => (
+        "y″ + t y = 0 (Airy)" => (:none,
             () -> C.desolve(Dg(Dg(f)) + t * f ~ 0, t, f),
             () -> Sym.symbolic_solve_ode(Ds(Ds(sy.y)) + sy.t * sy.y ~ 0, sy.y, sy.t),
             dsolve("f.diff(t, 2) + t*f", "0")),
@@ -539,27 +683,27 @@ simplification = let
     S = SP.sympy
     xpos, xreal = py(() -> (S.Symbol("x"; positive = true), S.Symbol("x"; real = true)))
     compare("simplification", [
-        "sin⁴x − cos⁴x + cos 2x = 0" => (
+        "sin⁴x − cos⁴x + cos 2x = 0" => (:at => 0,
             () -> C.simplify(sin(x)^4 - cos(x)^4 + cos(2x)),
             () -> Sym.simplify(sin(sy.x)^4 - cos(sy.x)^4 + cos(2sy.x)),
             () -> S.simplify(sin(sp.x)^4 - cos(sp.x)^4 + cos(2sp.x))),
-        "(x⁶ − 1) / (x² − 1) = x⁴ + x² + 1" => (
+        "(x⁶ − 1) / (x² − 1) = x⁴ + x² + 1" => (:at => 0.7^4 + 0.7^2 + 1,
             () -> C.simplify((x^6 - 1) / (x^2 - 1)),
             () -> Sym.simplify((sy.x^6 - 1) / (sy.x^2 - 1)),
             () -> S.simplify((sp.x^6 - 1) / (sp.x^2 - 1))),
-        "√(5 + 2√6) = √2 + √3" => (
+        "√(5 + 2√6) = √2 + √3" => (:at => √2 + √3,
             () -> C.simplify(sqrt(5 + 2sqrt(Giac.giac_eval("6")))),
             () -> Sym.simplify(sqrt(5 + 2sqrt(Sym.Num(6)))),
             () -> S.sqrtdenest(sqrt(5 + 2sqrt(S.Integer(6))))),
-        "√(x²) = x for x > 0" => (
+        "√(x²) = x for x > 0" => (:at => 0.7,
             () -> assuming(() -> sqrt(x^2), x > 0),
             () -> Sym.simplify(sqrt(sy.x^2)),
             () -> S.simplify(sqrt(xpos^2))),
-        "log(eˣ) = x for real x" => (
+        "log(eˣ) = x for real x" => (:at => 0.7,
             () -> let; @giac_var xr::real; C.simplify(log(exp(xr))); end,
             () -> Sym.simplify(log(exp(sy.x))),
             () -> S.simplify(log(exp(xreal)))),
-        "sin(π n) = 0 for integer n" => (
+        "sin(π n) = 0 for integer n" => (:at => 0,
             () -> let; @giac_var n::integer; sin(n * Giac.giac_eval("pi")); end,
             () -> Sym.simplify(sin(Sym.variable(:n) * π)),
             () -> S.simplify(sin(S.Symbol("n"; integer = true) * S.pi))),
@@ -685,7 +829,7 @@ scale = Comparison(["Brusselator, N = $N ($(2N) states)" => [giac_jacobian(N), s
 @md"""
 ## Performance, in summary
 
-For each section and system: how many tasks it answered correctly, how often its answer was the fastest, and its typical slowdown, the geometric mean over the tasks it answered of its time divided by the fastest correct answer's. An approximate, unsimplified, unevaluated, wrong or missing answer doesn't count, so a system that answers fewer tasks is compared only on those. The last two rows are the model-to-Jacobian test: building the function, and evaluating it. The plot shows every time.
+For each section and system: how many tasks it answered correctly, how often its answer was the fastest, and its typical slowdown, the geometric mean over the tasks it answered of its time divided by the fastest correct answer's. A system scores ×1.0 only when it is the fastest on every task of a row; where the fastest answers are split between systems, as in simplification, every slowdown is above 1. The lowest in each row is outlined. An approximate, unsimplified, unevaluated, wrong or missing answer doesn't count, so a system that answers fewer tasks is compared only on those. The last two rows are the model-to-Jacobian test: building the function, and evaluating it. The plot shows every time.
 """
 
 #%% code id=performance
@@ -740,6 +884,7 @@ function Base.show(io::IO, ::MIME"text/html", p::Performance)
       table.perf { border-collapse: collapse; margin: 6px 0; font-size: .92em; }
       table.perf th, table.perf td { padding: 7px 12px; border-bottom: 1px solid rgba(128,128,128,.22); text-align: left; }
       table.perf td.s { font-weight: 600; font-variant-numeric: tabular-nums; }
+      table.perf td.best { outline: 2px solid #7ec699; outline-offset: -3px; }
       table.perf .d { opacity: .7; font-size: .85em; display: block; }
       table.perf tr.all td { border-top: 2px solid rgba(128,128,128,.5); font-weight: 600; }
     </style><table class="perf"><tr><th></th>""")
@@ -747,12 +892,13 @@ function Base.show(io::IO, ::MIME"text/html", p::Performance)
     print(io, "</tr>")
     for (name, cells) in p.rows
         print(io, name == "All tasks" ? "<tr class=\"all\">" : "<tr>", "<td>", name, "</td>")
+        lowest = minimum((r for (_, _, _, r) in cells if r !== nothing); init = Inf)
         for (a, n, w, r) in cells
             if r === nothing
                 print(io, "<td class=\"s\" style=\"opacity:.5\">—<span class=\"d\">$a of $n answered</span></td>")
             else
-                print(io, "<td class=\"s\" style=\"background:", _slowdown_colour(r), "\">×", r < 10 ? round(r; digits = 1) : round(Int, r),
-                      "<span class=\"d\">$a of $n answered, $w fastest</span></td>")
+                print(io, "<td class=\"s", r == lowest ? " best" : "", "\" style=\"background:", _slowdown_colour(r), "\">×",
+                      r < 10 ? round(r; digits = 1) : round(Int, r), "<span class=\"d\">$a of $n answered, $w fastest</span></td>")
             end
         end
         print(io, "</tr>")
@@ -763,7 +909,10 @@ end
 function Base.show(io::IO, ::MIME"text/markdown", p::Performance)
     println(io, "| | ", join(COLUMNS, " | "), " |\n|", repeat(":--|", length(COLUMNS) + 1))
     for (name, cells) in p.rows
-        println(io, "| ", name, " | ", join([r === nothing ? "— ($a/$n)" : "×$(round(r; digits = 1)) ($a/$n, $w fastest)" for (a, n, w, r) in cells], " | "), " |")
+        lowest = minimum((r for (_, _, _, r) in cells if r !== nothing); init = Inf)
+        println(io, "| ", name, " | ", join([r === nothing ? "— ($a/$n)" :
+                                             (r == lowest ? "**×$(round(r; digits = 1))**" : "×$(round(r; digits = 1))") * " ($a/$n, $w fastest)"
+                                             for (a, n, w, r) in cells], " | "), " |")
     end
 end
 performance
@@ -800,6 +949,7 @@ end
 #   DedicatedThreads 0.1.0 9d6577c3-9664-4440-a53f-cec765ebc045
 #   GiacSlate 0.1.2 f4c9f34b-fa6a-4506-9309-e8c0bac809fa path=~/devel/GiacSlate.jl
 #   Groebner 0.10.11 0b43b601-686d-58a3-8a1c-6623616c7cd4
+#   Latexify 0.16.12 23fbe1c1-3f47-55db-b15f-69d7ec21a316
 #   SciMLBase 3.58.0 0bca4576-84f4-4d90-8ffe-ffa030f20462
 #   SparseArrays 1.13.0 2f01184e-e22b-5df5-ae63-d93ebab69eaf
 #   SymPyPythonCall 0.5.3 bc8888f7-b21e-4b7c-a06a-5d9c9496438c

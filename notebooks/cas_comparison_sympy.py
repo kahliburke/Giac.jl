@@ -3,7 +3,9 @@
 Each task is the notebook's, under the same label. A task runs once, then SymPy's cache is cleared
 and it is timed again, as the best of three runs (or one run when it takes more than half a
 second). A task that runs past its time limit is interrupted by an alarm, which a pure-Python
-computation can receive. The results are written as TOML, which Julia reads without a package:
+computation can receive. Each answer is kept with its `srepr`, so the notebook can rebuild it and
+compare it with the other systems' through `describe`. The results are written as TOML, which
+Julia reads without a package:
 
     python cas_comparison_sympy.py ~/.cache/giac/benchmarks/sympy_native.toml
 """
@@ -33,9 +35,6 @@ def _alarm(signum, frame):
     raise Timeout()
 
 
-signal.signal(signal.SIGALRM, _alarm)
-
-
 def _status(answer):
     return "unevaluated" if _regex.search(r"\b(Integral|Limit)\(", answer) else "ok"
 
@@ -60,7 +59,64 @@ def measure(task, limit=30):
         signal.alarm(0)
         return {"answer": f"error: {type(e).__name__}: {e}", "seconds": None, "status": "error"}
     answer = str(r)
-    return {"answer": answer, "seconds": min(times), "status": _status(answer)}
+    return {"answer": answer, "seconds": min(times), "status": _status(answer), "srepr": srepr(r)}
+
+
+class _Names(dict):
+    """SymPy's names, including those its top level doesn't export, such as `ExprCondPair`."""
+
+    def __missing__(self, name):
+        if hasattr(sympy, name):
+            return getattr(sympy, name)
+        for module in list(sys.modules.values()):
+            if getattr(module, "__name__", "").startswith("sympy") and hasattr(module, name):
+                return getattr(module, name)
+        raise KeyError(name)
+
+
+def revive(s):
+    """An answer from its `srepr`."""
+    return eval(s, vars(sympy), _Names())
+
+
+def point(values):
+    """The comparison point, from names and values written as text."""
+    return {name: Rational(v) for name, v in values.items()}
+
+
+def _at(e, p, **over):
+    p = {**p, **over}
+    e = sympify(e)
+    v = complex(N(e.subs({s: p[s.name] for s in e.free_symbols}), 20))
+    return [v.real, v.imag]
+
+
+def values(r, kind, p):
+    """The answer's values for a comparison of `kind`: lists of solutions, each a list of [re, im]."""
+    if kind == "at":
+        return [[_at(r, p)]]
+    if kind == "antiderivative":
+        hi, lo = _at(r, p), _at(r, p, x=p["x0"])
+        return [[[hi[0] - lo[0], hi[1] - lo[1]]]]
+    if kind == "series":
+        return [[_at(r.removeO(), p)]]
+    if kind == "solutions":
+        out = []
+        for s in (r if isinstance(r, (list, tuple)) else [r]):
+            parts = [s[k] for k in sorted(s, key=str)] if isinstance(s, dict) else \
+                    list(s) if isinstance(s, (list, tuple)) else [s]
+            out.append([_at(c, p) for c in parts])
+        return out
+    return None
+
+
+def describe(r, kind, p):
+    """The answer typeset and its values at the point `p`, as TOML."""
+    try:
+        v = values(r, kind, p)
+    except Exception:
+        v = None
+    return f"latex = {_toml(latex(r))}\n" + ("" if v is None else f"values = {v!r}\n")
 
 
 def cyclic(v):
@@ -170,6 +226,7 @@ def write_toml(path, results):
 
 
 def main(path):
+    signal.signal(signal.SIGALRM, _alarm)
     results = {"sympy": sympy.__version__, "python": platform.python_version(),
                "date": time.strftime("%Y-%m-%d %H:%M"), "sections": {}}
     for section, tasks in TASKS.items():
