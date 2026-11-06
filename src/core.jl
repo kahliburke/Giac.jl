@@ -647,7 +647,7 @@ function _read_node(buf::Vector{UInt8}, pos::Ref{Int})
         pos[] += n
         return NumNode(sign < 0 ? -magnitude : magnitude)
     elseif tag == 0x03
-        return NumNode(_read_value(Float64, buf, pos))
+        return NumNode(_from_giac_double(_read_value(Float64, buf, pos)))
     elseif tag == 0x04
         return SymNode(_read_string(buf, pos))
     elseif tag == 0x05
@@ -686,7 +686,7 @@ function _node_from_gen_by_node(gen)
     t = T(B.type(gen))
     t == INT && return NumNode(Int(B.to_int64(gen)))
     t == ZINT && return NumNode(parse(BigInt, String(B.zint_to_string(gen))))
-    t == DOUBLE && return NumNode(Float64(B.to_double(gen)))
+    t == DOUBLE && return NumNode(_from_giac_double(Float64(B.to_double(gen))))
     t == IDNT && return SymNode(String(B.idnt_name(gen)))
     if t == FRAC
         p, q = _node_from_gen_by_node(B.frac_num(gen)), _node_from_gen_by_node(B.frac_den(gen))

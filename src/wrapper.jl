@@ -459,13 +459,29 @@ function _giac_to_int64(ptr::Ptr{Cvoid})::Int64
     return parse(Int64, expr_str)
 end
 
+# A GIAC double keeps its type tag in its low byte: it is stored as a Float64 with those 8 bits
+# cleared, which truncates it toward zero. The number it stands for is read back as the shortest
+# decimal that truncates to it, so `1.2` stored in GIAC reads as `1.2`, and a computed value as
+# the shortest number within its truncation interval.
+function _from_giac_double(d::Float64)
+    u = reinterpret(UInt64, d)
+    (isfinite(d) && !iszero(d) && u & 0xff == 0) || return d
+    direction = d > 0 ? RoundUp : RoundDown            # away from zero, where the cleared bits were
+    for n in 1:17
+        c = round(d, direction; sigdigits = n)
+        reinterpret(UInt64, c) & ~UInt64(0xff) == u && return c
+    end
+    return d
+end
+
 # A number held by a GIAC object, read without printing it: a double or a machine integer as it
 # is stored. A big integer, a fraction or a multiprecision real is read from its printed form,
 # which is exact for those (a double prints with only 12 digits).
 function _gen_to_float64(gen)::Float64
     B = GiacCxxBindings
     t = T(B.type(gen))
-    (t == DOUBLE || t == INT) && return Float64(B.to_double(gen))
+    t == DOUBLE && return _from_giac_double(Float64(B.to_double(gen)))
+    t == INT && return Float64(B.to_double(gen))
     s = String(B.to_string(gen))
     if occursin('/', s)
         p, q = split(s, '/')

@@ -30,13 +30,16 @@ using Giac.GenTypes
         end
     end
 
-    # A GIAC double keeps its type tag in the low byte: 45 bits of mantissa. Its value is read as
-    # it is stored, not from its 12-digit printed form.
+    # A GIAC double keeps its type tag in the low byte, which truncates it to 45 bits of mantissa.
+    # It is read as stored, not from its 12-digit printed form, as the shortest decimal that
+    # truncates to it.
     @testset "a GIAC double is read as stored" begin
         E = Giac.Commands.evalf
         @test abs(to_julia(E(giac_eval("pi"))) - π) < 2.0^-44 * π
         @test abs(to_julia(E(giac_eval("exp(i*pi/3)"))) - cis(π / 3)) < 2.0^-43
-        @test abs(to_julia(giac_eval("0.7")) - 0.7) < 2.0^-45
+        for v in (0.7, 1.2, 2.34, -123.456, 1.5e-200, 6.02214076e23)
+            @test to_julia(giac_eval(string(v))) === v
+        end
         @test to_julia(giac_eval("3+4*i")) == 3 + 4im
         @test to_julia(E(giac_eval("2^70"))) == 2.0^70
     end
