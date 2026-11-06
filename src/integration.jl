@@ -10,6 +10,15 @@ function _integrate(f::GiacExpr, x::GiacExpr)
     return g === nothing ? r : g
 end
 
+# `Commands.integrate(f, x, a, b)`: GIAC's, and where it leaves the integral unevaluated, the
+# integral as derivatives of a known one in its parameters (parametric_integrals.jl)
+function _integrate(f::GiacExpr, x::GiacExpr, a, b)
+    r = invoke_cmd(:integrate, f, x, a, b)
+    _any_node(n -> n isa CallNode && n.f == "integrate", _node(r)) || return r
+    v = _parametric_integral(f, x, a, b)
+    return v === nothing ? r : v
+end
+
 _is_infinite(r::GiacExpr) = string(r) in ("infinity", "+infinity", "-infinity", "undef")
 _is_zero_expr(e::GiacExpr) = (n = _node(e); n isa NumNode && iszero(n.v))
 

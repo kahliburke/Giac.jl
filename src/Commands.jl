@@ -639,9 +639,21 @@ end
 GIAC's `integrate`, except that where GIAC returns `infinity` for an indefinite integral of an
 expression with derivatives of unknown functions (`∫(η′p + ηp′) dt`), the antiderivative is found by
 taking off one derivative term at a time: `∫ V u′ uᵖ dt = V uᵖ⁺¹/(p+1) - ∫ V′ uᵖ⁺¹/(p+1) dt`.
+
+A definite integral on [0, 1] or [0, ∞) that GIAC leaves unevaluated is tried term by term as a
+derivative of a Beta or Gamma integral in its parameters, for terms such as
+`xᵅ (1-x)ᵝ (ln x)ᵐ (ln(1-x))ⁿ`, `xᵅ e⁻ᵏˣ (ln x)ᵐ` and `xᵅ (1+x)⁻ᵞ (ln x)ᵐ (ln(1+x))ⁿ`. A term
+is integrated only where its convergence is decided from its exponents, with the variables'
+declared signs and assumptions:
+
+```julia
+@giac_var x
+integrate(log(x) * log(1 - x), x, 0, 1)      # (-pi^2+12)/6
+```
 """
 integrate(args...) = invoke_cmd(:integrate, args...)
 integrate(f::GiacExpr, x::GiacExpr) = parentmodule(@__MODULE__)._integrate(f, x)
+integrate(f::GiacExpr, x::GiacExpr, a, b) = parentmodule(@__MODULE__)._integrate(f, x, a, b)
 export integrate      # written here, so the generated commands' export skips it
 
 # desolve: an unknown declared as `y(t)` is passed by name
