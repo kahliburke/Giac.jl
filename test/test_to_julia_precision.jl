@@ -41,7 +41,9 @@ using Giac.GenTypes
             @test to_julia(giac_eval(string(v))) === v
         end
         @test to_julia(giac_eval("3+4*i")) == 3 + 4im
-        @test to_julia(E(giac_eval("2^70"))) == 2.0^70
+        @test to_julia(E(giac_eval("2^70"))) === 2.0^70             # exact values stay exact
+        @test to_julia(E(giac_eval("1/4"))) === 0.25
+        @test to_julia(E(giac_eval("123456789"))) === 123456789.0
     end
 
     @testset "the issue #19 fixed point still holds" begin

@@ -462,10 +462,11 @@ end
 # A GIAC double keeps its type tag in its low byte: it is stored as a Float64 with those 8 bits
 # cleared, which truncates it toward zero. The number it stands for is read back as the shortest
 # decimal that truncates to it, so `1.2` stored in GIAC reads as `1.2`, and a computed value as
-# the shortest number within its truncation interval.
+# the shortest number within its truncation interval. A value with 16 or more trailing zero bits
+# (an integer, a power of two, a half) is taken as exact.
 function _from_giac_double(d::Float64)
     u = reinterpret(UInt64, d)
-    (isfinite(d) && !iszero(d) && u & 0xff == 0) || return d
+    (isfinite(d) && !iszero(d) && u & 0xff == 0 && trailing_zeros(u) < 16) || return d
     direction = d > 0 ? RoundUp : RoundDown            # away from zero, where the cleared bits were
     for n in 1:17
         c = round(d, direction; sigdigits = n)
