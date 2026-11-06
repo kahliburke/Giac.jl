@@ -120,7 +120,8 @@ function _arguments(m::_Model)
     taken = Set(string.(_all_vars(m)))
     fresh(n) = (while n in taken; n *= "_"; end; Symbol(n))
     return (out = fresh("out"), u = fresh("u"), p = fresh("p"),
-            t = m.t === nothing ? fresh("t") : Symbol(string(m.t)), inputs = fresh("inputs"), v = fresh("v"))
+            t = m.t === nothing ? fresh("t") : Symbol(string(m.t)), inputs = fresh("inputs"), v = fresh("v"),
+            stored = fresh("stored"))
 end
 
 # The model's states, parameters and inputs that the code uses, bound to the arguments
@@ -193,16 +194,24 @@ end
 
 # `out = codes(u, p, t)` in place, or `codes(u, p, t)` as a new array of the kind of `u`, with
 # subexpressions they share computed once. A zero entry is not written in place: it is set by
-# `fill!` for a dense array, and is not stored in a sparse prototype. With `vector`, the
-# functions take a vector `v` before `u`, as a Jacobian-vector product does.
-function _generate(codes::AbstractArray, m::_Model; inplace::Bool, dense_zeros::Bool = true, vector::Bool = false)
+# `fill!` for a dense array. With `sparse`, `out` has the structure of the nonzero codes (from
+# `_sparse_prototype`), and they are written straight into its stored values, which hold them in
+# the same column order. With `vector`, the functions take a vector `v` before `u`, as a
+# Jacobian-vector product does.
+function _generate(codes::AbstractArray, m::_Model; inplace::Bool, sparse::Bool = false, vector::Bool = false)
     a = _arguments(m)
     v = vector ? Symbol[a.v] : Symbol[]
     prelude, outs = _prelude(codes, m, a)
     if inplace
-        writes = [:($(a.out)[$(Tuple(I)...)] = $(outs[I])) for I in CartesianIndices(codes) if !_is_zero(codes[I])]
-        fill = dense_zeros && any(_is_zero, codes) ? [:(fill!($(a.out), zero(eltype($(a.out)))))] : Expr[]
-        body = Expr(:block, prelude..., fill..., Expr(:macrocall, Symbol("@inbounds"), nothing, Expr(:block, writes...)),
+        nonzero = [I for I in CartesianIndices(codes) if !_is_zero(codes[I])]
+        if sparse
+            start = [:($(a.stored) = $(GlobalRef(Giac, :_stored_values))($(a.out)))]
+            writes = [:($(a.stored)[$k] = $(outs[I])) for (k, I) in enumerate(nonzero)]
+        else
+            start = length(nonzero) < length(codes) ? [:(fill!($(a.out), zero(eltype($(a.out)))))] : Expr[]
+            writes = [:($(a.out)[$(Tuple(I)...)] = $(outs[I])) for I in nonzero]
+        end
+        body = Expr(:block, prelude..., start..., Expr(:macrocall, Symbol("@inbounds"), nothing, Expr(:block, writes...)),
                     :(return nothing))
         args = Symbol[a.out, v..., a.u, a.p, a.t]
     else
@@ -369,7 +378,7 @@ function _rhs(m::_Model; jac::Bool = true, tgrad::Bool = true, paramjac::Bool = 
     fkw = Dict{Symbol, Any}(:sys => GiacSystem(m; timed = true))
     J = (jac || jvp || vjp) && !by_state ? _derivatives(m.F, m.states) : nothing
     if jac && !by_state
-        fkw[:jac] = _generate(J, m; inplace, dense_zeros = !sparse)
+        fkw[:jac] = _generate(J, m; inplace, sparse)
         sparse && (fkw[:jac_prototype] = _sparse_prototype(J))
     end
     v = _arguments(m).v
@@ -450,7 +459,7 @@ function SciMLBase.NonlinearFunction(F::AbstractVector{GiacExpr}, x::_Vars; p = 
     fkw = Dict{Symbol, Any}(:sys => GiacSystem(m; timed = false))
     if jac
         J = _derivatives(m.F, m.states)
-        fkw[:jac] = _drop_time(_generate(J, m; inplace, dense_zeros = !sparse), inplace)
+        fkw[:jac] = _drop_time(_generate(J, m; inplace, sparse), inplace)
         sparse && (fkw[:jac_prototype] = _sparse_prototype(J))
     end
     f = _drop_time(_generate(_codes(m.F), m; inplace), inplace)

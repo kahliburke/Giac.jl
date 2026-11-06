@@ -211,6 +211,10 @@ end
 # prototype for a solver. Defined when SparseArrays is loaded.
 _sparse_pattern(mask) = throw(ArgumentError("a sparse Jacobian needs SparseArrays: `using SparseArrays`"))
 
+# The stored values of a sparse matrix, in column order, for generated code that writes them
+# directly. Defined when SparseArrays is loaded.
+_stored_values(out) = throw(ArgumentError("a function built with `sparse = true` writes a sparse matrix with the Jacobian's structure, got $(typeof(out))"))
+
 # An array of size `dims` holding `entries`, of the kind of `u`: an `Array`, or a static array
 # for a static `u` (defined when StaticArrays is loaded). Generated out-of-place code builds its
 # results with it.

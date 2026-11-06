@@ -44,6 +44,8 @@ using SciMLBase.SymbolicIndexingInterface: variable_symbols
         Js = copy(fs.jac_prototype)
         fs.jac(Js, u, p, 0.0)
         @test Matrix(Js) ≈ J
+        @test (@allocated fs.jac(Js, u, p, 0.0)) == 0
+        @test_throws ArgumentError fs.jac(zeros(2, 2), u, p, 0.0)          # the structure is the prototype's
 
     end
 
