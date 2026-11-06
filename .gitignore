@@ -32,6 +32,7 @@
 
 !notebooks/
 !notebooks/*.jl
+!notebooks/*.py
 
 !docs/
 !docs/**

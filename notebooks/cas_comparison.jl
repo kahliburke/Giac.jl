@@ -6,7 +6,9 @@ try; import KaimonSlate; catch; error("This is a Kaimon Slate notebook — runni
 
 How the Giac.jl of this branch compares with Symbolics.jl and ModelingToolkit, SymPy, and Mathematica. The matrix first rates each capability from the systems' documented features. The sections after it run the same tasks in all four systems, side by side, with the answers and the time each took, so the ratings rest on evidence where a test exists.
 
-Each Julia system is timed after a first run that compiles, as the best of three runs. Mathematica runs through `wolframscript`, one kernel per section, timed inside the kernel with `AbsoluteTiming` after clearing its caches. SymPy runs in this process on a thread of its own, its cache cleared before each timed run. A SymPy task that may not end runs instead in a separate Python process, timed once there, with a time limit, because a call into Python can't be interrupted.
+Each Julia system is timed after a first run that compiles, as the best of three runs. Mathematica runs through `wolframscript`, one kernel per section, timed inside the kernel with `AbsoluteTiming` after a first run and with its caches cleared.
+
+SymPy has two columns. **SymPy, from Julia** calls it through SymPyPythonCall, on a thread of its own, after a first run and with its cache cleared; a task that may not end runs instead in a separate Python process with a time limit, since a call into Python can't be interrupted. **SymPy, in Python** is the same task run natively by `cas_comparison_sympy.py`, beside this notebook: a first run, then the best of three with the cache cleared, each task under an alarm. Its results are kept in `~/.cache/giac/benchmarks/` and read here; the script runs again only when it changes.
 """
 
 #%% code id=python nocache
@@ -41,6 +43,19 @@ end
 # Wolfram Language code in a fresh Mathematica kernel, its output as text
 wl(code) = wolfram("-code", code)
 (; giac = pkgdir(Giac), symbolics = pkgversion(Sym), sympy = py(() -> string(SP.sympy.__version__)), mathematica = wl("\$VersionNumber"))
+
+#%% code id=sympy_native
+import TOML
+# SymPy's tasks run natively in Python by the script beside this notebook. Its results are kept,
+# and the script runs again only when it is newer than them.
+native_script = joinpath(pkgdir(Giac), "notebooks", "cas_comparison_sympy.py")
+native_file = joinpath(homedir(), ".cache", "giac", "benchmarks", "sympy_native.toml")
+if !isfile(native_file) || mtime(native_file) < mtime(native_script)
+    mkpath(dirname(native_file))
+    run(`$(SP.PythonCall.C.CTX.exe_path) $native_script $native_file`)
+end
+native = TOML.parsefile(native_file)
+(sympy = native["sympy"], python = native["python"], run = native["date"])
 
 #%% code id=matrix collapsed
 "The capability matrix: headings, and rows of a capability's rating in each system."
@@ -175,6 +190,9 @@ function measure(f; reset = () -> nothing, unevaluated = _ -> false, show = stri
     end
 end
 
+# The comparison tables' columns: SymPy twice, called from Julia and run natively in Python
+COLUMNS = ["Giac.jl", "Symbolics / MTK", "SymPy, from Julia", "SymPy, in Python", "Mathematica"]
+
 _sympy_unevaluated(s) = occursin(r"\b(Integral|Limit)\(", s)
 giac(f) = measure(f; unevaluated = s -> occursin(r"\b(integrate|limit|desolve|int)\(|Unable to|^(list)?\[\]$", s))
 symbolics(f) = measure(f; unevaluated = s -> s == "nothing")
@@ -244,13 +262,14 @@ _STATUS = Dict(:ok => ("✓", "#7ec699"), :unevaluated => ("unevaluated", "#e5c0
 # `task` is `:wrong`, `:approximate` or `:unsimplified`
 function judge!(c::Comparison, task, system, status)
     row = c.rows[findfirst(r -> startswith(r.first, task), c.rows)].second
-    col = findfirst(==(system), SYSTEMS)
+    col = findfirst(==(system), COLUMNS)
     row[col] = Trial(row[col].answer, row[col].seconds, status)
     return c
 end
 
-# Answers compared without spaces, `*`, and with Mathematica's brackets as parentheses
-_normal(s) = lowercase(replace(s, r"[\s*]" => "", "[" => "(", "]" => ")"))
+# Answers compared without spaces, with Python's `**` as `^`, without `*`, and with Mathematica's
+# brackets as parentheses
+_normal(s) = lowercase(replace(replace(s, "**" => "^"), r"[\s*]" => "", "[" => "(", "]" => ")"))
 
 # Each answer given that is not one of its task's expected forms, marked not simplified
 function expect!(c::Comparison, forms)
@@ -267,7 +286,7 @@ function Base.show(io::IO, ::MIME"text/html", c::Comparison)
       table.cmp td.ans { font-family: var(--mono, monospace); font-size: .86em; overflow-wrap: anywhere; }
       table.cmp .t { display: block; margin-top: 3px; font-family: inherit; font-weight: 600; }
     </style><table class="cmp"><tr><th style="width:18%">Task</th>""")
-    foreach(s -> print(io, "<th>", s, "</th>"), SYSTEMS)
+    foreach(s -> print(io, "<th>", s, "</th>"), COLUMNS)
     print(io, "</tr>")
     for (task, trials) in c.rows
         print(io, "<tr><td>", _esc(task), "</td>")
@@ -281,19 +300,28 @@ function Base.show(io::IO, ::MIME"text/html", c::Comparison)
 end
 
 function Base.show(io::IO, ::MIME"text/markdown", c::Comparison)
-    println(io, "| Task | ", join(SYSTEMS, " | "), " |\n|", repeat(":--|", length(SYSTEMS) + 1))
+    println(io, "| Task | ", join(COLUMNS, " | "), " |\n|", repeat(":--|", length(COLUMNS) + 1))
     for (task, trials) in c.rows
         cells = [replace(first(tr.answer, 60), "|" => "\\|") * " (" * first(_STATUS[tr.status]) * " " * _timefmt(tr.seconds) * ")" for tr in trials]
         println(io, "| ", task, " | ", join(cells, " | "), " |")
     end
 end
 
-# Rows from tasks given as `label => (giac, symbolics, sympy)`: functions, `nothing` where a
-# system has no such operation, or for SymPy a string of Python code run in its own process;
-# and the Mathematica code for each task
-function compare(tasks, wolfram::Vector{String})
+# SymPy's result for a task of `section` from its native run, by the task's label
+native_sections = native["sections"]
+function native_trial(section, label)
+    r = get(get(native_sections, section, Dict()), label, nothing)
+    r === nothing && return Trial("not in the native run", nothing, :absent)
+    haskey(r, "build") && return Trial("first call: " * _timefmt(r["first_call"]) * ", evaluate: " * _timefmt(r["evaluate"]), r["build"], :ok)
+    Trial(shorten(r["answer"]), get(r, "seconds", nothing), Symbol(r["status"]))
+end
+
+# Rows of `section` from tasks given as `label => (giac, symbolics, sympy)`: functions, `nothing`
+# where a system has no such operation, or for SymPy a string of Python code run in its own
+# process; the Mathematica code for each task; and SymPy's native run of the same tasks
+function compare(section, tasks, wolfram::Vector{String})
     ms = mathematica(wolfram)
-    Comparison([label => [giac(g), s === nothing ? Trial(nothing) : symbolics(s), sympy(p), m]
+    Comparison([label => [giac(g), s === nothing ? Trial(nothing) : symbolics(s), sympy(p), native_trial(section, label), m]
                 for ((label, (g, s, p)), m) in zip(tasks, ms)])
 end
 
@@ -313,7 +341,7 @@ GIAC factors further than the others: by default (its `withsqrt` mode) it splits
 """
 
 #%% code id=algebra
-algebra = compare([
+algebra = compare("algebra", [
     "expand (1 + x + y + z)²⁰: the number of terms, 1771" => (
         () -> length(Giac.arguments(C.expand((1 + x + y + z)^20))),
         () -> length(Sym.arguments(Sym.value(Sym.expand((1 + sy.x + sy.y + sy.z)^20)))),
@@ -348,7 +376,7 @@ GIAC's integrator is the fastest here by one to two orders of magnitude, and ans
 
 #%% code id=calculus
 ∞ = Giac.giac_eval("+infinity")
-calculus = compare([
+calculus = compare("calculus", [
     "∫ x³ eˣ sin x dx" => (
         () -> C.integrate(x^3 * exp(x) * sin(x), x), nothing,
         () -> SP.sympy.integrate(sp.x^3 * exp(sp.x) * sin(sp.x), sp.x)),
@@ -407,7 +435,7 @@ equations = let
     sv = [Sym.variable(Symbol("c$i")) for i in 1:5]
     wolfram_cyclic = "{" * join(string.(cyclic(gv)), ", ") * "}"
     sympy_cyclic = "[" * join(replace.(string.(cyclic(gv)), "^" => "**"), ", ") * "]"
-    compare([
+    compare("equations", [
         "Gröbner basis of cyclic-5, graded reverse lexicographic: the number of elements" => (
             () -> length(C.gbasis(cyclic(gv), gv, Giac.giac_eval("revlex"))),
             () -> length(Sym.groebner_basis(cyclic(sv))),
@@ -450,7 +478,7 @@ odes = let
     Ds = Sym.Differential(sy.t)
     # SymPy's dsolve of `lhs = rhs` in f(t), written with `f`
     dsolve(lhs, rhs) = "(lambda f: dsolve(Eq($lhs, $rhs), f))(Function('f')(t))"
-    compare([
+    compare("odes", [
         "y″ + y = sin t" => (
             () -> C.desolve(Dg(Dg(f)) + f ~ sin(t), t, f),
             () -> Sym.symbolic_solve_ode(Ds(Ds(sy.y)) + sy.y ~ sin(sy.t), sy.y, sy.t),
@@ -495,7 +523,7 @@ GIAC and SymPy reach every simplified form; Mathematica's `Simplify` leaves $\sq
 simplification = let
     S = SP.sympy
     xpos, xreal = py(() -> (S.Symbol("x"; positive = true), S.Symbol("x"; real = true)))
-    compare([
+    compare("simplification", [
         "sin⁴x − cos⁴x + cos 2x = 0" => (
             () -> C.simplify(sin(x)^4 - cos(x)^4 + cos(2x)),
             () -> Sym.simplify(sin(sy.x)^4 - cos(sy.x)^4 + cos(2sy.x)),
@@ -634,7 +662,8 @@ end
 
 # a small model first, so that no build below includes compiling the builders themselves
 giac_jacobian(5), symbolics_jacobian(5)
-scale = Comparison(["Brusselator, N = $N ($(2N) states)" => [giac_jacobian(N), symbolics_jacobian(N), sympy_jacobian(N), mathematica_jacobian(N)]
+scale = Comparison(["Brusselator, N = $N ($(2N) states)" => [giac_jacobian(N), symbolics_jacobian(N), sympy_jacobian(N),
+                                                                native_trial("scale", "Brusselator, N = $N ($(2N) states)"), mathematica_jacobian(N)]
                     for N in (50, 200)])
 
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
