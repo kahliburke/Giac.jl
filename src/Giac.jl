@@ -67,6 +67,7 @@ using Tables
 include("types.jl")
 include("utils.jl")
 include("core.jl")
+include("derivatives.jl")
 include("wrapper.jl")
 include("command_registry.jl")
 include("command_utils.jl")

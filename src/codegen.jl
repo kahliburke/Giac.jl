@@ -165,7 +165,7 @@ function _compile(exprs, groups)
             end
         end
     end
-    free = Set(string(s) for e in (exprs isa GiacExpr ? (exprs,) : exprs) for s in free_symbols(e))
+    free = mapreduce(_free_names, union, exprs isa GiacExpr ? (exprs,) : exprs; init = Set{String}())
     unbound = setdiff(free, bound, keys(_JULIA_CONSTANTS))
     isempty(unbound) || throw(ArgumentError("the expression has variables that are not arguments: $(join(sort!(collect(unbound)), ", "))"))
     codes = exprs isa GiacExpr ? [to_expr(exprs)] : map(to_expr, exprs)

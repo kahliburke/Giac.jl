@@ -174,6 +174,12 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._trig_safe_simplify(args[1])
     end
 
+    # a derivative in a variable is taken on the tree where it can be (derivatives.jl)
+    if cmd === :diff
+        d = parentmodule(@__MODULE__)._tree_diff(args...)
+        d === nothing || return d
+    end
+
     # Fast path (069-invoke-cmd-fastpath): bypass _arg_to_giac_string + giac_eval
     # when every argument has a direct Gen representation. Set
     # GIAC_INVOKE_CMD_STRING_PATH=1 to disable globally.

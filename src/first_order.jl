@@ -87,7 +87,7 @@ function first_order(eqs::AbstractVector; t = nothing)
     algebraic = [n for n in names if order[n] == 0]
     highest = GiacExpr[_state(n, order[n]) for n in dynamic]
     hnames = Set(string.(highest))
-    has_highest(r) = any(s -> string(s) in hnames, free_symbols(r))
+    has_highest(r) = !isdisjoint(_free_names(r), hnames)
     deqs, aeqs = filter(has_highest, rs), filter(!has_highest, rs)
     length(deqs) == length(dynamic) ||
         throw(ArgumentError("$(length(deqs)) equations with derivatives for the $(length(dynamic)) unknowns $(join(dynamic, ", "))"))

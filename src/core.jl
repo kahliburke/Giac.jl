@@ -991,3 +991,6 @@ _symbol_names!(out, n::AddNode) = (foreach(t -> _symbol_names!(out, first(t)), n
 _symbol_names!(out, n::MulNode) = (foreach(((b, e),) -> (_symbol_names!(out, b); _symbol_names!(out, e)), n.factors); out)
 _symbol_names!(out, n::CallNode) = (foreach(a -> _symbol_names!(out, a), n.args); out)
 _symbol_names!(out, n::GenNode) = (foreach(s -> push!(out, string(s)), free_symbols(n.expr)); out)
+
+# the names of an expression's free variables, read from its tree
+_free_names(e::GiacExpr) = _symbol_names(_node(e))

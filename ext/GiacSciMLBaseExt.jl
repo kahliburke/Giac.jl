@@ -81,7 +81,7 @@ _substitute(e::GiacExpr, subs) = isempty(subs) ? e : substitute(e, subs...)
 
 function _check_free(exprs, m::_Model)
     bound = Set(string.(_all_vars(m)))
-    free = Set(string(s) for e in exprs for s in Giac.free_symbols(e))
+    free = mapreduce(Giac._free_names, union, exprs; init = Set{String}())
     unbound = setdiff(free, bound, ("pi", "infinity"))
     isempty(unbound) || throw(ArgumentError("the model has variables that are neither states, parameters, inputs nor time: $(join(sort!(collect(unbound)), ", ")). Give them as parameters, or `t = …` for time"))
     return nothing
@@ -165,8 +165,8 @@ _codes(exprs) = map(Giac.to_expr, exprs)
 function _derivatives(F, vars)
     column = Dict(string(v) => j for (j, v) in enumerate(vars))
     codes = Any[0 for _ in eachindex(F), _ in eachindex(vars)]
-    for (i, f) in enumerate(F), s in Giac.free_symbols(f)
-        j = get(column, string(s), nothing)
+    for (i, f) in enumerate(F), s in Giac._free_names(f)
+        j = get(column, s, nothing)
         j === nothing || (codes[i, j] = Giac.to_expr(C.diff(f, vars[j])))
     end
     return codes
@@ -356,13 +356,13 @@ function _affine(m::_Model)
     (isempty(m.inputs) && m.mass === nothing) || return nothing
     n = length(m.states)
     names = Set(string.(m.states))
-    m.t === nothing || all(f -> !any(s -> string(s) == string(m.t), Giac.free_symbols(f)), m.F) || return nothing
+    m.t === nothing || all(f -> !(string(m.t) in Giac._free_names(f)), m.F) || return nothing
     M = Any[0 for _ in 1:n+1, _ in 1:n+1]
-    for (i, f) in enumerate(m.F), s in Giac.free_symbols(f)
-        j = findfirst(x -> string(x) == string(s), m.states)
+    for (i, f) in enumerate(m.F), s in Giac._free_names(f)
+        j = findfirst(x -> string(x) == s, m.states)
         j === nothing && continue
         a = C.diff(f, m.states[j])
-        any(x -> string(x) in names, Giac.free_symbols(a)) && return nothing
+        isdisjoint(Giac._free_names(a), names) || return nothing
         M[i, j] = Giac.to_expr(a)
     end
     for (i, f) in enumerate(m.F)
@@ -562,7 +562,7 @@ _assignment(a, known = ()) = throw(ArgumentError("values are given as `x => valu
 # bound by name
 function _value(v::GiacExpr, known = ())
     env = Dict{Symbol, Any}(Symbol(string(k)) => x for (k, x) in known)
-    free = setdiff(Set(Symbol(string(x)) for x in Giac.free_symbols(v)), keys(env), (:pi, :infinity))
+    free = setdiff(Set(Symbol.(Giac._free_names(v))), keys(env))
     isempty(free) || throw(ArgumentError("the value $v uses $(join(sort!(collect(free)), ", ")): a value may be written only in the parameters"))
     return _evaluate(Giac.to_expr(v), env)
 end
