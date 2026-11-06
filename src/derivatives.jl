@@ -59,7 +59,7 @@ function _derivative(n::CallNode, x::String)
     u = only(n.args)
     du = _derivative(u, x)
     (du === nothing || _is_zero_node(du)) && return du
-    return _mul(rule(n, u), du)
+    return _mul(du, rule(n, u))          # u′ f′(u), in GIAC's order
 end
 
 # `diff(f, x)` or `diff(f, x, k)` on the tree, for a variable `x`; `nothing` for GIAC to answer
