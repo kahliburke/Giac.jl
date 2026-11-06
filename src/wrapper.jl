@@ -459,42 +459,29 @@ function _giac_to_int64(ptr::Ptr{Cvoid})::Int64
     return parse(Int64, expr_str)
 end
 
-function _giac_to_float64(ptr::Ptr{Cvoid})::Float64
-    expr_str = _giac_expr_to_string(ptr)
-    return parse(Float64, expr_str)
+# A number held by a GIAC object, read without printing it: a double or a machine integer as it
+# is stored. A big integer, a fraction or a multiprecision real is read from its printed form,
+# which is exact for those (a double prints with only 12 digits).
+function _gen_to_float64(gen)::Float64
+    B = GiacCxxBindings
+    t = T(B.type(gen))
+    (t == DOUBLE || t == INT) && return Float64(B.to_double(gen))
+    s = String(B.to_string(gen))
+    if occursin('/', s)
+        p, q = split(s, '/')
+        return Float64(parse(BigInt, p) // parse(BigInt, q))
+    end
+    return Float64(parse(BigFloat, s))
 end
 
-function _giac_complex_real(ptr::Ptr{Cvoid})::Float64
-    return with_giac_lock() do
-        try
-            expr_str = _giac_expr_to_string(ptr)
-            gen = GiacCxxBindings.giac_eval(expr_str)
-            # Use cplx_re accessor
-            re_gen = GiacCxxBindings.cplx_re(gen)
-            re_str = GiacCxxBindings.to_string(re_gen)
-            return parse(Float64, re_str)
-        catch e
-            @debug "Complex real extraction failed: $e"
-            return 0.0
-        end
-    end
-end
+# The GIAC object behind `ptr`, or one evaluated from its printed form when none is registered
+_gen_of(ptr::Ptr{Cvoid}) = something(_get_gen(ptr), GiacCxxBindings.giac_eval(_giac_expr_to_string(ptr)))
 
-function _giac_complex_imag(ptr::Ptr{Cvoid})::Float64
-    return with_giac_lock() do
-        try
-            expr_str = _giac_expr_to_string(ptr)
-            gen = GiacCxxBindings.giac_eval(expr_str)
-            # Use cplx_im accessor
-            im_gen = GiacCxxBindings.cplx_im(gen)
-            im_str = GiacCxxBindings.to_string(im_gen)
-            return parse(Float64, im_str)
-        catch e
-            @debug "Complex imag extraction failed: $e"
-            return 0.0
-        end
-    end
-end
+_giac_to_float64(ptr::Ptr{Cvoid})::Float64 = with_giac_lock(() -> _gen_to_float64(_gen_of(ptr)))
+_giac_complex_real(ptr::Ptr{Cvoid})::Float64 =
+    with_giac_lock(() -> _gen_to_float64(GiacCxxBindings.cplx_re(_gen_of(ptr))))
+_giac_complex_imag(ptr::Ptr{Cvoid})::Float64 =
+    with_giac_lock(() -> _gen_to_float64(GiacCxxBindings.cplx_im(_gen_of(ptr))))
 
 function _giac_rational_num(ptr::Ptr{Cvoid})::Int64
     return with_giac_lock() do

@@ -30,6 +30,17 @@ using Giac.GenTypes
         end
     end
 
+    # A GIAC double keeps its type tag in the low byte: 45 bits of mantissa. Its value is read as
+    # it is stored, not from its 12-digit printed form.
+    @testset "a GIAC double is read as stored" begin
+        E = Giac.Commands.evalf
+        @test abs(to_julia(E(giac_eval("pi"))) - π) < 2.0^-44 * π
+        @test abs(to_julia(E(giac_eval("exp(i*pi/3)"))) - cis(π / 3)) < 2.0^-43
+        @test abs(to_julia(giac_eval("0.7")) - 0.7) < 2.0^-45
+        @test to_julia(giac_eval("3+4*i")) == 3 + 4im
+        @test to_julia(E(giac_eval("2^70"))) == 2.0^70
+    end
+
     @testset "the issue #19 fixed point still holds" begin
         # `evalf` cannot reduce these; they must come back unchanged rather
         # than recursing forever.
