@@ -16,8 +16,10 @@ using DedicatedThreads: DedicatedPool, spawn
 # Python belongs to the OS thread that starts it, and a cell may run on any thread. So SymPy gets a
 # thread of its own: SymPyPythonCall is loaded there, which starts Python on it, and every SymPy
 # call is sent there with `py`. The module is bound from that load rather than by an `import`,
-# which the notebook would run early, on another thread.
-const PYTHON = DedicatedPool(1; name = :python)
+# which the notebook would run early, on another thread. The pool is kept in `Main`, so that a
+# re-run of this cell sends its calls to the same thread, where Python already runs.
+PYTHON = isdefined(Main, :PYTHON_POOL) ? Main.PYTHON_POOL :
+         Core.eval(Main, :(const PYTHON_POOL = $(DedicatedPool(1; name = :python))))
 py(f) = fetch(spawn(f, PYTHON))
 const SP = py(() -> Base.require(Base.PkgId(Base.UUID("bc8888f7-b21e-4b7c-a06a-5d9c9496438c"), "SymPyPythonCall")))
 py(() -> Threads.threadid()), py(() -> string(SP.sympy.factor(SP.sympy.sympify("x^12 - 1"))))
@@ -679,8 +681,122 @@ scale = Comparison(["Brusselator, N = $N ($(2N) states)" => [giac_jacobian(N), s
                                                                 native_trial("scale", "Brusselator, N = $N ($(2N) states)"), mathematica_jacobian(N)]
                     for N in (50, 200)])
 
+#%% md id=performance_md
+@md"""
+## Performance, in summary
+
+For each section and system: how many tasks it answered correctly, how often its answer was the fastest, and its typical slowdown, the geometric mean over the tasks it answered of its time divided by the fastest correct answer's. An approximate, unsimplified, unevaluated, wrong or missing answer doesn't count, so a system that answers fewer tasks is compared only on those. The last two rows are the model-to-Jacobian test: building the function, and evaluating it. The plot shows every time.
+"""
+
+#%% code id=performance
+"Per system: tasks answered correctly, tasks in all, fastest answers, and the geometric mean slowdown."
+struct Performance
+    rows::Vector{Pair{String, Vector{NTuple{4, Any}}}}
+end
+
+# a time written by `_timefmt`, in seconds
+function _seconds(s)
+    m = match(r"([\d.]+) (ns|μs|ms|s)\b", s)
+    m === nothing && return nothing
+    parse(Float64, m[1]) * Dict("ns" => 1e-9, "μs" => 1e-6, "ms" => 1e-3, "s" => 1.0)[m[2]]
+end
+# the scale test's evaluation times, as trials of their own
+_evaluation(c::Comparison) = Comparison([label => [Trial(t.answer, t.status === :ok ? _seconds(split(t.answer, "evaluate: ")[end]) : nothing, t.status)
+                                                   for t in trials] for (label, trials) in c.rows])
+
+function _performance(rows)
+    k = length(COLUMNS)
+    answered, wins, logs = zeros(Int, k), zeros(Int, k), [Float64[] for _ in 1:k]
+    for (_, trials) in rows
+        ok = [t.status === :ok && t.seconds !== nothing for t in trials]
+        any(ok) || continue
+        best = minimum(t.seconds for (t, o) in zip(trials, ok) if o)
+        for (i, (t, o)) in enumerate(zip(trials, ok))
+            o || continue
+            answered[i] += 1
+            t.seconds == best && (wins[i] += 1)
+            push!(logs[i], log(t.seconds / best))
+        end
+    end
+    [(answered[i], length(rows), wins[i], isempty(logs[i]) ? nothing : exp(sum(logs[i]) / length(logs[i]))) for i in 1:k]
+end
+
+sections = ["Polynomial algebra" => algebra, "Calculus" => calculus, "Equations" => equations,
+            "ODEs in closed form" => odes, "Simplification" => simplification,
+            "Model to Jacobian: build" => scale, "Model to Jacobian: evaluation" => _evaluation(scale)]
+performance = Performance(vcat([name => _performance(c.rows) for (name, c) in sections],
+                               ["All tasks" => _performance(reduce(vcat, [c.rows for (_, c) in sections]))]))
+
+# green for the fastest, through amber, to red at a hundred times slower
+function _slowdown_colour(r)
+    f = clamp(log10(r) / 2, 0, 1)
+    c1, c2, c3 = (126, 198, 153), (229, 192, 123), (224, 108, 117)
+    a, b, g = f < 0.5 ? (c1, c2, 2f) : (c2, c3, 2f - 1)
+    "rgba($(round(Int, a[1] + (b[1] - a[1]) * g)), $(round(Int, a[2] + (b[2] - a[2]) * g)), $(round(Int, a[3] + (b[3] - a[3]) * g)), 0.28)"
+end
+
+function Base.show(io::IO, ::MIME"text/html", p::Performance)
+    print(io, """<style>
+      table.perf { border-collapse: collapse; margin: 6px 0; font-size: .92em; }
+      table.perf th, table.perf td { padding: 7px 12px; border-bottom: 1px solid rgba(128,128,128,.22); text-align: left; }
+      table.perf td.s { font-weight: 600; font-variant-numeric: tabular-nums; }
+      table.perf .d { opacity: .7; font-size: .85em; display: block; }
+      table.perf tr.all td { border-top: 2px solid rgba(128,128,128,.5); font-weight: 600; }
+    </style><table class="perf"><tr><th></th>""")
+    foreach(s -> print(io, "<th>", s, "</th>"), COLUMNS)
+    print(io, "</tr>")
+    for (name, cells) in p.rows
+        print(io, name == "All tasks" ? "<tr class=\"all\">" : "<tr>", "<td>", name, "</td>")
+        for (a, n, w, r) in cells
+            if r === nothing
+                print(io, "<td class=\"s\" style=\"opacity:.5\">—<span class=\"d\">$a of $n answered</span></td>")
+            else
+                print(io, "<td class=\"s\" style=\"background:", _slowdown_colour(r), "\">×", r < 10 ? round(r; digits = 1) : round(Int, r),
+                      "<span class=\"d\">$a of $n answered, $w fastest</span></td>")
+            end
+        end
+        print(io, "</tr>")
+    end
+    print(io, "</table>")
+end
+
+function Base.show(io::IO, ::MIME"text/markdown", p::Performance)
+    println(io, "| | ", join(COLUMNS, " | "), " |\n|", repeat(":--|", length(COLUMNS) + 1))
+    for (name, cells) in p.rows
+        println(io, "| ", name, " | ", join([r === nothing ? "— ($a/$n)" : "×$(round(r; digits = 1)) ($a/$n, $w fastest)" for (a, n, w, r) in cells], " | "), " |")
+    end
+end
+performance
+
+#%% code id=performance_plot
+using CairoMakie
+set_theme!(theme_dark())
+let rows = reduce(vcat, [[(name, label, trials) for (label, trials) in c.rows] for (name, c) in sections])
+    colours = [:orange, :mediumpurple, :deepskyblue, :lightskyblue, :tomato]
+    markers = [:circle, :diamond, :utriangle, :dtriangle, :rect]
+    n = length(rows)
+    fig = Figure(size = (1000, 26n + 120))
+    # the model-to-Jacobian rows twice, as building and as evaluating
+    labels = [startswith(name, "Model to Jacobian: ") ? split(name, ": ")[2] * ", " * replace(l, "Brusselator, " => "") : first(l, 46)
+              for (name, l, _) in rows]
+    ax = Axis(fig[2, 1]; xscale = log10, xlabel = "seconds", yticks = (1:n, labels),
+              yreversed = true, title = "every task's time; hollow: not a correct answer", yticklabelsize = 11)
+    for (i, (col, mk)) in enumerate(zip(colours, markers))
+        good = [(t[3][i].seconds, j) for (j, t) in enumerate(rows) if t[3][i].seconds !== nothing && t[3][i].status === :ok]
+        poor = [(t[3][i].seconds, j) for (j, t) in enumerate(rows) if t[3][i].seconds !== nothing && t[3][i].status !== :ok]
+        isempty(good) || scatter!(ax, first.(good), last.(good); color = col, marker = mk, markersize = 11, label = COLUMNS[i])
+        isempty(poor) || scatter!(ax, first.(poor), last.(poor); color = :transparent, strokecolor = col, strokewidth = 1.5, marker = mk, markersize = 11)
+    end
+    # the sections, divided
+    edges = cumsum([length(c.rows) for (_, c) in sections])[1:end-1] .+ 0.5
+    hlines!(ax, edges; color = :gray40, linewidth = 1)
+    Legend(fig[1, 1], ax; orientation = :horizontal, framevisible = false)
+    fig
+end
+
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
 #   BenchmarkTools 1.8.0 6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf
+#   CairoMakie 0.15.17 13f3f980-e62b-5c42-98c6-ff1f3baf88f0
 #   DedicatedThreads 0.1.0 9d6577c3-9664-4440-a53f-cec765ebc045
 #   GiacSlate 0.1.2 f4c9f34b-fa6a-4506-9309-e8c0bac809fa path=~/devel/GiacSlate.jl
 #   Groebner 0.10.11 0b43b601-686d-58a3-8a1c-6623616c7cd4
