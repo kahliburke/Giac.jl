@@ -40,3 +40,16 @@ end
     @test Giac._parametric_integral(x^b * log(x), x, 0, 1) === nothing
     @test Giac._parametric_integral(log(x) * log(1 + x), x, 0, 1) === nothing
 end
+
+# A failed GIAC limit (a definite integral may take one) leaves GIAC's series flags changed, and
+# later results with them; the wrapper restores the flags after each call
+@testset "A failed limit leaves later results as they were" begin
+    if isdefined(Giac.GiacCxxBindings, :series_flags)
+        try
+            giac_eval("limit(x^(b+1)/(b+1)*ln(x),x,0,1)")
+        catch
+        end
+        @test Giac.GiacCxxBindings.series_flags() & 8 == 0
+        @test acotd(cotd(giac_eval("2"))) == 2
+    end
+end

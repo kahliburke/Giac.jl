@@ -6,7 +6,7 @@ try; import KaimonSlate; catch; error("This is a Kaimon Slate notebook — runni
 
 How the Giac.jl of this branch compares with Symbolics.jl and ModelingToolkit, SymPy, and Mathematica. The matrix first rates each capability from the systems' documented features. The sections after it run the same tasks in all four systems, side by side, with the answers and the time each took, so the ratings rest on evidence where a test exists.
 
-Each Julia system is timed after a first run that compiles, as the best of three runs. Mathematica runs through `wolframscript`, one kernel per section, timed inside the kernel with `AbsoluteTiming` after a first run and with its caches cleared.
+Each Julia system is timed after a first run that compiles, as the best of three runs. Giac.jl runs on a development build of its C++ wrapper, from the branch that goes with this one (expression trees passed to GIAC directly rather than printed and parsed, command lookups cached); the setup output records which. Mathematica runs through `wolframscript`, one kernel per section, timed inside the kernel with `AbsoluteTiming` after a first run and with its caches cleared.
 
 SymPy has two columns. **SymPy, from Julia** calls it through SymPyPythonCall, on a thread of its own, after a first run and with its cache cleared; a task that may not end runs instead in a separate Python process with a time limit, since a call into Python can't be interrupted. **SymPy, in Python** is the same task run natively by `cas_comparison_sympy.py`, beside this notebook: a first run, then the best of three with the cache cleared, each task under an alarm. Its results are kept in `~/.cache/giac/benchmarks/` and read here; the script runs again only when it changes.
 
@@ -32,8 +32,13 @@ py(() -> Threads.threadid()), py(() -> string(SP.sympy.factor(SP.sympy.sympify("
 
 #%% code id=setup
 using Giac, GiacSlate, LinearAlgebra, BenchmarkTools
-import Symbolics as Sym, Groebner, Latexify
+import Symbolics as Sym, Groebner, Latexify, libgiac_julia_jll
 const C = Giac.Commands
+# Giac's C++ wrapper: a local build, as its checkout and commit, or the released one
+giac_wrapper = let dir = dirname(dirname(dirname(libgiac_julia_jll.libgiac_wrapper_path)))
+    isdir(joinpath(dir, ".git")) ? replace(dir, homedir() => "~") * " at " * readchomp(`git -C $dir rev-parse --short HEAD`) :
+                                   "released " * Giac.GiacCxxBindings.wrapper_version()
+end
 # `wolframscript` with `args`, its output as text: one kernel at a time, and a run that crashes is
 # tried again, up to three times
 WOLFRAM = ReentrantLock()
@@ -50,7 +55,7 @@ function wolfram(args...)
 end
 # Wolfram Language code in a fresh Mathematica kernel, its output as text
 wl(code) = wolfram("-code", code)
-(; giac = pkgdir(Giac), symbolics = pkgversion(Sym), sympy = py(() -> string(SP.sympy.__version__)), mathematica = wl("\$VersionNumber"))
+(; giac = pkgdir(Giac), giac_wrapper, symbolics = pkgversion(Sym), sympy = py(() -> string(SP.sympy.__version__)), mathematica = wl("\$VersionNumber"))
 
 #%% code id=sympy_native
 import TOML
@@ -70,6 +75,7 @@ native = TOML.parsefile(native_file)
 struct CapabilityMatrix
     systems::Vector{String}
     rows::Vector{Any}            # a heading `String`, or `capability => [rating, …]`
+    untested::Set{String}        # capabilities rated from documentation, with no test below
 end
 
 SYSTEMS = ["Giac.jl", "Symbolics / MTK", "SymPy", "Mathematica"]
@@ -80,13 +86,13 @@ capabilities = CapabilityMatrix(SYSTEMS, Any[
     "Assumptions" => ["● three of three tests; declared on variables, functions, matrices †", "○ none", "● three of three tests", "● three of three tests"],
     "Pattern matching / rewrite rules" => ["● †", "●", "◐", "●"],
     "Calculus",
-    "Differentiation" => ["●", "●", "●", "●"],
+    "Differentiation" => ["● in Julia, on the expression tree †", "●", "●", "●"],
     "Indefinite integration" => ["● three of three tests, fastest by 10–100×", "○ no `integrate`", "● three of three tests", "● three of three tests"],
-    "Definite integrals, special functions" => ["◐ two of three tests", "○", "◐ two of three; a garbled third", "● three of three tests"],
+    "Definite integrals, special functions" => ["● three of three tests; Beta and Gamma integrals differentiated in their parameters †", "○", "◐ two of three; a garbled third", "● three of three tests"],
     "Limits, series" => ["●", "◐ `limit` fails on `sin`; `taylor` works", "●", "●"],
     "Closed-form ODE solutions" => ["◐ three of five tests, each under 1 ms", "○ one of five; one wrong answer", "● four of five tests", "● five of five tests"],
     "Equations and algebra",
-    "Polynomial systems (Gröbner bases)" => ["● fastest on cyclic-5; msolve †; `solve` gives a sextic's roots numerically", "● Groebner.jl", "◐ 100× slower; no answer for a sextic system", "● exact `Root` objects"],
+    "Polynomial systems (Gröbner bases)" => ["● fastest on cyclic-5; msolve †; `cSolve` gives a sextic's roots numerically", "● Groebner.jl", "◐ 100× slower; no answer for a sextic system", "● exact `Root` objects"],
     "Real solutions, parametric case classification" => ["● msolve †", "○", "◐", "● Reduce"],
     "Ideal theory (primary decomposition, radicals)" => ["● Oscar †", "○", "○", "○ ?"],
     "Exact algebraic numbers" => ["● QQBar †", "○", "◐ CRootOf", "● Root"],
@@ -101,7 +107,7 @@ capabilities = CapabilityMatrix(SYSTEMS, Any[
     "Mechanics (Lagrange, Kane)" => ["○ notebook only", "○", "●", "◐"],
     "Into numerical solvers",
     "Compiled native functions" => ["● zero-allocation, shared subexpressions computed once †", "●", "◐ lambdify", "◐ Compile"],
-    "Exact Jacobians, sparse patterns, jvp into solvers" => ["● evaluates as fast as Symbolics; builds 5–7× slower †", "● fast build and evaluation", "○ in Julia; slow `lambdify`", "◐ fastest build; `Compile` dense, 1000× slower to evaluate"],
+    "Exact Jacobians, sparse patterns, jvp into solvers" => ["● builds and evaluates as fast as Symbolics †", "● fast build and evaluation", "○ in Julia; slow `lambdify`", "◐ fastest build; `Compile` dense, 1000× slower to evaluate"],
     "Events, stochastic models, inputs" => ["● †", "●", "○", "●"],
     "Component models, index reduction, tearing" => ["○", "●", "○", "●"],
     "Solutions indexed by symbolic variables" => ["● †", "●", "○", "◐"],
@@ -113,7 +119,15 @@ capabilities = CapabilityMatrix(SYSTEMS, Any[
     "Native in Julia" => ["● C++ engine wrapped", "●", "◐ via Python", "○ external"],
     "Licence" => ["GPL-3 (GIAC)", "MIT", "BSD", "proprietary"],
     "Maturity" => ["◐ new, on a branch", "●", "●", "●"],
-])
+], Set([
+    "Pattern matching / rewrite rules", "Real solutions, parametric case classification",
+    "Ideal theory (primary decomposition, radicals)", "Exact algebraic numbers",
+    "Quantifier elimination / cylindrical decomposition", "Symbolic det / inverse / eigen",
+    "Matrix calculus (symbolic matrices, Kronecker, vec)", "Lie derivatives and brackets, center manifolds",
+    "Lyapunov / region of attraction by sum-of-squares", "Linear control (transfer functions, state space, LQR, Bode)",
+    "Mechanics (Lagrange, Kane)", "Events, stochastic models, inputs", "Component models, index reduction, tearing",
+    "Solutions indexed by symbolic variables", "Parameter sensitivities / adjoints",
+    "Turning Julia functions into expressions (tracing)", "Parallel symbolic work"]))
 
 _MARK_COLOURS = Dict('●' => "#7ec699", '◐' => "#e5c07b", '○' => "#e06c75")
 _esc(s) = replace(s, "&" => "&amp;", "<" => "&lt;", ">" => "&gt;")
@@ -138,19 +152,21 @@ function Base.show(io::IO, ::MIME"text/html", m::CapabilityMatrix)
         if r isa String
             print(io, "<tr><td class=\"area\" colspan=\"$(length(m.systems) + 1)\">", _esc(r), "</td></tr>")
         else
-            print(io, "<tr><td>", _esc(first(r)), "</td>")
+            print(io, "<tr><td>", _esc(first(r)))
+            first(r) in m.untested && print(io, "<br><span style=\"opacity:.6;font-size:.82em\">not compared here</span>")
+            print(io, "</td>")
             foreach(x -> print(io, "<td>", _rating_html(x), "</td>"), last(r))
             print(io, "</tr>")
         end
     end
-    print(io, "</table><p style=\"opacity:.7;font-size:.88em\">● strong · ◐ partial or limited · ○ absent or weak · † added on this branch, rather than from the GIAC engine · ? unsure</p>")
+    print(io, "</table><p style=\"opacity:.7;font-size:.88em\">● strong · ◐ partial or limited · ○ absent or weak · † added on this branch, rather than from the GIAC engine · ? unsure. A row marked <i>not compared here</i> is rated from the systems' documentation, with no test in this notebook.</p>")
 end
 
 function Base.show(io::IO, ::MIME"text/markdown", m::CapabilityMatrix)
     println(io, "| Capability | ", join(m.systems, " | "), " |\n|", repeat(":--|", length(m.systems) + 1))
     for r in m.rows
         r isa String ? println(io, "| **", r, "** |", repeat(" |", length(m.systems))) :
-                       println(io, "| ", first(r), " | ", join(last(r), " | "), " |")
+                       println(io, "| ", first(r), first(r) in m.untested ? " (not compared here)" : "", " | ", join(last(r), " | "), " |")
     end
 end
 capabilities
@@ -529,7 +545,7 @@ end
 
 Integrals, indefinite and definite, limits and series. A definite integral or limit has its value in the task, to check the answers against. An integral given back unevaluated is marked so. Symbolics has no `integrate`.
 
-GIAC's integrator is the fastest here by one to two orders of magnitude, and answers every indefinite and improper integral. Only Mathematica evaluates $\int_0^1 \log x \log(1-x)\,dx$: GIAC gives it back, and SymPy returns a partly evaluated expression with an infinite imaginary part. Symbolics' `limit` handles neither `sin` nor a non-integer power; its `taylor` gives the series.
+GIAC's integrator is the fastest here by one to two orders of magnitude, and answers every indefinite and improper integral. GIAC's own `integrate` gives $\int_0^1 \log x \log(1-x)\,dx$ back, since its antiderivative needs the dilogarithm; Giac.jl then finds it as a derivative of the Beta integral $\int_0^1 x^s (1-x)^r\,dx$ in $s$ and $r$. Mathematica evaluates it too, and SymPy returns a partly evaluated expression with an infinite imaginary part. Symbolics' `limit` handles neither `sin` nor a non-integer power; its `taylor` gives the series.
 """
 
 #%% code id=calculus
@@ -583,7 +599,7 @@ calculus = compare("calculus", [
 
 A Gröbner basis of the cyclic-5 system, in the graded reverse lexicographic order (its number of elements), a polynomial system, a transcendental equation whose solution is Lambert's W, and a linear system with a parameter.
 
-All four find the 20-element Gröbner basis; GIAC is fastest, then Groebner.jl behind Symbolics, then Mathematica, with SymPy a hundred times slower. For $x^2 + y^2 = 1,\ x^3 = y$, GIAC's `solve` gives the two real solutions numerically, of the six, and they match two of Mathematica's; Mathematica gives all six exactly as `Root` objects and Symbolics as roots of a polynomial, while SymPy finds nothing in 30 seconds (in an earlier run, nothing in 15 minutes). Symbolics' `symbolic_solve` cannot take $x e^x = 2$.
+All four find the 20-element Gröbner basis; GIAC is fastest, then Groebner.jl behind Symbolics, then Mathematica, with SymPy a hundred times slower. For $x^2 + y^2 = 1,\ x^3 = y$, GIAC's `cSolve` (its `solve` gives only the real solutions) gives all six numerically, since it solves exactly only up to degree four and doesn't see that $x^6 + x^2 - 1$ is a cubic in $x^2$; Mathematica gives all six exactly as `Root` objects and Symbolics as roots of a polynomial, while SymPy finds nothing in 30 seconds (in an earlier run, nothing in 15 minutes). Symbolics' `symbolic_solve` cannot take $x e^x = 2$.
 """
 
 #%% code id=equations
@@ -599,7 +615,7 @@ equations = let
             () -> length(Sym.groebner_basis(cyclic(sv))),
             "(lambda c1, c2, c3, c4, c5: len(groebner($sympy_cyclic, c1, c2, c3, c4, c5, order='grevlex').exprs))(*symbols('c1:6'))"),
         "x² + y² = 1, x³ = y: the solutions" => (:solutions,
-            () -> C.solve([x^2 + y^2 ~ 1, x^3 ~ y], [x, y]),
+            () -> C.cSolve([x^2 + y^2 ~ 1, x^3 ~ y], [x, y]),
             () -> Sym.symbolic_solve([sy.x^2 + sy.y^2 ~ 1, sy.x^3 ~ sy.y], [sy.x, sy.y]),
             "solve([x**2 + y**2 - 1, x**3 - y], [x, y])"),
         "x eˣ = 2" => (:solutions,
@@ -618,7 +634,7 @@ equations = let
         "Solve[{a x + y == 1, x - a y == 2}, {x, y}]",
     ])
 end
-# the two real solutions, numerically, of the six
+# the six solutions, numerically
 judge!(equations, "x² + y² = 1", "Giac.jl", :approximate)
 
 #%% md id=odes_md
@@ -727,7 +743,7 @@ The step a numerical solver needs from a CAS: the Jacobian of a large sparse mod
 
 Each system first builds a small model, so no time below includes compiling the builders themselves. Then each cell gives the time of the symbolic build and code generation, and below it the first call, which compiles the generated code (in Julia), and the best of 20 evaluations.
 
-The two Julia systems compile to the same kind of code, writing the sparse matrix's stored values directly, and evaluate it in the same time, a few hundred nanoseconds for 400 states. Building takes Giac five to seven times as long as Symbolics, because each derivative is a call into GIAC, where Symbolics differentiates in Julia. Mathematica builds fastest, but its compiled function returns a dense matrix and evaluates a thousand times slower. SymPy is slowest at both.
+The two Julia systems compile to the same kind of code, writing the sparse matrix's stored values directly, and evaluate it in the same time, a few hundred nanoseconds for 400 states. Both differentiate in Julia, and build in about the same time. Mathematica builds fastest, but its compiled function returns a dense matrix and evaluates a thousand times slower. SymPy is slowest at both.
 """
 
 #%% code id=scale
