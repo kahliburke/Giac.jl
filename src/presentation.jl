@@ -192,9 +192,10 @@ function _pnode(e::GiacExpr)
     end
     if !iscall(e)
         t = giac_type(e)
-        (t == INT || t == ZINT || t == FRAC || t == DOUBLE || t == REAL) && return _PNum(to_julia(e))
-        if t == CPLX
+        (t == INT || t == ZINT || t == DOUBLE || t == REAL) && return _PNum(to_julia(e))
+        if t == FRAC || t == CPLX
             v = to_julia(e)
+            v isa Real && return _PNum(v)
             v isa Complex && return _complex_pnode(v)
         end
         s = string(e)
