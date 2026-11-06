@@ -35,7 +35,8 @@ end
     # a symbolic exponent known to give a convergent integral
     r = C.integrate(x^a * log(x), x, 0, 1)
     @test string(C.simplify(r + 1 / (a + 1)^2)) == "0"
-    # convergence not decided, or a family that does not apply: left unevaluated
-    @test occursin("integrate", string(C.integrate(x^b * log(x), x, 0, 1)))
-    @test occursin("integrate", string(C.integrate(log(x) * log(1 + x), x, 0, 1)))
+    # convergence not decided, or a family that does not apply: not taken. (GIAC's own integral of
+    # x^b ln x with b unknown changes how it evaluates cot later in the process, so it isn't called.)
+    @test Giac._parametric_integral(x^b * log(x), x, 0, 1) === nothing
+    @test Giac._parametric_integral(log(x) * log(1 + x), x, 0, 1) === nothing
 end
