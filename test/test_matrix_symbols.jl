@@ -1,4 +1,5 @@
 # Symbolic matrices (@matsym): products that do not commute, kept in a canonical form
+using Random
 
 using LinearAlgebra
 using Giac.Rules: is_positive, simplest, rewrite, equivalent, matrix_identities, verify, MatrixIdentity
@@ -86,7 +87,10 @@ using Giac.Rules: is_positive, simplest, rewrite, equivalent, matrix_identities,
     @testset "matrix identities" begin
         ids = matrix_identities()
         @test length(ids) == 8 && all(i -> i isa MatrixIdentity, ids)
-        @test all(verify, ids)                       # each on random numeric matrices
+        # each on random numeric matrices, from a fixed seed: a rare ill-conditioned draw misses
+        # the tolerance
+        Random.seed!(20261106)
+        @test all(verify, ids)
         @matsym u[n] v[n] M3[3, 2] N3[2, 3]
         sm = only(filter(i -> i.name == "Sherman–Morrison", ids))
         @test sm(A) === nothing
