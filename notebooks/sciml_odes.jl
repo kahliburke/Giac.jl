@@ -223,10 +223,14 @@ function brusselator(N)
 end
 cells = 100
 Fb, u0b, pb = brusselator(cells)
+# a small model first, so the time below doesn't include compiling the builder itself
+let (F3, u03, p3) = brusselator(3)
+    ODEProblem(F3, u03, (0, 1), p3; sparse = true)
+end
 bt = @elapsed bprob = ODEProblem(Fb, u0b, (0, 10), pb; sparse = true)
 ms(p) = round(1000 * @belapsed(solve($p, Rodas5P()), samples = 5, evals = 1); digits = 1)
 @examples begin
-    "building the problem"
+    "building the problem, in seconds"
     length(Fb)
     bt
     nnz(bprob.f.jac_prototype), length(Fb)^2
