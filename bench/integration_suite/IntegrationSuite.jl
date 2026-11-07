@@ -1,6 +1,6 @@
 # The independent CAS integration test suite (Abbasi's, built on Rubi's test files): a catalogue of
-# its integrals and the 2024 results of nine systems, a runner that integrates a selection of them
-# with Giac.jl in worker processes, and the grading of each answer.
+# its integrals and the 2024 results of nine systems, the units a sweep integrates them in, and the
+# runs kept. The grading, which the sweep's processes load, is in grading.jl.
 #
 # The catalogue is made once from the suite's SQLite database; a run's results are kept, one line
 # of JSON per integral, under `~/.cache/giac/integration_suite/runs/<name>/`.
@@ -8,6 +8,9 @@
 module IntegrationSuite
 
 using Giac, JSON, Dates
+
+include("grading.jl")
+using .IntegrationGrading
 
 const C = Giac.Commands
 
@@ -126,118 +129,12 @@ end
 # Grading an answer
 # ---------------------------------------------------------------------------------------------
 
-"""
-    leaf_count(e)
-
-The size of `e` counted as Mathematica's `LeafCount` counts it, so that it compares with the
-suite's optimal sizes: every head and atom is a leaf, a fraction is `Rational[p, q]`, a
-difference is a sum with a factor −1, a quotient a power −1, a square root the power 1/2, and
-`exp(u)` the power `E^u`.
-"""
-leaf_count(e::GiacExpr) = _leaves(Giac._node(e))
-
-_leaves(v::Integer) = 1
-_leaves(v::Rational) = isinteger(v) ? 1 : 3
-_leaves(v::Complex) = 3
-_leaves(v::Number) = 1
-_leaves(n::Giac.NumNode) = _leaves(n.v)
-_leaves(n::Giac.SymNode) = 1
-_leaves(n::Giac.GenNode) = 1
-function _leaves(n::Giac.CallNode)
-    n.f == "exp" && return 2 + sum(_leaves, n.args)                    # Power[E, u]
-    n.f == "sqrt" && return 4 + sum(_leaves, n.args)                   # Power[u, Rational[1, 2]]
-    1 + sum(_leaves, n.args; init = 0)
-end
-# a term c·m, as Times[c, m] with Times flattened
-function _term_leaves(m::Giac.Node, c::Number)
-    isone(c) && return _leaves(m)
-    m === Giac._UNIT && return _leaves(c)
-    m isa Giac.MulNode ? _leaves(m) + _leaves(c) : 1 + _leaves(c) + _leaves(m)
-end
-_leaves(n::Giac.AddNode) = (length(n.terms) == 1 ? 0 : 1) + sum(_term_leaves(m, c) for (m, c) in n.terms)
-_power_leaves(b, e) = isequal(e, Giac._ONE) ? _leaves(b) : 1 + _leaves(b) + _leaves(e)
-function _leaves(n::Giac.MulNode)
-    parts = sum(_power_leaves(b, e) for (b, e) in n.factors; init = 0)
-    k = length(n.factors) + (isone(n.coef) ? 0 : 1)
-    k == 1 && isone(n.coef) ? parts : 1 + parts + (isone(n.coef) ? 0 : _leaves(n.coef))
-end
-
-const ELEMENTARY = Set(["exp", "ln", "log", "sqrt", "sin", "cos", "tan", "sec", "csc", "cot",
-                        "asin", "acos", "atan", "acot", "asec", "acsc", "sinh", "cosh", "tanh",
-                        "sech", "csch", "coth", "asinh", "acosh", "atanh", "acoth", "abs", "sign"])
 # the special functions written in a Mathematica expression, by their GIAC-like names
 const MMA_SPECIAL = r"\b(Erf|Erfi|Erfc|ExpIntegralEi|ExpIntegralE|SinIntegral|CosIntegral|SinhIntegral|CoshIntegral|LogIntegral|PolyLog|Gamma|LogGamma|PolyGamma|Zeta|ProductLog|FresnelS|FresnelC|Elliptic[A-Za-z]*|Hypergeometric[A-Za-z0-9]*|AppellF1|BesselJ|BesselY|BesselI|BesselK|AiryAi|AiryBi|Erfc|HurwitzZeta|LerchPhi|Beta|RootSum|Root)\b"
 
 # functions of optimal answers, in Mathematica's form, that GIAC has no form of; an optimal answer
 # with one can't be reached in GIAC
 const BEYOND_GIAC = r"\b(PolyLog|FresnelS|FresnelC|Hypergeometric\w*|AppellF1|Elliptic\w*|ExpIntegralE|SinhIntegral|CoshIntegral|LerchPhi|HurwitzZeta)\["
-
-_functions(n::Giac.CallNode, acc) = (push!(acc, n.f); foreach(a -> _functions(a, acc), n.args); acc)
-_functions(n::Giac.AddNode, acc) = (foreach(t -> _functions(t[1], acc), n.terms); acc)
-_functions(n::Giac.MulNode, acc) = (foreach(f -> (_functions(f[1], acc); _functions(f[2], acc)), n.factors); acc)
-_functions(n::Giac.Node, acc) = acc
-special_functions(e::GiacExpr) = sort!(collect(setdiff(_functions(Giac._node(e), Set{String}()), ELEMENTARY)))
-
-_has_i(n::Giac.NumNode) = n.v isa Complex
-_has_i(n::Giac.SymNode) = false
-_has_i(n::Giac.CallNode) = any(_has_i, n.args)
-_has_i(n::Giac.AddNode) = any(t -> _has_i(t[1]) || t[2] isa Complex, n.terms)
-_has_i(n::Giac.MulNode) = n.coef isa Complex || any(f -> _has_i(f[1]) || _has_i(f[2]), n.factors)
-_has_i(n::Giac.Node) = occursin(r"\bi\b", string(n))
-has_complex(e::GiacExpr) = _has_i(Giac._node(e))
-
-# values for the parameters, distinct and away from special points
-_parameter_value(name) = 0.5 + mod(hash(name) % 1000, 997) / 664.0
-const POINTS = [0.37, 0.83, 1.61, 2.29]
-
-# |d/dx answer − integrand| relative to the integrand at the points where it is finite, in
-# 20-digit arithmetic: `true` when it is small at every such point (two at least), `false` when
-# it is not, `nothing` when there are too few points to tell
-function verify(answer::GiacExpr, integrand::GiacExpr, x::GiacExpr)
-    d = C.diff(answer, x) - integrand
-    names = setdiff(string.(Giac.to_julia(C.lname(integrand + answer))), [string(x)])
-    params = Dict(Giac.giac_identifier(n) => _parameter_value(n) for n in names)
-    checked = 0
-    for p in POINTS
-        values = merge(params, Dict(x => p))
-        f = _number(Giac.substitute(integrand, values))
-        (f === nothing || !isfinite(f) || abs(f) < 1e-12) && continue
-        g = _number(Giac.substitute(d, values))
-        g === nothing && continue
-        abs(g) <= 1e-8 * max(abs(f), 1.0) || return false
-        checked += 1
-    end
-    checked >= 2 ? true : nothing
-end
-function _number(e)
-    try
-        v = Giac.to_julia(C.evalf(e, 20))
-        v isa Number ? ComplexF64(v) : nothing
-    catch
-        nothing
-    end
-end
-
-"""
-    grade(answer, integrand, x, optimal_size, optimal_special, optimal_complex) -> (grade, note)
-
-The suite's grade of `answer`: A, correct and at most twice the optimal size; B, correct and
-larger; C, correct but with complex numbers or special functions the optimal answer does not
-have (`optimal_special`, `optimal_complex` say whether it has them); F, unevaluated or wrong. `?`
-is an answer that could not be checked.
-"""
-function grade(answer::GiacExpr, integrand::GiacExpr, x::GiacExpr, optimal_size, optimal_special, optimal_complex)
-    occursin(r"\bintegrate\(", string(answer)) && return ("F", "unevaluated")
-    ok = verify(answer, integrand, x)
-    ok === nothing && return ("?", "not checked: too few finite points")
-    ok || return ("F", "wrong: the derivative differs from the integrand")
-    special = special_functions(answer)
-    !isempty(special) && !optimal_special && return ("C", "special functions the optimal has not: " * join(special, ", "))
-    has_complex(answer) && !optimal_complex && !has_complex(integrand) && return ("C", "complex numbers the optimal has not")
-    (optimal_size === nothing || optimal_size <= 0) && return ("A", "")
-    size = leaf_count(answer)
-    size <= 2optimal_size ? ("A", "") : ("B", "size $size, over twice the optimal $optimal_size")
-end
 
 # ---------------------------------------------------------------------------------------------
 # The catalogue
@@ -252,21 +149,6 @@ _name(part) = replace(replace(part, r"^[0-9][0-9.]*[a-z]?_" => ""), "_" => " ")
 function _optimal_giac(maple)
     (maple === nothing || occursin(r"Unintegrable|\bInt\(|\bint\(", maple)) && return nothing
     first(to_giac(replace(maple, r"\bln\(" => "log(")))
-end
-
-"""
-    optimal_size(optimal_giac, optimal_mma_size)
-
-The size of an integral's optimal antiderivative by `leaf_count`, so that it compares with an
-answer's; the suite's own size (Mathematica's) when its GIAC form can't be read.
-"""
-function optimal_size(optimal_giac, optimal_mma_size)
-    optimal_giac === nothing && return optimal_mma_size
-    try
-        leaf_count(giac_eval(optimal_giac))
-    catch
-        optimal_mma_size
-    end
 end
 
 "A system's 2024 result for an integral: its grade, its time in seconds and its answer's size."
@@ -389,135 +271,68 @@ function sample(catalogue; per_file = 8)
 end
 
 # ---------------------------------------------------------------------------------------------
-# Running: integrals in worker processes, each with a time limit
+# Runs: an integral as a sweep's unit, the code that integrates it, and the results kept
 # ---------------------------------------------------------------------------------------------
 
-const WORKER = joinpath(@__DIR__, "worker.jl")
+"""
+    unit(e::Integral)
 
-# the versions and the machine a run is made on
-function environment()
-    sh(cmd) = try readchomp(cmd) catch; "" end
-    dir = pkgdir(Giac)
-    commit = sh(`git -C $dir rev-parse --short HEAD`) *
-             (isempty(sh(`git -C $dir status --porcelain -- src ext`)) ? "" : " (modified)")
-    Dict("giac_jl" => string(pkgversion(Giac)), "commit" => commit,
-         "branch" => sh(`git -C $dir rev-parse --abbrev-ref HEAD`),
-         "giac" => Giac.GiacCxxBindings.giac_version(), "julia" => string(VERSION),
-         "cpu" => Sys.cpu_info()[1].model, "machine" => sh(`sysctl -n hw.model`),
-         "os" => "macOS " * sh(`sw_vers -productVersion`))
-end
+What a sweep's unit needs of an integral: its integrand and variable, and what is known of its
+optimal antiderivative ("" and 0 when nothing is).
+"""
+unit(e::Integral) = (id = e.id, integrand = e.integrand, variable = e.variable,
+                     optimal_giac = something(e.optimal_giac, ""), optimal_mma_size = something(e.optimal_mma_size, 0),
+                     optimal_special = e.optimal_special, optimal_complex = e.optimal_complex)
 
-# a worker's environment, with the commit of its wrapper library when that is a local build
-function _with_wrapper_commit(env)
-    dir = dirname(expanduser(env["wrapper"]))
-    commit = try readchomp(`git -C $dir rev-parse --short HEAD`) catch; "" end
-    isempty(commit) ? env : merge(env, Dict("wrapper_commit" => commit))
-end
+_sh(cmd) = try readchomp(cmd) catch; "" end
+_short_hash(s) = string(hash(s); base = 16, pad = 16)[1:8]
 
-mutable struct _Worker
-    process::Base.Process
-    lines::Channel{String}
-    environment::Dict{String, Any}     # what it runs: Giac.jl, GIAC and its wrapper, Julia
-end
-
-function _start_worker(project, log)
-    cmd = `$(Base.julia_cmd()) --project=$project --startup-file=no -t 1 $WORKER`
-    p = open(pipeline(cmd; stderr = log), "r+")
-    lines = Channel{String}(64)
-    @async (try
-        for l in eachline(p)
-            startswith(l, "@@") && put!(lines, l[3:end])
-        end
-    catch
-    end; close(lines))
-    w = _Worker(p, lines, Dict{String, Any}())
-    ready = _next(w, 600)
-    ready isa String && startswith(ready, "READY ") || error("a worker did not start")
-    w.environment = JSON.parse(ready[7:end]; dicttype = Dict{String, Any})
-    w
-end
-
-# the worker's next message within `limit` seconds, or `:timeout`, or `:exited`
-function _next(w::_Worker, limit)
-    timedwait(() -> isready(w.lines) || !isopen(w.lines), limit; pollint = 0.01) === :ok || return :timeout
-    isready(w.lines) ? take!(w.lines) : :exited
-end
-# a worker that has answered ends when its input does; one that is late is killed
-function _stop(w::_Worker; late = false)
-    late ? kill(w.process) : close(w.process.in)
-    try close(w.process) catch end
-end
-
-function _attempt(w, e::Integral, limit, check_limit)
-    println(w.process, JSON.json(e))
-    flush(w.process)
-    r = _next(w, limit)
-    r === :timeout && return (Dict("grade" => "F(-1)", "note" => "no answer within $limit s"), true)
-    r === :exited && return (Dict("grade" => "F(-2)", "note" => "the worker stopped"), true)
-    result = JSON.parse(r[3:end])        # "R {...}"
-    haskey(result, "error") && return (merge(result, Dict("grade" => "F(-2)", "note" => result["error"])), false)
-    v = _next(w, check_limit)
-    v isa Symbol && return (merge(result, Dict("grade" => "?", "note" => "not checked within $check_limit s")), true)
-    (merge(result, JSON.parse(v[3:end])), false)
+# a git checkout's commit, with a hash of its uncommitted changes to `paths` after a +
+function _checkout_version(dir, paths...)
+    top = _sh(`git -C $dir rev-parse --show-toplevel`)
+    isempty(top) && return ""
+    changes = _sh(`git -C $top diff HEAD -- $paths`)
+    _sh(`git -C $top rev-parse --short HEAD`) * (isempty(changes) ? "" : "+" * _short_hash(changes))
 end
 
 """
-    run!(name, entries; limit = 30, check_limit = 60, workers = …, progress)
+    code_version()
 
-Integrate `entries` with Giac.jl, `workers` at a time in processes of their own, and keep each
-result as a line of `runs/<name>/results.jsonl`. An integral without an answer within `limit`
-seconds has its worker stopped and replaced. Integrals already in the file are skipped, so a run
-that is stopped can be continued.
+What integrates and grades the integrals: Giac.jl's commit, the C++ wrapper library's (a local
+build's commit, or the released version), and a hash of the grading code, each with a hash of
+uncommitted changes after a +. A sweep that captures it starts again when any of them changes.
 """
-function run!(name, entries; limit = 30, check_limit = 60, workers = max(1, Sys.CPU_THREADS ÷ 2),
-              project = Base.active_project(), selection = "", progress = (done, total) -> nothing)
+function code_version()
+    wrapper_dir = dirname(Giac.libgiac_julia_jll.libgiac_wrapper_path)
+    local_build = _checkout_version(wrapper_dir, "src")
+    (giac_jl = _checkout_version(pkgdir(Giac), "src", "ext"),
+     wrapper = isempty(local_build) ? "released " * Giac.GiacCxxBindings.wrapper_version() : local_build,
+     wrapper_path = Giac.libgiac_julia_jll.libgiac_wrapper_path,
+     grading = _short_hash(read(joinpath(@__DIR__, "grading.jl"), String)),
+     giac = Giac.GiacCxxBindings.giac_version())
+end
+
+# the machine a run is made on
+environment() = Dict("julia" => string(VERSION), "cpu" => Sys.cpu_info()[1].model,
+                     "machine" => _sh(`sysctl -n hw.model`), "os" => "macOS " * _sh(`sw_vers -productVersion`))
+
+"""
+    keep_run!(name, results; selection, version, limit, started, finished)
+
+Keep a finished sweep's results, `Result`s, as the run `name` under `runs_dir()`, with what made
+them, so that runs of different code can be compared. A run already kept is left as it is.
+"""
+function keep_run!(name, results; selection, version, limit, started, finished)
     dir = joinpath(runs_dir(), name)
+    isfile(joinpath(dir, "meta.json")) && return name
     mkpath(dir)
-    file = joinpath(dir, "results.jsonl")
-    done = Set(r.id for r in load_results(name))
-    todo = [e for e in entries if !(e.id in done)]
-    meta_file = joinpath(dir, "meta.json")
-    meta = isfile(meta_file) ? JSON.parsefile(meta_file; dicttype = Dict{String, Any}) :
-           Dict{String, Any}("name" => name, "selection" => selection, "started" => string(now()),
-                             "limit" => limit, "check_limit" => check_limit, "workers" => workers,
-                             "environment" => environment())
-    meta["count"] = length(entries)
-    write(meta_file, JSON.json(meta))
-    out, lock_ = open(file, "a"), ReentrantLock()
-    queue = Channel{Integral}(length(todo))
-    foreach(e -> put!(queue, e), todo); close(queue)
-    finished = Threads.Atomic{Int}(length(done))
-    keep(record) = lock(lock_) do
-        println(out, JSON.json(record)); flush(out)
-        finished[] += 1
-        progress(finished[], length(entries))
+    open(joinpath(dir, "results.jsonl"), "w") do io
+        foreach(r -> println(io, JSON.json(r)), results)
     end
-    log = open(joinpath(dir, "workers.log"), "a")
-    try
-        @sync for _ in 1:workers
-            @async begin
-                w = nothing
-                for e in queue
-                    record = Dict{String, Any}("id" => e.id)
-                    if e.integrand === nothing
-                        keep(merge(record, Dict("grade" => "N/A", "note" => "not in GIAC: " * join(e.unsupported, ", "))))
-                        continue
-                    end
-                    w === nothing && (w = _start_worker(project, log))
-                    result, lost = _attempt(w, e, limit, check_limit)
-                    haskey(meta, "worker") || (meta["worker"] = _with_wrapper_commit(w.environment); write(meta_file, JSON.json(meta)))
-                    lost && (_stop(w; late = true); w = nothing)
-                    keep(merge(record, result))
-                end
-                w === nothing || _stop(w)
-            end
-        end
-    finally
-        close(out)
-        close(log)
-        meta["finished"] = string(now())
-        write(meta_file, JSON.json(meta))
-    end
+    write(joinpath(dir, "meta.json"), JSON.json(Dict(
+        "name" => name, "selection" => selection, "count" => length(results), "limit" => limit,
+        "version" => Dict(pairs(version)), "environment" => environment(),
+        "started" => string(started), "finished" => string(finished))))
     name
 end
 
@@ -532,6 +347,8 @@ struct Result
 end
 Result(d::AbstractDict) = Result(d["id"], d["grade"], get(d, "note", ""), get(d, "seconds", nothing),
                                  get(d, "answer", nothing), get(d, "size", nothing))
+# from a sweep's row: the integral's id among its parameters, and what the unit returned
+Result(id::Integer, r) = Result(id, r.grade, r.note, r.seconds, coalesce(r.answer, nothing), coalesce(r.size, nothing))
 
 "A run's results."
 function load_results(name)

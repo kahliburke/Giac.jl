@@ -83,36 +83,69 @@ Dict(k => length(v) for (k, v) in selections)
 Locked: it runs only when run deliberately. The integrals are shared among several worker processes, each a Julia with Giac.jl that integrates one integral after another, as a session would, after a few integrals of each kind that compile the code they share, so that no timed integral includes compiling it. An integral without an answer in 30 seconds has its worker stopped and replaced: GIAC's own timeout leaves the process unusable once it fires. Each result is kept as it comes, so a run that is stopped continues where it left off when run again under the same name.
 """
 
-#%% code id=run locked
+#%% code id=units
+# the selection to integrate, as the sweep's units: the integrals GIAC can state (the others are
+# N/A without a run), and what integrates them
 run_selection = "sample"
-run_name = string(Dates.today(), "_", replace(S.environment()["commit"], " (modified)" => "+"), "_", replace(run_selection, r"\W+" => "_"))
-S.run!(run_name, selections[run_selection]; selection = run_selection)
+units = [S.unit(e) for e in selections[run_selection] if e.integrand !== nothing]
+version = S.code_version()
+(selection = run_selection, units = length(units), version)
 
-#%% code id=runs
-kept = S.runs()
-# the wrapper library a run's workers loaded: a local build by its commit, or the released one
-wrapper(m) = haskey(m, "worker") ? get(m["worker"], "wrapper_commit", "released") : "—"
-Markdown.parse("| Run | Selection | Integrals | Giac.jl | GIAC | Wrapper | Started | Finished |\n|:--|:--|--:|:--|:--|:--|:--|:--|\n" *
-               join(["| $(m["name"]) | $(m["selection"]) | $(m["count"]) | $(m["environment"]["giac_jl"]) at $(m["environment"]["commit"]) | " *
-                     "$(m["environment"]["giac"]) | $(wrapper(m)) | $(first(m["started"], 16)) | $(first(get(m, "finished", "—"), 16)) |" for m in kept], "\n"))
+#%% job id=integration cluster=local eval_barrier
+# Each integral is a unit: integrated by Giac.jl with a 30 s limit, then graded. A process takes a
+# chunk of units in turn, as one session would. `version` names the code: a change to Giac.jl,
+# its wrapper library or the grading starts a new sweep. GIAC runs on a thread of its own
+# (DedicatedThreads), which lets `with_timeout` stop an integration that runs over.
+integration = @sweep(paramgrid(units); plot = false) do p
+    using DedicatedThreads, Giac
+    isdefined(Main, :IntegrationGrading) ||
+        Base.include(Main, joinpath(pkgdir(Giac), "bench", "integration_suite", "grading.jl"))
+    Giac.libgiac_julia_jll.libgiac_wrapper_path == version.wrapper_path ||
+        error("the task process loads another wrapper library: ", Giac.libgiac_julia_jll.libgiac_wrapper_path)
+    # the grading code was loaded during this call, so it is reached in the newest world
+    Base.invokelatest(() -> Main.IntegrationGrading.integrate_unit(p; limit = 30))
+end
 
 #%% md id=results_md
 @md"""
 ## Results
 
-The newest run, against the 2024 results on the same integrals. The 2024 runs were made on another machine, and GIAC through Sage, so their times compare only roughly.
+The sweep's results so far, against the 2024 results on the same integrals; the cells run again as units land. The 2024 runs were made on another machine, and GIAC through Sage, so their times compare only roughly.
 """
 
 #%% code id=results
-current = kept[1]
-results = S.load_results(current["name"])
+# Giac.jl's results so far: the sweep's units that have landed, and the selection's integrals GIAC
+# can't state. The cells below run again as units land.
+landed = [S.Result(row.params.id, row.record) for row in integration if row.record !== nothing]
+not_stated = [S.Result(e.id, "N/A", "not in GIAC: " * join(e.unsupported, ", "), nothing, nothing, nothing)
+              for e in selections[run_selection] if e.integrand === nothing]
+results = [landed; not_stated]
 graded = [(e = by_id[r.id], r = r) for r in results]
-const GRADES = ["A", "B", "C", "?", "F", "F(-1)", "F(-2)", "N/A"]
+GRADES = ["A", "B", "C", "?", "F", "F(-1)", "F(-2)", "N/A"]
 grade_2024(e, s) = something(S.reference(e, s).grade, "N/A")
 tally(gs) = Dict(g => count(==(g), gs) for g in GRADES)
 ours = tally([x.r.grade for x in graded])
 theirs = Dict(s => tally([grade_2024(x.e, s) for x in graded]) for s in S.SYSTEMS_2024)
-(run = current["name"], integrals = length(graded), grades = ours)
+# what made them, for the plots
+machine = S.environment()
+made_by = "Giac.jl $(pkgversion(Giac)) at $(version.giac_jl), wrapper $(version.wrapper), GIAC $(version.giac)"
+(landed = length(landed), of = length(units), grades = ours)
+
+#%% code id=kept_runs
+# Once every unit has landed, the sweep's results are kept as a run, to compare with runs of
+# other code; the runs kept so far
+run_name = string(Dates.today(), "_", version.giac_jl, "_", replace(run_selection, r"\W+" => "_"))
+if integration.total > 0 && integration.pending == 0
+    at = [row.at for row in integration if row.record !== nothing]
+    S.keep_run!(run_name, results; selection = run_selection, version, limit = 30,
+                started = minimum(at), finished = maximum(at))
+end
+kept = S.runs()
+md_text(s) = replace(string(s), "_" => "\\_", "|" => "\\|")
+Markdown.parse("| Run | Selection | Integrals | Giac.jl | Wrapper | Grading | GIAC | Finished |\n|:--|:--|--:|:--|:--|:--|:--|:--|\n" *
+               join(["| $(md_text(m["name"])) | $(md_text(m["selection"])) | $(m["count"]) | $(m["version"]["giac_jl"]) | " *
+                     "$(m["version"]["wrapper"]) | $(m["version"]["grading"]) | $(m["version"]["giac"]) | $(first(m["finished"], 16)) |"
+                     for m in kept], "\n"))
 
 #%% code id=grades_plot
 let systems = ["Giac.jl"; [S.SYSTEM_NAMES[s] for s in S.SYSTEMS_2024]]
@@ -120,11 +153,10 @@ let systems = ["Giac.jl"; [S.SYSTEM_NAMES[s] for s in S.SYSTEMS_2024]]
     n = length(graded)
     colours = Dict("A" => :seagreen3, "B" => :yellowgreen, "C" => :goldenrod, "?" => :gray60, "F" => :tomato,
                    "F(-1)" => :orchid, "F(-2)" => :mediumpurple, "N/A" => :gray35)
-    env = current["environment"]
     fig = Figure(size = (1000, 420))
     ax = Axis(fig[1, 1]; xlabel = "share of the $n integrals", yticks = (1:length(systems), systems), yreversed = true,
-              title = "grades: Giac.jl $(env["giac_jl"]) at $(env["commit"]) (GIAC $(env["giac"])), and the 2024 results",
-              subtitle = "$(env["cpu"]), $(env["os"]), Julia $(env["julia"]); run $(current["name"])")
+              title = "grades: $made_by, and the 2024 results",
+              subtitle = "$(machine["cpu"]), $(machine["os"]), Julia $(machine["julia"]); selection $run_selection")
     left = zeros(length(systems))
     for g in GRADES
         w = [c[g] / n for c in counts]
@@ -162,9 +194,8 @@ let k = length(GRADES)
     for x in graded
         M[findfirst(==(grade_2024(x.e, "giac")), GRADES), something(findfirst(==(x.r.grade), GRADES), k)] += 1
     end
-    env = current["environment"]
     fig = Figure(size = (640, 560))
-    ax = Axis(fig[1, 1]; xlabel = "Giac.jl $(env["giac_jl"]) at $(env["commit"])", ylabel = "GIAC 1.9.0-99 (2024)",
+    ax = Axis(fig[1, 1]; xlabel = made_by, ylabel = "GIAC 1.9.0-99 (2024)",
               xticks = (1:k, GRADES), yticks = (1:k, GRADES), yreversed = true, aspect = DataAspect())
     heatmap!(ax, 1:k, 1:k, log10.(M' .+ 1); colormap = :viridis)
     top = maximum(log10.(M .+ 1))
@@ -180,11 +211,10 @@ let times(xs, f) = sort([t for x in xs for t in (f(x),) if t !== nothing])
     ours_t = times([x for x in graded if solved(x.r.grade)], x -> x.r.seconds)
     old = times([x for x in graded if solved(grade_2024(x.e, "giac"))], x -> S.reference(x.e, "giac").seconds)
     mma = times([x for x in graded if solved(grade_2024(x.e, "mma"))], x -> S.reference(x.e, "mma").seconds)
-    env = current["environment"]
     fig = Figure(size = (900, 420))
     ax = Axis(fig[1, 1]; xscale = log10, xlabel = "seconds", ylabel = "integrals answered correctly within",
-              title = "times of the correct answers", subtitle = "Giac.jl on $(env["cpu"]); the 2024 times on the suite's machine")
-    stairs!(ax, ours_t, 1:length(ours_t); color = :orange, linewidth = 2, label = "Giac.jl $(env["giac_jl"]) at $(env["commit"])")
+              title = "times of the correct answers", subtitle = "Giac.jl on $(machine["cpu"]); the 2024 times on the suite's machine")
+    stairs!(ax, ours_t, 1:length(ours_t); color = :orange, linewidth = 2, label = made_by)
     isempty(old) || stairs!(ax, old, 1:length(old); color = :deepskyblue, label = "GIAC 1.9.0-99 via Sage (2024)")
     isempty(mma) || stairs!(ax, mma, 1:length(mma); color = :gray70, label = "Mathematica 14 (2024)")
     axislegend(ax; position = :lt, framevisible = false)
@@ -217,6 +247,7 @@ end
 
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
 #   CairoMakie 0.15.17 13f3f980-e62b-5c42-98c6-ff1f3baf88f0
+#   DedicatedThreads 0.1.0 9d6577c3-9664-4440-a53f-cec765ebc045
 #   JSON 1.13.4 682c06a0-de6a-54ab-a142-c8b1cf79cde6
 #   SQLite 1.11.0 0aa819cd-b072-5ff4-a722-6bc24af294d9
 # ╚═╡
