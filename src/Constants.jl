@@ -208,8 +208,9 @@ end
 # match them). Compared by their printed string. The list is the set of
 # *real* GIAC atoms — names like `nan`, `NaN`, `unsigned_infinity`, and
 # `undefined` are not in GIAC's atom table; they parse as ordinary free
-# identifiers and must NOT be added here.
-const _giac_constant_names = ("infinity", "undef")
+# identifiers and must NOT be added here. `inf` is how the expression tree writes +infinity,
+# which GIAC reads back as +infinity.
+const _giac_constant_names = ("infinity", "inf", "undef")
 
 """
     is_giac_constant(expr::GiacExpr) -> Bool
