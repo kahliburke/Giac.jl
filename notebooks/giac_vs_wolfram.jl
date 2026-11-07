@@ -537,7 +537,7 @@ integrals = contest("Indefinite integrals", [
 ])
 
 #%% md id=definite_md
-@md raw"""
+@md"""
 ## Definite integrals
 
 Famous values: an integral of Bose–Einstein type, Serret's integral, a symmetry trick, the log-sine integral, Ahmed's integral (a hard one), Laplace's integral, a dilogarithm value, Euler's constant from a Gamma-function derivative, a Gaussian with a cosine, Frullani's integral, and an integral of the complementary error function.
@@ -572,7 +572,7 @@ definite = contest("Definite integrals", [
 ])
 
 #%% md id=sums_md
-@md raw"""
+@md"""
 ## Sums and products
 
 Zeta values, a harmonic-number series, a Dirichlet beta value, a central binomial series, Vandermonde's identity in closed form, a closed form with a power of two, a polylogarithm value, and two infinite products.
@@ -604,7 +604,7 @@ sums = contest("Sums and products", [
 ])
 
 #%% md id=limits_md
-@md raw"""
+@md"""
 ## Limits
 
 A limit where the first six orders cancel, Stirling's growth of $n!$, a second-order term of $e$, a nested-exponential limit of the kind the Gruntz algorithm was made for, a cancellation of poles, a ratio of Gamma functions, a power of the sinc function, and a bounded oscillation.
@@ -631,7 +631,7 @@ limits = contest("Limits", [
 ])
 
 #%% md id=equations_md
-@md raw"""
+@md"""
 ## Equations and inequalities
 
 Polynomial systems with all their complex solutions, a quintic that is solvable by radicals, every solution of a trigonometric equation, Lambert's $W$, inequalities with polynomials and absolute values, and a condition on a parameter that needs quantifier elimination. For complex solutions Giac.jl uses GIAC's `cSolve`, as its `solve` gives the real ones.
@@ -708,7 +708,7 @@ polynomials = contest("Polynomial algebra", [
             () -> C.resultant(x - t^2 + 1, y - t^3 + t, t), "Resultant[x - t^2 + 1, y - t^3 + t, t]",
             Vanishing([["x" => "-91/100", "y" => "-273/1000"], ["x" => "-51/100", "y" => "-357/1000"]], ["x" => "1/2", "y" => "1/2"])),
     Problem("Polynomial decomposition", raw"x^6 + 6x^4 + x^3 + 9x^2 + 3x - 5 = g(h(x))",
-            () -> error("Giac.jl has no polynomial decomposition"), "Decompose[x^6 + 6 x^4 + x^3 + 9 x^2 + 3 x - 5, x]",
+            () -> Giac.polynomial_decomposition(x^6 + 6x^4 + x^3 + 9x^2 + 3x - 5, x), "Decompose[x^6 + 6 x^4 + x^3 + 9 x^2 + 3 x - 5, x]",
             Decomposition("x", "7/10", let u = 0.7; u^6 + 6u^4 + u^3 + 9u^2 + 3u - 5 end)),
 ])
 
@@ -728,7 +728,8 @@ simplification = contest("Simplification and algebraic numbers", [
             () -> C.simplify((convert(GiacExpr, 2)^(1 // 3) - 1)^(1 // 3)), "FullSimplify[(2^(1/3) - 1)^(1/3)]",
             Form(Value(cbrt(cbrt(big(2)) - 1)), :denested, "not denested")),
     Problem("A heptagon sum", raw"\cos\tfrac{2\pi}{7} + \cos\tfrac{4\pi}{7} + \cos\tfrac{6\pi}{7} = -\tfrac12",
-            () -> C.simplify(cos(2PI / 7) + cos(4PI / 7) + cos(6PI / 7)), "FullSimplify[Cos[2 Pi/7] + Cos[4 Pi/7] + Cos[6 Pi/7]]",
+            # Giac.jl's exact simplifier for algebraic constants (Nemo's algebraic numbers)
+            () -> Giac.simplify_algebraic(cos(2PI / 7) + cos(4PI / 7) + cos(6PI / 7)), "FullSimplify[Cos[2 Pi/7] + Cos[4 Pi/7] + Cos[6 Pi/7]]",
             Form(Value(-1 / 2), :no_trig, "cosines left")),
     Problem("A minimal polynomial", raw"\text{the minimal polynomial of } \sqrt2 + \sqrt3 + \sqrt5",
             () -> C.pmin(sqrt(convert(GiacExpr, 2)) + sqrt(convert(GiacExpr, 3)) + sqrt(convert(GiacExpr, 5)), x),
@@ -746,7 +747,7 @@ simplification = contest("Simplification and algebraic numbers", [
 ])
 
 #%% md id=odes_md
-@md raw"""
+@md"""
 ## Differential equations
 
 The Airy and Bessel equations, a Riccati equation whose solutions are Bessel functions, a nonlinear autonomous equation, a forced Euler–Cauchy equation, a Bernoulli equation, a linear system with a Jordan block, and two partial differential equations: the transport equation's general solution and the heat equation on an interval with boundary and initial conditions. Giac.jl's `desolve` handles ordinary equations only.
@@ -792,7 +793,7 @@ odes = contest("Differential equations", [
 ])
 
 #%% md id=linear_md
-@md raw"""
+@md"""
 ## Linear algebra
 
 Eigenvalues of a matrix with a parameter, a Jordan form with a non-trivial block, a matrix exponential, a factored Vandermonde determinant, and a Smith normal form.
@@ -823,7 +824,7 @@ linear = contest("Linear algebra", [
 ])
 
 #%% md id=numbers_md
-@md raw"""
+@md"""
 ## Number theory
 
 Factoring the Fermat number $F_7$, proving a 157-digit Mersenne number prime, a discrete logarithm modulo $10^9 + 7$, Pell's equation, a periodic continued fraction, and the partition number $p(200)$. Giac.jl reaches PARI through GIAC's `pari` command where GIAC has no command of its own.
@@ -857,7 +858,7 @@ numbers = contest("Number theory", [
 ])
 
 #%% md id=transforms_md
-@md raw"""
+@md"""
 ## Transforms and special functions
 
 Laplace transforms forward and back, a delayed step, the series of Lambert's $W$, a Gauss hypergeometric function in closed form, and the reflection formula of the Gamma function.
@@ -879,7 +880,7 @@ transforms = contest("Transforms and special functions", [
             Value(let u = big(1 // 10); u - u^2 + 3u^3 / 2 - 8u^4 / 3 + 125u^5 / 24 end; at = [["x" => "1/10"]],
                   giac = a -> C.convert(a, giac_eval("polynom")), wolfram = "Normal")),
     Problem("A hypergeometric function", raw"{}_2F_1(1, 1; 2; x) = -\frac{\ln(1 - x)}{x}",
-            () -> C.simplify(giac_eval("hypergeom([1,1],[2],x)")), "FunctionExpand[Hypergeometric2F1[1, 1, 2, x]]",
+            () -> Giac.hypergeometric([1, 1], [2], x), "FunctionExpand[Hypergeometric2F1[1, 1, 2, x]]",
             Form(Value(2log(big(2)); at = [["x" => "1/2"]]), (:free_of, "hypergeom", "Hypergeometric2F1"), "not in closed form")),
     Problem("Gamma's reflection formula", raw"\Gamma\left(\tfrac14\right)\Gamma\left(\tfrac34\right) = \pi\sqrt2",
             () -> C.simplify(C.Gamma(giac_eval("1/4")) * C.Gamma(giac_eval("3/4"))), "FullSimplify[Gamma[1/4] Gamma[3/4]]",
@@ -887,7 +888,7 @@ transforms = contest("Transforms and special functions", [
 ])
 
 #%% md id=control_md
-@md raw"""
+@md"""
 ## Control
 
 From a nonlinear control course: the gains that keep a cubic characteristic polynomial stable (Routh–Hurwitz), a Lyapunov equation, the algebraic Riccati equation of an LQR problem, the Lie algebra rank condition for the unicycle, a center manifold, and two polynomial inequalities, one with a sum-of-squares certificate and Motzkin's polynomial, which is nonnegative but not a sum of squares. Mathematica has Lyapunov and Riccati solvers; for the rest its user writes a few lines, as here.
@@ -930,7 +931,7 @@ control = contest("Control", [
 ])
 
 #%% md id=summary_md
-@md raw"""
+@md"""
 ## Summary
 
 Each area's problems by outcome, for both systems, and the problems one system solved and the other didn't.
@@ -976,15 +977,19 @@ scoreboard = Scoreboard([integrals, definite, sums, limits, equations, polynomia
 @md raw"""
 ## What the contest shows
 
-Mathematica answers almost everything here; the problems it misses are Ahmed's integral (which Giac.jl misses too), Ramanujan's denesting, a square root it leaves nested, and an inverse cosine its `Simplify` leaves as it is under the assumptions, where Giac.jl gets both of the last two. Giac.jl is level with it on limits, linear algebra, control, the Laplace transforms and most equations and number theory, and it has no wrong answers. Where it falls behind, the gaps are in a few places:
+Mathematica answers almost everything here; the problems it misses are Ahmed's integral (which Giac.jl misses too), Ramanujan's denesting, a square root it leaves nested, and an inverse cosine its `Simplify` leaves as it is under the assumptions, where Giac.jl gets both of the last two. Giac.jl is level with it on limits, linear algebra, polynomial algebra apart from one factorization, the transforms and special functions, and most equations and number theory, and it has no wrong answers.
 
-- **Integration**: GIAC's integrator gives back algebraic integrands that need a clever substitution (Chebyshev's pseudo-elliptic integral, the arctangent of a radical, the fourth root) and a rational function whose denominator has no roots in radicals, which Mathematica writes as a `RootSum`. Definite integrals that need a contour, a symmetry or a polylogarithm (Serret's, the log-sine, the Gaussian with a cosine, $\operatorname{erfc}^2$) come back unevaluated; the ones Giac.jl solves beyond GIAC come from its derivatives of Beta and Gamma integrals.
-- **Symbolic sums**: GIAC sums $\zeta(4)$, an arithmetic-geometric series and a closed form in $n$, but not harmonic numbers, alternating or central binomial series, Vandermonde's identity, polylogarithm values or infinite products.
+Some of Giac.jl's answers come from its own layers rather than from GIAC: definite integrals as derivatives of Beta and Gamma integrals (the dilogarithm value, Euler's constant, the log-sine integral), sines and cosines written as exponentials (the Gaussian with a cosine), the mean of an integrand and its reflection (the symmetry trick), infinite sums and products as limits of GIAC's partial ones (the two products), alternating sums in pairs of terms with polygamma values reflected (Dirichlet's β(3)), Chu–Vandermonde for finite hypergeometric sums, `hypergeometric` for series whose Pochhammer ratios are rational, `polynomial_decomposition`, and exact algebraic numbers through Nemo (the heptagon sum).
+
+Where it falls behind, the gaps are in a few places:
+
+- **Integration**: GIAC's integrator gives back algebraic integrands that need a clever substitution (Chebyshev's pseudo-elliptic integral, the arctangent of a radical, the fourth root) and a rational function whose denominator has no roots in radicals, which Mathematica writes as a `RootSum`. Serret's integral and $\operatorname{erfc}^2$ stay unevaluated.
+- **Symbolic sums**: harmonic-number and central binomial series, and polylogarithm values; GIAC has no polylogarithm.
 - **Differential equations**: no Airy functions, no Riccati or forced Euler–Cauchy equations, and no partial differential equations at all.
-- **Exact forms**: `cSolve` gives a sextic system's and a solvable quintic's roots numerically, where Mathematica gives exact `Root` objects or radicals; GIAC's `simplify` leaves $\cos(2\pi/17)$ and the heptagon sum in cosines.
-- **Missing functions**: no polynomial decomposition, no ${}_2F_1$, and no proof of nonnegativity beyond sums of squares (Motzkin's polynomial needs cylindrical decomposition).
+- **Exact forms**: `cSolve` gives a sextic system's and a solvable quintic's roots numerically, where Mathematica gives exact `Root` objects or radicals; $\cos(2\pi/17)$ is not written in square roots; GIAC's `factor` splits $\Phi_5$ with $\sqrt5$, so $x^{105} - 1$ is not factored over $\mathbb{Q}$.
+- **Missing proofs**: no proof of nonnegativity beyond sums of squares (Motzkin's polynomial needs cylindrical decomposition).
 
-Some failures are GIAC's own defects rather than missing mathematics: `isprime(2^521 - 1)` fails inside PARI, a PARI error leaves PARI locked for the rest of the session, and `pari_unlock` locks a PARI that is free (the harness works around both).
+Some failures are defects rather than missing mathematics: `isprime(2^521 - 1)` fails inside PARI (its APRCL test errs on this number, though it proves other primes of the same size), a PARI error leaves PARI locked for the rest of the session, and `pari_unlock` locks a PARI that is free (the harness works around both).
 """
 
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
@@ -998,4 +1003,5 @@ Some failures are GIAC's own defects rather than missing mathematics: `isprime(2
 # ╚═╡
 # ╔═╡ Slate.config · per-notebook settings (Settings panel)
 #   docid = f328007c-4c53-4cb8-9a60-3174d7f3bc07
+#   format = 2
 # ╚═╡
