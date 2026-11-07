@@ -141,6 +141,8 @@ struct _PCall <: _PNode; f::String; args::Vector{_PNode}; user::Bool; end
 struct _PEq <: _PNode; lhs::_PNode; rhs::_PNode; end
 struct _POrder <: _PNode; arg::_PNode; end
 struct _PRaw <: _PNode; tex::String; end
+# a factorization of an integer, ifactor's 2^3*3^2*5: the factors as they stand, not multiplied
+struct _PFactors <: _PNode; factors::Vector{_PNode}; end
 # the derivative of the function `f` (of `args`) in the variables `wrt`, one per order
 struct _PDeriv <: _PNode; f::String; args::Vector{_PNode}; wrt::Vector{String}; end
 # the derivative of an expression
@@ -214,6 +216,8 @@ function _pnode(e::GiacExpr)
         # a product read as the core has it, so its roots are gathered
         m = _node(e)
         m isa MulNode && return _pnode(m)
+        # one the core keeps as GIAC has it, a factorization of an integer
+        m isa GenNode && return _PFactors(_PNode[_pnode(x) for x in a])
         return _PProd(_PNode[_pnode(x) for x in a])
     end
     if h == "-" || h == "inv"
@@ -597,6 +601,7 @@ _tex(n::_PNum, c::_Ctx) = (t = c.exponent && n.v isa Rational && !isone(denomina
                            "$(abs(numerator(n.v)))/$(denominator(n.v))" : _number_tex(abs(n.v)); n.v < 0 ? "-" * t : t)
 _tex(n::_PAtom, c::_Ctx) = n.tex
 _tex(n::_PRaw, c::_Ctx) = n.tex
+_tex(n::_PFactors, c::_Ctx) = join((_tex(f, c) for f in n.factors), " \\cdot ")
 _tex(n::_PEq, c::_Ctx) = _tex(n.lhs, c) * " = " * _tex(n.rhs, c)
 _tex(n::_POrder, c::_Ctx) = "O\\left(" * _tex(n.arg, c) * "\\right)"
 _tex(n::_PProd, c::_Ctx) = ((s, t) = _product_tex(n, c); s < 0 ? "-" * t : t)

@@ -150,3 +150,12 @@ end
         @test occursin("4", tex)
     end
 end
+
+# a factorization without powers stays one too, in the tree and typeset
+@testset "a squarefree factorization" begin
+    f = Giac.Commands.ifactor(giac_eval("2^128 + 1"))
+    @test !(Giac._node(f) isa Giac.NumNode)
+    @test Giac.giac_latex(f) == "59649589127497217 \\cdot 5704689200685129054721"
+    @test Giac.giac_latex(Giac.Commands.ifactor(360)) == "2^{3} \\cdot 3^{2} \\cdot 5"
+    @test Giac._node(giac_eval("2*3")) == Giac.NumNode(6)
+end

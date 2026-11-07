@@ -674,6 +674,9 @@ function _read_node(buf::Vector{UInt8}, pos::Ref{Int})
         end
         s = _signed_infinity(h, args)
         s === nothing || return s
+        # GIAC leaves a product or power of integers unevaluated only as a factorization (ifactor's
+        # 2^3*3^2*5): read node by node, which keeps it as GIAC has it
+        h in ("*", "^") && k >= 2 && all(a -> a isa NumNode && a.v isa Integer, args) && return nothing
         h == "+" && return _add(args...)
         h == "*" && return _mul(args...)
         h == "-" && return k == 1 ? _neg(args[1]) : k == 2 ? _sub(args[1], args[2]) : nothing
@@ -755,7 +758,9 @@ function _is_factorization(gen)
     leaf = B.symb_feuille(gen)
     B.is_vector(leaf) || return false
     gs = [B.vect_at(leaf, i) for i in 0:(B.vect_size(leaf) - 1)]
-    return any(power, gs) && all(g -> integer(g) || power(g), gs)
+    # GIAC multiplies integers out, so a product of them left standing is a factorization, with
+    # or without powers (2^128+1 is 59649589127497217*5704689200685129054721)
+    return length(gs) >= 2 && all(g -> integer(g) || power(g), gs)
 end
 
 function _push_gen_args!(out, gen)
