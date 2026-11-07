@@ -12,7 +12,8 @@ end
 
 # `Commands.integrate(f, x, a, b)`: GIAC's, and where it leaves the integral unevaluated, the
 # integral as derivatives of a known one in its parameters (parametric_integrals.jl), term by term
-# with sines and cosines written as exponentials, or as the mean of f and its reflection
+# with sines and cosines written as exponentials, or as the mean of f and its image under an
+# involution of the interval
 function _integrate(f::GiacExpr, x::GiacExpr, a, b)
     r = invoke_cmd(:integrate, f, x, a, b)
     _integral_left(r) || return r
@@ -59,14 +60,29 @@ function _trig_as_exponentials(n::Node)
     return n
 end
 
-# ∫ₐᵇ f = ½ ∫ₐᵇ (f(x) + f(a+b−x)), for finite bounds: for x g(x) with g symmetric about the
-# midpoint, the sum is (a+b) g(x)
+# ∫ₐᵇ f = ½ ∫ₐᵇ (f + (f∘φ)·|φ′|) for a decreasing involution φ of [a, b]: a+b−x on a finite
+# interval, (1−x)/(1+x) on [0, 1] and 1/x on [0, ∞). Taken when the sum is no longer than f and
+# GIAC integrates it: x g(x) with g symmetric about the midpoint gives (a+b) g(x), and
+# ln(1+x)/(1+x²) on [0, 1] gives ln 2/(1+x²).
 function _reflected_integral(f::GiacExpr, x::GiacExpr, a, b)
-    _any_node(n -> n isa SymNode && n.name in ("inf", "infinity"), _node(convert(GiacExpr, a) + convert(GiacExpr, b))) && return nothing
-    g = invoke_cmd(:normal, f + substitute(f, x => a + b - x))
-    _size(_node(g)) <= _size(_node(f)) || return nothing
-    v = invoke_cmd(:integrate, g, x, a, b)
-    return _integral_left(v) ? nothing : invoke_cmd(:simplify, v / 2)
+    for φ in _involutions(x, convert(GiacExpr, a), convert(GiacExpr, b))
+        g = invoke_cmd(:simplify, f - substitute(f, x => φ) * invoke_cmd(:diff, φ, x))
+        _size(_node(g)) <= _size(_node(f)) || continue
+        v = invoke_cmd(:integrate, g, x, a, b)
+        _integral_left(v) || return invoke_cmd(:simplify, v / 2)
+    end
+    return nothing
+end
+
+function _involutions(x, a, b)
+    infinite(e) = _any_node(n -> n isa SymNode && n.name in ("inf", "infinity"), _node(e))
+    φs = GiacExpr[]
+    infinite(a) || infinite(b) || push!(φs, a + b - x)
+    if _is_zero_expr(a)
+        _is_zero_expr(b - 1) && push!(φs, (1 - x) / (1 + x))
+        _is_plus_infinity(_node(b)) && push!(φs, 1 / x)
+    end
+    return φs
 end
 
 _is_infinite(r::GiacExpr) = string(r) in ("infinity", "+infinity", "-infinity", "inf", "-inf", "undef")

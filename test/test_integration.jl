@@ -46,7 +46,7 @@ end
     @test same(sin(x)^2 * log(sin(x)), 0, π_ / 2, "pi/8 - pi*ln(2)/4")
 end
 
-@testset "Integrals with exponentials for sines, and by reflection" begin
+@testset "Integrals with exponentials for sines, and by involutions of the interval" begin
     @giac_var x
     C = Giac.Commands
     ∞, π_ = giac_eval("+infinity"), giac_eval("pi")
@@ -57,6 +57,9 @@ end
     @test same(exp(-x^2) * sin(x)^2, -∞, ∞, "sqrt(pi)*(1 - exp(-1))/2")
     # x g(x) with g symmetric about the midpoint
     @test same(x * sin(x) / (1 + cos(x)^2), 0, π_, "pi^2/4")
+    # Serret's integral, under (1-x)/(1+x); and under 1/x on [0, ∞)
+    @test same(log(1 + x) / (1 + x^2), 0, 1, "pi*ln(2)/8")
+    @test same(log(x) / (1 + x^2), 0, ∞, "0")
 end
 
 # A failed GIAC limit (a definite integral may take one) leaves GIAC's series flags changed, and
