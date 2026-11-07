@@ -174,6 +174,13 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._trig_safe_simplify(args[1])
     end
 
+    # sums and products GIAC leaves unevaluated are tried as limits and in pairs of terms (sums.jl)
+    if cmd === :sum && length(args) == 4
+        return parentmodule(@__MODULE__)._sum_cmd(args...)
+    elseif cmd === :product && length(args) == 4
+        return parentmodule(@__MODULE__)._product_cmd(args...)
+    end
+
     # a derivative in a variable is taken on the tree where it can be (derivatives.jl)
     if cmd === :diff
         d = parentmodule(@__MODULE__)._tree_diff(args...)

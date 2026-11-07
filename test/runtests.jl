@@ -46,6 +46,7 @@ using LinearAlgebra
     include("test_normal_forms.jl")
     include("test_express_interrupt.jl")
     include("test_integration.jl")
+    include("test_sums.jl")
     include("test_matrix_iteration.jl")
     include("test_memory.jl")
 
