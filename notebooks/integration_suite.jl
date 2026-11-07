@@ -202,7 +202,9 @@ end
 @md"""
 ### From GIAC 1.9 to Giac.jl
 
-Each integral's 2024 GIAC grade against its grade now: the diagonal is unchanged, left of it better, right of it worse.
+What became of each integral: its grade in the 2024 run, with GIAC 1.9 through Sage (a row), against its grade now, with Giac.jl (a column), and how many integrals made that move. Green cells are integrals that do better now, red ones worse, grey ones the same, a different failure, or not checked. A solved grade (A, B, C) is better than any unsolved one, and among them A is better than B, and B than C.
+
+A move between A and B is a change of the answer's size against twice the optimal's, and sizes here are counted by this notebook, not by the 2024 grader; near that boundary the two counts can differ, so such moves say less than the ones between solved and unsolved.
 """
 
 #%% code id=transitions
@@ -211,15 +213,27 @@ let k = length(GRADES)
     for x in graded
         M[findfirst(==(grade_2024(x.e, "giac")), GRADES), something(findfirst(==(x.r.grade), GRADES), k)] += 1
     end
-    fig = Figure(size = (640, 560))
-    ax = Axis(fig[1, 1]; xlabel = made_by, ylabel = "GIAC 1.9.0-99 (2024)",
-              xticks = (1:k, GRADES), yticks = (1:k, GRADES), yreversed = true, aspect = DataAspect())
-    heatmap!(ax, 1:k, 1:k, log10.(M' .+ 1); colormap = :viridis)
-    top = maximum(log10.(M .+ 1))
+    # how good a grade is: solved A, B, C, then every kind of failure alike; an answer not checked
+    # (?) is neither better nor worse than anything
+    rank(g) = g == "A" ? 1 : g == "B" ? 2 : g == "C" ? 3 : 4
+    change(i, j) = "?" in (GRADES[i], GRADES[j]) ? 0 : sign(rank(GRADES[i]) - rank(GRADES[j]))   # +1 better now
+    better = sum(M[i, j] for i in 1:k, j in 1:k if change(i, j) > 0; init = 0)
+    worse = sum(M[i, j] for i in 1:k, j in 1:k if change(i, j) < 0; init = 0)
+    same = sum(M) - better - worse
+    top = log10(maximum(M) + 1)
+    hue(i, j) = change(i, j) > 0 ? RGBf(0.30, 0.78, 0.47) : change(i, j) < 0 ? RGBf(0.93, 0.38, 0.32) : RGBf(0.55, 0.55, 0.6)
+    fig = Figure(size = (720, 640))
+    ax = Axis(fig[1, 1]; xlabel = "now: $made_by", ylabel = "in 2024: GIAC 1.9.0-99 through Sage",
+              xticks = (1:k, GRADES), yticks = (1:k, GRADES), yreversed = true, aspect = DataAspect(),
+              xaxisposition = :top, xlabelsize = 12,
+              title = "what became of each integral", titlegap = 30,
+              subtitle = "$better better now (green), $worse worse (red), $same the same, another failure or not checked (grey)")
     for i in 1:k, j in 1:k
-        M[i, j] > 0 && text!(ax, j, i; text = string(M[i, j]), align = (:center, :center), fontsize = 12,
-                             color = log10(M[i, j] + 1) > 0.6top ? :black : :white)
+        M[i, j] == 0 && continue
+        poly!(ax, Rect2f(j - 0.5, i - 0.5, 1, 1); color = (hue(i, j), 0.2 + 0.8 * log10(M[i, j] + 1) / top))
+        text!(ax, j, i; text = string(M[i, j]), align = (:center, :center), fontsize = 13, color = :white)
     end
+    xlims!(ax, 0.5, k + 0.5); ylims!(ax, k + 0.5, 0.5)
     fig
 end
 
