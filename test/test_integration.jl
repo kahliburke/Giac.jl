@@ -39,6 +39,24 @@ end
     # x^b ln x with b unknown changes how it evaluates cot later in the process, so it isn't called.)
     @test Giac._parametric_integral(x^b * log(x), x, 0, 1) === nothing
     @test Giac._parametric_integral(log(x) * log(1 + x), x, 0, 1) === nothing
+    # sinᵅ cosᵝ with their logarithms on [0, π/2]: half a Beta function
+    π_ = giac_eval("pi")
+    @test same(log(sin(x)), 0, π_ / 2, "-pi*ln(2)/2")
+    @test same(log(cos(x))^2, 0, π_ / 2, "pi^3/24 + pi*ln(2)^2/2")
+    @test same(sin(x)^2 * log(sin(x)), 0, π_ / 2, "pi/8 - pi*ln(2)/4")
+end
+
+@testset "Integrals with exponentials for sines, and by reflection" begin
+    @giac_var x
+    C = Giac.Commands
+    ∞, π_ = giac_eval("+infinity"), giac_eval("pi")
+    same(f, lo, hi, v) = string(C.simplify(C.integrate(f, x, lo, hi) - giac_eval(v))) == "0"
+    # -∞ made in Julia reaches GIAC as -infinity, not as its unsigned infinity
+    @test string(C.integrate(exp(-x^2), x, -∞, 0)) == "sqrt(pi)/2"
+    @test same(exp(-x^2) * cos(2x), -∞, ∞, "sqrt(pi)/e")
+    @test same(exp(-x^2) * sin(x)^2, -∞, ∞, "sqrt(pi)*(1 - exp(-1))/2")
+    # x g(x) with g symmetric about the midpoint
+    @test same(x * sin(x) / (1 + cos(x)^2), 0, π_, "pi^2/4")
 end
 
 # A failed GIAC limit (a definite integral may take one) leaves GIAC's series flags changed, and

@@ -9,7 +9,7 @@ const _JULIA_HEADS = Dict(
     "asinh" => :asinh, "acosh" => :acosh, "atanh" => :atanh, "re" => :real, "im" => :imag,
     "conj" => :conj)
 
-const _JULIA_CONSTANTS = Dict("pi" => :π, "infinity" => :Inf)
+const _JULIA_CONSTANTS = Dict("pi" => :π, "infinity" => :Inf, "inf" => :Inf)
 
 """
     to_expr(e::GiacExpr) -> Union{Expr, Symbol, Number}

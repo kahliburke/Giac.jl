@@ -667,6 +667,8 @@ function _read_node(buf::Vector{UInt8}, pos::Ref{Int})
             a === nothing && return nothing
             args[i] = a
         end
+        s = _signed_infinity(h, args)
+        s === nothing || return s
         h == "+" && return _add(args...)
         h == "*" && return _mul(args...)
         h == "-" && return k == 1 ? _neg(args[1]) : k == 2 ? _sub(args[1], args[2]) : nothing
@@ -678,6 +680,17 @@ function _read_node(buf::Vector{UInt8}, pos::Ref{Int})
         g = GiacCxxBindings.gen_export_opaque(Int32(_read_value(UInt32, buf, pos)))
         return GenNode(GiacExpr(_make_gen_ptr(g)), String(GiacCxxBindings.to_string(g)))
     end
+    return nothing
+end
+
+# GIAC's +infinity and -infinity are + and - applied to its unsigned infinity. The tree has +∞ as
+# `inf`, which GIAC reads as +infinity, so that -∞ and other arithmetic on it keep the sign.
+const _PLUS_INFINITY = SymNode("inf")
+_is_plus_infinity(n::Node) = n isa SymNode && n.name == "inf"
+function _signed_infinity(h::String, args)
+    (length(args) == 1 && args[1] isa SymNode && args[1].name == "infinity") || return nothing
+    h == "+" && return _PLUS_INFINITY
+    h == "-" && return _neg(_PLUS_INFINITY)
     return nothing
 end
 
@@ -707,6 +720,8 @@ function _node_from_gen_by_node(gen)
                 push!(raw, leaf)
             end
             args = Node[_node_from_gen_by_node(a) for a in raw]
+            s = _signed_infinity(h, args)
+            s === nothing || return s
             h == "+" && return _add(args...)
             h == "*" && return _mul(args...)
             h == "-" && return length(args) == 1 ? _neg(args[1]) : _sub(args[1], args[2])

@@ -200,7 +200,7 @@ function _pnode(e::GiacExpr)
         end
         s = string(e)
         s == "pi" && return _PAtom("\\pi", s, true)
-        s == "infinity" && return _PAtom("\\infty", s, true)
+        s in ("infinity", "inf") && return _PAtom("\\infty", s, true)
         if t == IDNT
             haskey(_ATOMS, s) && return _PAtom("{" * _ATOMS[s][4] * "}", s, false)
             return _PAtom(_tex_name(s), s, false)
@@ -308,7 +308,7 @@ _pnode(n::NumNode) = n.v isa Real ? _PNum(n.v) : n.v isa Complex ? _complex_pnod
 function _pnode(n::SymNode)
     s = n.name
     s == "pi" && return _PAtom("\\pi", s, true)
-    s == "infinity" && return _PAtom("\\infty", s, true)
+    s in ("infinity", "inf") && return _PAtom("\\infty", s, true)
     haskey(_ATOMS, s) && return _PAtom("{" * _ATOMS[s][4] * "}", s, false)
     return _PAtom(_tex_name(s), s, false)
 end
