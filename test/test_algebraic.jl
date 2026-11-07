@@ -64,6 +64,8 @@ using Giac: to_giac, to_nemo
         @test string(Giac.simplify_algebraic(G("(2+sqrt(5))^(1/3)") * x)) == "(1/2+sqrt(5)/2)*x"
         @test string(Giac.simplify_algebraic(G("cos(pi/5) - sin(pi/10)"))) == "1/2"
         @test string(Giac.simplify_algebraic(G("sqrt(2)*sqrt(3) - sqrt(6)") * x + 1)) == "1"
+        # values at multiples of π/7 share one field of degree 6, so their sum is decided
+        @test string(Giac.simplify_algebraic(G("cos(2*pi/7) + cos(4*pi/7) + cos(6*pi/7)"))) == "-1/2"
         # a constant whose canonical form is longer is kept as written
         @test string(Giac.simplify_algebraic(sin(x) + G("cos(pi/7)"))) == string(sin(x) + G("cos(pi/7)"))
     end

@@ -943,41 +943,52 @@ function _before(a, b)
     ra == rb ? imag(a) < imag(b) : ra < rb
 end
 
-# A bound on the degree of a constant, from its structure; nothing when it is not one
-_degree_bound(n::Giac.NumNode) = n.v isa Complex && !iszero(imag(n.v)) ? 2 : 1
-_degree_bound(n::Giac.Node) = nothing
-function _degree_bound(n::Giac.AddNode)
-    d = 1
+# A bound on the degree of a constant, from its structure; nothing when it is not one. The
+# trigonometric values at rational multiples of π all lie in one cyclotomic field, so they count
+# once, by the order of its roots of unity: the parts are (degree of the rest, that order).
+function _degree_bound(n::Giac.Node)
+    p = _degree_parts(n)
+    return p === nothing ? nothing : _capped(p[1] * p[2])
+end
+
+_capped(d) = min(d, typemax(Int) ÷ 1024)
+_complex_degree(c) = c isa Complex && !iszero(imag(c)) ? 2 : 1
+
+_degree_parts(n::Giac.NumNode) = (_complex_degree(n.v), 1)
+_degree_parts(n::Giac.Node) = nothing
+function _degree_parts(n::Giac.AddNode)
+    d, L = 1, 1
     for (m, c) in n.terms
-        b = _degree_bound(m)
-        b === nothing && return nothing
-        d = min(d * b * (c isa Complex && !iszero(imag(c)) ? 2 : 1), typemax(Int) ÷ 1024)
+        p = _degree_parts(m)
+        p === nothing && return nothing
+        d, L = _capped(d * p[1] * _complex_degree(c)), _capped(lcm(L, p[2]))
     end
-    return d
+    return d, L
 end
-function _degree_bound(n::Giac.MulNode)
-    d = n.coef isa Complex && !iszero(imag(n.coef)) ? 2 : 1
+function _degree_parts(n::Giac.MulNode)
+    d, L = _complex_degree(n.coef), 1
     for (b, e) in n.factors
-        db = _degree_bound(b)
-        (db === nothing || !(e isa Giac.NumNode && e.v isa Union{Integer, Rational})) && return nothing
-        d = min(d * db * Int(min(denominator(e.v), 1024)), typemax(Int) ÷ 1024)
+        p = _degree_parts(b)
+        (p === nothing || !(e isa Giac.NumNode && e.v isa Union{Integer, Rational})) && return nothing
+        d, L = _capped(d * p[1] * Int(min(denominator(e.v), 1024))), _capped(lcm(L, p[2]))
     end
-    return d
+    return d, L
 end
-function _degree_bound(n::Giac.CallNode)
+function _degree_parts(n::Giac.CallNode)
     if n.f == "rootof"
         lists = length(n.args) == 1 ? _list(only(n.args)) : n.args
-        return length(lists) == 2 && lists[2] isa Giac.GenNode ? length(lists[2].expr) - 1 : nothing
+        return length(lists) == 2 && lists[2] isa Giac.GenNode ? (length(lists[2].expr) - 1, 1) : nothing
     elseif n.f in ("cos", "sin", "tan", "exp") && length(n.args) == 1
+        # cos rπ, sin rπ and tan rπ are in the field of the (2q)th roots of unity, q the denominator of r
         r = _pi_multiple(only(n.args); imaginary = n.f == "exp")
-        return r === nothing ? nothing : 2 * Int(min(denominator(r), 1024))
+        return r === nothing ? nothing : (1, 2 * Int(min(denominator(r), 1024)))
     elseif n.f == "surd" && length(n.args) == 2
-        b = _degree_bound(n.args[1])
+        p = _degree_parts(n.args[1])
         k = n.args[2]
-        return b === nothing || !(k isa Giac.NumNode && k.v isa Integer) ? nothing : b * Int(min(k.v, 1024))
+        return p === nothing || !(k isa Giac.NumNode && k.v isa Integer) ? nothing : (_capped(p[1] * Int(min(k.v, 1024))), p[2])
     elseif n.f in ("sqrt", "abs", "re", "real", "im", "imag", "conj") && length(n.args) == 1
-        b = _degree_bound(only(n.args))
-        return b === nothing ? nothing : 2b * (n.f == "conj" ? 1 : 2)
+        p = _degree_parts(only(n.args))
+        return p === nothing ? nothing : (_capped(2 * p[1] * (n.f == "conj" ? 1 : 2)), p[2])
     end
     return nothing
 end
