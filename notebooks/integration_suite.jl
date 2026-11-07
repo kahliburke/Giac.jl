@@ -111,6 +111,19 @@ end
 ## Results
 
 The sweep's results so far, against the 2024 results on the same integrals; the cells run again as units land. The 2024 runs were made on another machine, and GIAC through Sage, so their times compare only roughly.
+
+| Grade | Meaning |
+|:--|:--|
+| **A** | correct, and at most twice the size of the optimal antiderivative (leaves counted as Mathematica's `LeafCount` counts them) |
+| **B** | correct, but more than twice the optimal size |
+| **C** | correct, but with complex numbers or special functions the optimal answer does not need |
+| **?** | an answer that could not be checked (too few points where the integrand is finite) |
+| **F** | not solved: given back unevaluated, or wrong (its derivative is not the integrand) |
+| **F(-1)** | no answer within the time limit |
+| **F(-2)** | an error |
+| **N/A** | an integrand GIAC can't state: it has a function GIAC lacks |
+
+*Solved* in the tables means A, B or C. The 2024 grader gave MuPAD and Reduce at most B.
 """
 
 #%% code id=results
@@ -153,17 +166,21 @@ let systems = ["Giac.jl"; [S.SYSTEM_NAMES[s] for s in S.SYSTEMS_2024]]
     n = length(graded)
     colours = Dict("A" => :seagreen3, "B" => :yellowgreen, "C" => :goldenrod, "?" => :gray60, "F" => :tomato,
                    "F(-1)" => :orchid, "F(-2)" => :mediumpurple, "N/A" => :gray35)
-    fig = Figure(size = (1000, 420))
+    meaning = Dict("A" => "A  correct, at most twice the optimal size", "B" => "B  correct, larger",
+                   "C" => "C  correct, needless complex numbers or special functions", "?" => "?  not checked",
+                   "F" => "F  unevaluated or wrong", "F(-1)" => "F(-1)  over the time limit", "F(-2)" => "F(-2)  an error",
+                   "N/A" => "N/A  not expressible in GIAC")
+    fig = Figure(size = (1000, 500))
     ax = Axis(fig[1, 1]; xlabel = "share of the $n integrals", yticks = (1:length(systems), systems), yreversed = true,
               title = "grades: $made_by, and the 2024 results",
               subtitle = "$(machine["cpu"]), $(machine["os"]), Julia $(machine["julia"]); selection $run_selection")
     left = zeros(length(systems))
     for g in GRADES
         w = [c[g] / n for c in counts]
-        barplot!(ax, 1:length(systems), w; offset = left, direction = :x, color = colours[g], label = g)
+        barplot!(ax, 1:length(systems), w; offset = left, direction = :x, color = colours[g], label = meaning[g])
         left .+= w
     end
-    Legend(fig[1, 2], ax; framevisible = false)
+    Legend(fig[2, 1], ax; orientation = :horizontal, nbanks = 3, framevisible = false, labelsize = 12)
     fig
 end
 
