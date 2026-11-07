@@ -25,6 +25,8 @@
 
 !bench/
 !bench/*.jl
+!bench/integration_suite/
+!bench/integration_suite/*.jl
 
 !examples/
 !examples/*.jl
