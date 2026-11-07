@@ -287,20 +287,22 @@ unit(e::Integral) = (id = e.id, integrand = e.integrand, variable = e.variable,
 _sh(cmd) = try readchomp(cmd) catch; "" end
 _short_hash(s) = string(hash(s); base = 16, pad = 16)[1:8]
 
-# a git checkout's commit, with a hash of its uncommitted changes to `paths` after a +
+# the last commit of a git checkout that changed `paths`, with a hash of their uncommitted changes
+# after a +: commits that change nothing under them leave it as it was
 function _checkout_version(dir, paths...)
     top = _sh(`git -C $dir rev-parse --show-toplevel`)
     isempty(top) && return ""
     changes = _sh(`git -C $top diff HEAD -- $paths`)
-    _sh(`git -C $top rev-parse --short HEAD`) * (isempty(changes) ? "" : "+" * _short_hash(changes))
+    _sh(`git -C $top log -1 --format=%h -- $paths`) * (isempty(changes) ? "" : "+" * _short_hash(changes))
 end
 
 """
     code_version()
 
-What integrates and grades the integrals: Giac.jl's commit, the C++ wrapper library's (a local
-build's commit, or the released version), and a hash of the grading code, each with a hash of
-uncommitted changes after a +. A sweep that captures it starts again when any of them changes.
+What integrates and grades the integrals: the last commit that changed Giac.jl's source, the
+C++ wrapper library's (a local build's, or the released version), and a hash of the grading
+code, each with a hash of uncommitted changes after a +. A sweep that captures it starts again
+when any of them changes, and only then.
 """
 function code_version()
     wrapper_dir = dirname(Giac.libgiac_julia_jll.libgiac_wrapper_path)
@@ -348,7 +350,9 @@ end
 Result(d::AbstractDict) = Result(d["id"], d["grade"], get(d, "note", ""), get(d, "seconds", nothing),
                                  get(d, "answer", nothing), get(d, "size", nothing))
 # from a sweep's row: the integral's id among its parameters, and what the unit returned
-Result(id::Integer, r) = Result(id, r.grade, r.note, r.seconds, coalesce(r.answer, nothing), coalesce(r.size, nothing))
+# (a unit that has no answer stores no `answer` or `size`)
+Result(id::Integer, r) = Result(id, r.grade, r.note, r.seconds, coalesce(get(r, :answer, nothing), nothing),
+                                coalesce(get(r, :size, nothing), nothing))
 
 "A run's results."
 function load_results(name)
