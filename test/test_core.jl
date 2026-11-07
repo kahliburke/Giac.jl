@@ -69,3 +69,12 @@
         foreach(n -> giac_eval("purge($n)"), names)
     end
 end
+
+# decimals at any precision count as decimals, so exact routes know to take over from them
+@testset "decimals in the tree" begin
+    @test Giac._has_float(Giac._node(giac_eval("evalf(sqrt(2))")))
+    @test Giac._has_float(Giac._node(giac_eval("evalf(sqrt(2), 30)")))
+    @test Giac._has_float(Giac._node(giac_eval("evalf(1 + i*sqrt(2), 30)")))
+    @test !Giac._has_float(Giac._node(giac_eval("1/2 + 3*i")))
+    @test !Giac._has_float(Giac._node(giac_eval("[1, 2]")))
+end

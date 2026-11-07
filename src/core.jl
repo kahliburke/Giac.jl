@@ -315,6 +315,11 @@ _has_float(n::NumNode) = n.v isa AbstractFloat || (n.v isa Complex && real(n.v) 
 _has_float(n::AddNode) = any(((m, c),) -> c isa AbstractFloat || _has_float(m), n.terms)
 _has_float(n::MulNode) = n.coef isa AbstractFloat || any(((b, e),) -> _has_float(b) || _has_float(e), n.factors)
 _has_float(n::CallNode) = any(_has_float, n.args)
+# a multiprecision float (at Digits above 15), or a complex number with one, is kept as GIAC has it
+function _has_float(n::GenNode)
+    t = giac_type(n.expr)
+    return t in (GenTypes.REAL, GenTypes.FLOAT) || (t == GenTypes.CPLX && occursin('.', n.key))
+end
 
 # Whether a node is known not to be negative: a number ≥ 0, a name declared positive or
 # nonnegative (or in an interval above 0), pi, and sums, products and powers of such
