@@ -40,6 +40,13 @@ using JuMP, Clarabel
         @test occursin("a sum of", sprint(show, MIME"text/plain"(), r))
         # a variable of unknown sign is allowed: τ² - 2τ + 2 = (τ - 1)² + 1
         @test positivity(τ^2 - 2τ + 2).sign == 1
+        # Motzkin's polynomial times 1 + x² + y² is a sum of squares
+        m = x^4 * y^2 + x^2 * y^4 - 3x^2 * y^2 + 1
+        r = positivity(m)
+        @test r.sign == 1 && r.numerator.sos !== nothing
+        c = r.numerator.sos
+        @test iszero(C.expand(GiacExpr(c) - c.multiplier * c.polynomial)) && string(c.multiplier) != "1"
+        @test sign_of(m) === :nonnegative
         # the negative of a sum of squares
         @test positivity(-(a - b)^2; positive = (a, b)).sign == -1
         # with a, b written as squares: a⁴ - a²b² + b⁴ is a sum of squares

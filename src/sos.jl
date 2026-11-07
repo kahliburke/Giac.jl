@@ -7,15 +7,18 @@
 """
     SOSCertificate
 
-`polynomial = Σₖ weights[k] * squares[k]^2`, exactly, with every weight a positive rational:
-a proof that `polynomial ≥ 0` for all real values of its variables. `GiacExpr(c)` is the sum
-written out; `expand(GiacExpr(c) - c.polynomial)` is zero.
+`multiplier * polynomial = Σₖ weights[k] * squares[k]^2`, exactly, with every weight a positive
+rational and the multiplier positive everywhere (1, or a power of 1 + Σ xᵢ²): a proof that
+`polynomial ≥ 0` for all real values of its variables. `GiacExpr(c)` is the sum written out;
+`expand(GiacExpr(c) - c.multiplier * c.polynomial)` is zero.
 """
 struct SOSCertificate
     polynomial::GiacExpr
     weights::Vector{Rational{BigInt}}
     squares::Vector{GiacExpr}
+    multiplier::GiacExpr
 end
+SOSCertificate(polynomial, weights, squares) = SOSCertificate(polynomial, weights, squares, convert(GiacExpr, 1))
 
 function GiacExpr(c::SOSCertificate)
     isempty(c.weights) && return convert(GiacExpr, 0)
@@ -28,7 +31,8 @@ _rational_text(w) = isone(denominator(w)) ? string(numerator(w)) : string(numera
 
 function Base.show(io::IO, ::MIME"text/plain", c::SOSCertificate)
     println(io, "Sum of squares, ", _squares_text(length(c.squares)), ":")
-    print(io, "  ", c.polynomial, " =")
+    m = string(c.multiplier)
+    print(io, "  ", m == "1" ? "" : "(" * m * ")·(", c.polynomial, m == "1" ? "" : ")", " =")
     isempty(c.squares) && print(io, " 0")
     for (i, (w, q)) in enumerate(zip(c.weights, c.squares))
         weight = isone(w) ? "" : _rational_text(w) * "·"

@@ -624,7 +624,8 @@ function Giac.positivity(e; order = (), positive = (), param = (), strict = true
 end
 
 # The sign of P from a sum of squares, when the Clarabel extension is loaded: P, or -P, with
-# each variable known to be nonnegative written as a square, is a sum of squares
+# each variable known to be nonnegative written as a square, is a sum of squares, or is one
+# times 1 + Σ xᵢ² (Motzkin's polynomial is not a sum of squares, but is one so multiplied)
 function _sos_sign(P, known)
     isempty(methods(Giac._sos_certificate)) && return nothing
     R = parent(P)
@@ -632,6 +633,11 @@ function _sos_sign(P, known)
     for s in (1, -1)
         c = Giac._sos_certificate(s * Ps)
         c === nothing || return s, c
+    end
+    m = 1 + sum(g^2 for g in gens(R) if degree(Ps, g) > 0; init = zero(R))
+    for s in (1, -1)
+        c = Giac._sos_certificate(s * Ps * m)
+        c === nothing || return s, Giac.SOSCertificate(Giac.to_giac(s * Ps), c.weights, c.squares, Giac.to_giac(m))
     end
     return nothing
 end
