@@ -12,6 +12,14 @@
         @test string(k2) == "3*k^2"
     end
 
+    @testset "a step on a held integral" begin
+        d = @derivation begin
+            f = x * (x * sin(x))
+            by_parts(integral(f, x), x)
+        end
+        @test rows(d)[2] == "\\int f \\, \\mathrm{d}x = x \\left(\\sin x - x \\cos x\\right) + \\int \\left(x \\cos x - \\sin x\\right) \\, \\mathrm{d}x"
+    end
+
     @testset "implications and their conditions" begin
         # (a `where` clause is parsed from a string, as a file is: Slate's cell analysis rejects it)
         d = Core.eval(@__MODULE__, Meta.parse("""

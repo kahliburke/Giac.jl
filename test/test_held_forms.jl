@@ -46,6 +46,9 @@
         r2 = by_parts(integral(a * η + p * η̇, t, t₁, t₂), p)
         @test L(substitute(r2, η(t₁) => 0, η(t₂) => 0)) == "\\int_{t_{1}}^{t_{2}} \\left(a \\eta - \\dot{p} \\eta\\right) \\, \\mathrm{d}t"
         @test_throws ArgumentError by_parts(p * η̇, p)
+        # the factor may be part of a power: x divides x² sin x
+        @giac_var x
+        @test string(by_parts(integral(x^2 * sin(x), x), x)) == "(sin(x)-x*cos(x))*x+integrate(x*cos(x)-sin(x),x)"
         @test string(integrand(integral(-a * η, t, t₁, t₂))) == "-a*η(t)"
     end
 

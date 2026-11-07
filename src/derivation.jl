@@ -558,6 +558,9 @@ function _derivation(simplifier, block)
             lead = terms[1]
             lead isa Expr && lead.head === :call && lead.args[1] isa Symbol && !(lead.args[1] in bound) &&
                 (shown[lead.args[1]] = lead)
+        elseif st isa Expr && st.head === :call && st.args[1] === :by_parts && length(st.args) == 3
+            # a step on a held form shows the form it works on: ∫ f dx = u v - ∫ u′ v dx
+            push!(out, row(st.args[2], valued(st)))
         else
             push!(out, row(st, valued(st)))
         end

@@ -153,8 +153,14 @@ function _by_parts(n::CallNode, u::GiacExpr)
     return iszero(inside) ? boundary : boundary + integral(inside, t, limits...)
 end
 
-_has_factor(term::Node, u::Node) = isequal(term, u) ||
-    (term isa MulNode && any(((b, e),) -> isequal(b, u) && isequal(e, _ONE), term.factors))
+# whether `u` divides `term`: the quotient has no negative power of a base of `u` (x divides x² sin x)
+function _has_factor(term::Node, u::Node)
+    isequal(term, u) && return true
+    bases = u isa MulNode ? Node[b for (b, _) in u.factors] : Node[u]
+    q = _div(term, u)
+    q isa MulNode || return true
+    return !any(((b, e),) -> any(isequal(b), bases) && !(e isa NumNode && e.v isa Real && e.v >= 0), q.factors)
+end
 
 # The integral node, with a negative integrand's sign outside: -∫ f dt rather than ∫ -f dt
 function _held_integral(f::Node, args::Vector{Node})
