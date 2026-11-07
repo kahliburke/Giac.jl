@@ -827,8 +827,9 @@ end
 # A constant built from rationals, i, roots, rootof and the trigonometric functions at rational
 # multiples of π has an exact value in QQBar, where equality and signs are decided exactly. Back
 # in GIAC, a number of degree 2 is written with a square root and one of higher degree as a
-# `rootof`. GIAC's `rootof(P, Q)` is P at the root of Q with the largest real part, then the
-# largest imaginary part.
+# `rootof`. For Q with rational coefficients, GIAC's `rootof(P, Q)` is P at the largest real root
+# of Q, or when Q has none, at the root with the largest real part, then imaginary part
+# (in_select_root in GIAC's alg_ext.cc).
 
 import Nemo: QQBarField, QQBarFieldElem
 
@@ -920,7 +921,7 @@ function _pi_multiple(n; imaginary = false)
     return isreal(c) && real(c) isa Union{Integer, Rational} ? real(c) : nothing
 end
 
-# GIAC's rootof(P, Q): P at the root of Q with the largest real part, then imaginary part
+# GIAC's rootof(P, Q): P at Q's principal root (see _principal)
 function _rootof_value(n::Giac.CallNode, K)
     lists = length(n.args) == 1 ? _list(only(n.args)) : n.args
     length(lists) == 2 || _not_algebraic(n)
@@ -936,7 +937,11 @@ _coefficients(l::Giac.Node, n) = _coefficients(_list(l), n)
 _coefficients(l::AbstractVector, n) =
     [x isa Giac.NumNode && x.v isa Union{Integer, Rational} ? _qq(x.v) : _not_algebraic(n) for x in l]
 
-_principal(rs) = reduce((a, b) -> _before(a, b) ? b : a, rs)
+# the largest real root, or with none, the root with the largest real part, then imaginary part
+function _principal(rs)
+    real_roots = filter(isreal, rs)
+    return isempty(real_roots) ? reduce((a, b) -> _before(a, b) ? b : a, rs) : maximum(real.(real_roots))
+end
 # whether b comes after a in GIAC's order: larger real part, then larger imaginary part
 function _before(a, b)
     ra, rb = real(a), real(b)
@@ -1074,10 +1079,11 @@ function _maps(za, i)
     return [(k, s, c) for c in cs for k in (2, 0) for s in (-1, 1)] |> m -> vcat([(1, -1, QQ(0))], m)
 end
 
-# The index of the root with the largest real part, then imaginary part, in floating point;
-# nothing when two are too close to tell
+# The index of the principal root (see _principal) in floating point, a root within rounding of
+# the real line counting as real; nothing when two are too close to tell
 function _numeric_principal(zs)
-    order = sortperm(zs; by = z -> (real(z), imag(z)), rev = true)
+    near_real(z) = abs(imag(z)) <= 1e-10 * (1 + abs(z))
+    order = sortperm(zs; by = z -> (near_real(z), real(z), imag(z)), rev = true)
     length(zs) > 1 && isapprox(zs[order[1]], zs[order[2]]; rtol = 1e-9) && return nothing
     return order[1]
 end
