@@ -113,6 +113,11 @@ end
     @test string(Giac.Commands.desolve(eq, t, y)) == "c_0*exp(-t)+c_1*exp(-2*t)"
     @test string(Giac.Commands.desolve([eq; ics], t, y)) == "2*exp(-t)-exp(-2*t)"
     @test string(Giac.Commands.desolve([eq; ics], y)) == "2*exp(-t)-exp(-2*t)"     # t from y(t)
+    # an Euler–Cauchy equation GIAC gives up on is solved in ln t
+    ec = t^2 * diff(y, t, 2) - 3t * diff(y, t) + 4y ~ t^2 * log(t)
+    s = Giac.Commands.desolve(ec, y)
+    @test string(Giac.Commands.simplify(t^2 * diff(s, t, 2) - 3t * diff(s, t) + 4s - t^2 * log(t))) == "0"
+    @test occursin("c_0", string(s)) && occursin("c_1", string(s))
 end
 
 @testset "declared assumptions" begin

@@ -181,6 +181,11 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._product_cmd(args...)
     end
 
+    # complex solutions GIAC gives as decimals are found exactly where the equations are (exact_solve.jl)
+    if cmd === :cSolve && length(args) == 2 && !parentmodule(@__MODULE__)._plain_csolve()
+        return parentmodule(@__MODULE__)._csolve_cmd(args...)
+    end
+
     # a derivative in a variable is taken on the tree where it can be (derivatives.jl)
     if cmd === :diff
         d = parentmodule(@__MODULE__)._tree_diff(args...)
@@ -689,7 +694,19 @@ function desolve(eqs, y::GiacExpr)
     parsed = _function_call(y)
     (parsed === nothing || length(parsed[2]) != 1) && return invoke_cmd(:desolve, eqs, y)
     name, (t,) = parsed
-    return invoke_cmd(:desolve, eqs, String(t), String(name))
+    r = try
+        invoke_cmd(:desolve, eqs, String(t), String(name))
+    catch err
+        err isa GiacError || rethrow()
+        err
+    end
+    # an equation GIAC gives up on is tried as an Euler–Cauchy equation (ode_transforms.jl)
+    if eqs isa GiacExpr && (r isa GiacError || parentmodule(@__MODULE__)._gave_up(r))
+        v = parentmodule(@__MODULE__)._euler_cauchy(eqs, giac_eval(String(t)), y)
+        v === nothing || return v
+    end
+    r isa GiacError && throw(r)
+    return r
 end
 
 "`(name, args)` of a call of a declared function such as `y(t)`, else `nothing`."
