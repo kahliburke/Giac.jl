@@ -45,3 +45,14 @@ end
     @test length(Giac.polynomial_decomposition(x^4 + x + 1, x)) == 1
     @test_throws ArgumentError Giac.polynomial_decomposition(x^4 + sqrt(GiacExpr(2)) * x^2, x)
 end
+
+@testset "Constructible polygons in square roots" begin
+    value(e) = real(ComplexF64(Giac.to_julia(Giac.Commands.evalf(e))))
+    for (f, ref) in (("cos", cospi), ("sin", sinpi)), (k, q) in ((1, 17), (2, 17), (3, 34), (5, 68), (2, 5), (3, 16), (1, 12), (7, 6))
+        e = Giac.in_radicals(giac_eval("$f($k*pi/$q)"))
+        @test !occursin("cos", string(e)) && !occursin("sin", string(e))
+        @test abs(value(e) - ref(k / q)) < 1e-12
+    end
+    @test string(Giac.in_radicals(giac_eval("cos(pi/8)"))) == "sqrt(2+sqrt(2))/2"
+    @test string(Giac.in_radicals(giac_eval("cos(pi/7)"))) == "cos(pi/7)"       # the heptagon is not constructible
+end
