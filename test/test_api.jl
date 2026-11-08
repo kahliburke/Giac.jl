@@ -202,3 +202,33 @@
         end
     end
 end
+
+# A setting holds for the calls made inside `with_settings`, and the session's own before and
+# after; it needs a wrapper library with setting overrides
+@testset "with_settings" begin
+    if Giac._wrapper_overrides()
+        @test Giac.setting(:keep_acosh_asinh) == 0
+        @test startswith(string(giac_eval("acosh(x)")), "ln(")
+        @test string(Giac.with_settings(() -> giac_eval("acosh(x)"), :keep_acosh_asinh => true)) == "acosh(x)"
+        @test Giac.setting(:keep_acosh_asinh) == 0
+        @test startswith(string(giac_eval("acosh(x)")), "ln(")
+        # also when the computation throws
+        @test_throws ErrorException Giac.with_settings(() -> error("inside"), :keep_acosh_asinh => true)
+        @test Giac.setting(:keep_acosh_asinh) == 0
+        @test_throws ArgumentError Giac.with_settings(() -> 1, :no_such_setting => true)
+    end
+end
+
+# An inner time limit inside an outer one: the earlier of the two holds
+@testset "with_timeout nested" begin
+    if Giac._giac_threaded()
+        # an integral GIAC works at for minutes
+        slow = "x*(1+x)^(2/3)*(1-x)^(1/2)/(-(1-x)^(5/6)*(1+x)^(1/3)+(1-x)^(2/3)*(1+x)^(1/2))"
+        t = @elapsed @test_throws Giac.GiacTimeout Giac.with_timeout(1) do
+            Giac.with_timeout(60) do
+                Giac.Commands.integrate(giac_eval(slow), giac_eval("x"))
+            end
+        end
+        @test t < 20
+    end
+end

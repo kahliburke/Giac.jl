@@ -2,12 +2,87 @@
 # functions, ∫(u′v + uv′) dt among them. Those are found here, a derivative term at a time: a term
 # V·u′·uᵖ comes from V·uᵖ⁺¹/(p+1), whose derivative is taken off what is left.
 
+# Indefinite integration is a search. GIAC integrates first; where it leaves the integral or fails,
+# the methods of `_INDEFINITE_METHODS` are tried in turn, each giving an antiderivative it has
+# checked by differentiating, or nothing. A method that makes a new integral (a substitution's, in
+# t) integrates it by `_integrate` again, so the new one is searched too, to a depth of
+# `_SEARCH_DEPTH`.
+#
+# Time is shared out so that no one path takes it all. The methods are in order of promise, each
+# giving up at once where it does not apply, and each that does has half of the time left (the last
+# all of it), what it leaves over going to the next; a method's own search has only its share, and
+# a method still running at the end of its share is stopped and the next one tried. Under a time
+# limit (`with_timeout`) GIAC's first attempt has half of it; without one, the methods after it
+# have `_SEARCH_SECONDS`.
+
+const _SEARCH_DEPTH = 3
+const _SEARCH_SECONDS = 20.0
+
+# a computation stopped from outside (with_timeout, interrupt), which ends the search
+_stopped(e) = e isa InterruptException || e isa GiacTimeout ||
+              (e isa Union{GiacError, ErrorException} && occursin("user interruption", sprint(showerror, e)))
+
+# a stop of one share of the search, which is not a stop from outside: the time limit around it
+# has not been reached
+_share_spent(e) = e isa GiacTimeout && time() < get(task_local_storage(), :giac_cancel, Inf)
+
 # `Commands.integrate(f, x)`
 function _integrate(f::GiacExpr, x::GiacExpr)
-    r = invoke_cmd(:integrate, f, x)
-    (_is_infinite(r) && occursin("diff(", string(f))) || return r
-    g = _antiderivative(f, x)
+    limit = get(task_local_storage(), :giac_cancel, nothing)
+    r = try
+        limit === nothing ? invoke_cmd(:integrate, f, x) :
+                            with_timeout(() -> invoke_cmd(:integrate, f, x), (limit - time()) / 2)
+    catch e
+        # GIAC's half of the time limit spent, or GIAC failing: the search, or GIAC's outcome
+        _share_spent(e) || !_stopped(e) || rethrow()
+        g = _search_integral(f, x)
+        g === nothing ? rethrow() : return g
+    end
+    if _is_infinite(r) && occursin("diff(", string(f))
+        g = _antiderivative(f, x)
+        return g === nothing ? r : g
+    end
+    _integral_left(r) || return r
+    g = _search_integral(f, x)
     return g === nothing ? r : g
+end
+
+# ∫ f dx by the methods after GIAC's, within the depth and time left to the search
+function _search_integral(f::GiacExpr, x::GiacExpr)
+    tls = task_local_storage()
+    depth = get(tls, :giac_integral_depth, 0)
+    depth >= _SEARCH_DEPTH && return nothing
+    deadline = get(tls, :giac_integral_deadline, nothing)
+    deadline === nothing && (deadline = min(time() + _SEARCH_SECONDS, get(tls, :giac_cancel, Inf)))
+    k = length(_INDEFINITE_METHODS)
+    task_local_storage(:giac_integral_depth, depth + 1) do
+        for (i, method) in enumerate(_INDEFINITE_METHODS)
+            share = (deadline - time()) / (i == k ? 1 : 2)
+            share <= 0 && return nothing
+            g = try
+                with_timeout(share) do
+                    task_local_storage(() -> method(f, x), :giac_integral_deadline, time() + share)
+                end
+            catch e
+                _share_spent(e) && continue
+                _stopped(e) && rethrow()
+                nothing
+            end
+            g === nothing || return g
+        end
+        return nothing
+    end
+end
+
+# ∫ f dx, the whole search, for a method's new integral: the antiderivative, or nothing
+function _integrate_or_nothing(f::GiacExpr, x::GiacExpr)
+    r = try
+        _integrate(f, x)
+    catch e
+        _stopped(e) && rethrow()
+        return nothing
+    end
+    return _integral_left(r) ? nothing : r
 end
 
 # `Commands.integrate(f, x, a, b)`: GIAC's, and where it leaves the integral unevaluated, the

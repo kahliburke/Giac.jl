@@ -71,8 +71,9 @@ end
 function with_timeout(f, seconds::Real)
     _giac_threaded() || @warn "with_timeout needs GIAC on a thread of its own (Julia started with more than one thread, or DedicatedThreads loaded); the computation runs without a limit" maxlog = 1
     # a deadline the cancel watcher compares with the clock: Julia's timers need its event loop,
-    # which may not be run while every other thread is idle
-    deadline = time() + seconds
+    # which may not be run while every other thread is idle. Inside another `with_timeout`, the
+    # earlier of the two deadlines holds.
+    deadline = min(time() + seconds, get(task_local_storage(), :giac_cancel, Inf))
     try
         return task_local_storage(f, :giac_cancel, deadline)
     catch e
