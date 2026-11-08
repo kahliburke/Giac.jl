@@ -180,12 +180,15 @@ _watched(job) = job !== nothing && job.check !== nothing && !@atomic(job.cancell
 
 # A task that polls the running job's cancel check while there is one, and otherwise waits for
 # one to start. Checks run in the latest world: one may be a closure defined after the task
-# started. Started the first time a check is in use.
+# started. Started the first time a check is in use, on the interactive threads when there are
+# any: the GIAC task may hold the only thread of the default pool while it computes, and a watcher
+# there would not run until the computation it is to stop had ended.
 function _start_cancel_watcher()
     _WATCHER[] === nothing || return
     lock(_WATCHER_LOCK) do
         _WATCHER[] === nothing || return
-        _WATCHER[] = Threads.@spawn while true
+        pool = Threads.nthreads(:interactive) > 0 ? :interactive : :default
+        _WATCHER[] = Threads.@spawn pool while true
             lock(_WATCH) do
                 while !_watched(_RUNNING[])
                     wait(_WATCH)
