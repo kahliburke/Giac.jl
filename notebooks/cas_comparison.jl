@@ -70,6 +70,72 @@ end
 native = TOML.parsefile(native_file)
 (sympy = native["sympy"], python = native["python"], run = native["date"])
 
+#%% md id=environment_md
+@md"""
+## Environment
+
+What the timings were measured on, read when the notebook runs: each system's exact version and the libraries under it, the machine, and how each system is timed. Giac.jl's commit is marked *modified* when its sources differ from that commit. The performance plot is labelled with the short versions and the machine.
+"""
+
+#%% code id=environment
+import Pkg, Dates
+using Markdown
+# `short_versions`: each column's system and version, for the plot; `machine_summary`: the
+# machine and Julia in a line
+short_versions, machine_summary, environment = let
+    sh(cmd) = try readchomp(cmd) catch; "" end
+    git(dir, args...) = sh(`git -C $dir $args`)
+    # the packages of the notebook's environment, by name
+    deps = Dict(d.name => d for d in values(Pkg.dependencies()))
+    ver(name) = haskey(deps, name) && deps[name].version !== nothing ? string(deps[name].version) : "—"
+    giac_dir = pkgdir(Giac)
+    giac_commit = git(giac_dir, "rev-parse", "--short", "HEAD") *
+                  (isempty(git(giac_dir, "status", "--porcelain", "--", "src", "ext")) ? "" : " (modified)")
+    giac_engine = Giac.GiacCxxBindings.giac_version()
+    sympy_version, python_version = py(() -> (string(SP.sympy.__version__), string(SP.PythonCall.pyimport("platform").python_version())))
+    wl_version, wl_system, wl_processors = split(wl("StringRiffle[{\$Version, \$SystemID, ToString[\$ProcessorCount]}, \"\\n\"]"), '\n')
+    cpu = Sys.cpu_info()
+    macos = sh(`sw_vers -productVersion`)
+    software = [
+        "Giac.jl" => "$(pkgversion(Giac)), $(git(giac_dir, "rev-parse", "--abbrev-ref", "HEAD")) at $giac_commit",
+        "GIAC (engine)" => "$giac_engine, GIAC_jll $(ver("GIAC_jll"))",
+        "Giac's C++ wrapper" => "$giac_wrapper (libgiac_julia_jll $(ver("libgiac_julia_jll")), CxxWrap $(ver("CxxWrap")))",
+        "Symbolics" => "Symbolics $(ver("Symbolics")), SymbolicUtils $(ver("SymbolicUtils")), Groebner $(ver("Groebner")), Latexify $(ver("Latexify"))",
+        "SciML" => "SciMLBase $(ver("SciMLBase")), RuntimeGeneratedFunctions $(ver("RuntimeGeneratedFunctions"))",
+        "SymPy, from Julia" => "SymPy $sympy_version on Python $python_version, through SymPyPythonCall $(ver("SymPyPythonCall")) and PythonCall $(ver("PythonCall"))",
+        "SymPy, in Python" => "SymPy $(native["sympy"]) on Python $(native["python"]), results of $(native["date"])",
+        "Mathematica" => "$wl_version ($wl_system), kernel sees $wl_processors processors",
+        "Julia" => "$(VERSION), $(Threads.nthreads()) threads, SymPy on its own thread (DedicatedThreads $(ver("DedicatedThreads")))",
+    ]
+    machine = [
+        "Computer" => sh(`sysctl -n hw.model`),
+        "CPU" => "$(cpu[1].model), $(sh(`sysctl -n hw.perflevel0.physicalcpu`)) performance and $(sh(`sysctl -n hw.perflevel1.physicalcpu`)) efficiency cores",
+        "Memory" => "$(round(Int, Sys.total_memory() / 2^30)) GiB",
+        "Operating system" => "macOS $macos ($(sh(`sw_vers -buildVersion`))), $(Sys.MACHINE)",
+        "Power" => something(match(r"'(.*?)'", sh(`pmset -g batt`)), (; captures = ["unknown"])).captures[1],
+        # other work on the machine shares its cores: the load average as the tasks start
+        "Load when read" => join(round.(Sys.loadavg(); digits = 2), ", ") * " (1, 5, 15 min)",
+    ]
+    timing = [
+        "Giac.jl, Symbolics" => "after a first run that compiles, the best of three, or one run over half a second; 60 s limit",
+        "SymPy, from Julia" => "the same, with SymPy's cache cleared before each run; 30 s limit for a task in a Python process of its own",
+        "SymPy, in Python" => "after a first run, the best of three with the cache cleared, each task under an alarm",
+        "Mathematica" => "one run after a first, with `ClearSystemCache[]` before each, by `AbsoluteTiming`; 120 s limit",
+        "Run" => string(Dates.format(Dates.now(), "yyyy-mm-dd HH:MM")),
+    ]
+    cell(v) = replace(v, "|" => "\\|", "_" => "\\_", "*" => "\\*")
+    table(title, rows) = "| $title | |\n|:--|:--|\n" * join(["| $k | $(cell(v)) |" for (k, v) in rows], "\n")
+    short = Dict(
+        "Giac.jl" => "Giac.jl $(pkgversion(Giac)) at $giac_commit (GIAC $giac_engine)",
+        "Symbolics / MTK" => "Symbolics $(ver("Symbolics"))",
+        "SymPy, from Julia" => "SymPy $sympy_version from Julia (Python $python_version)",
+        "SymPy, in Python" => "SymPy $(native["sympy"]) in Python $(native["python"])",
+        "Mathematica" => "Mathematica $(first(split(wl_version)))")
+    (short, "$(cpu[1].model), macOS $macos, Julia $VERSION, $(Dates.format(Dates.now(), "yyyy-mm-dd"))",
+     Markdown.parse(join([table("Software", software), table("Machine", machine), table("Timing", timing)], "\n\n")))
+end
+environment
+
 #%% code id=matrix collapsed
 "The capability matrix: headings, and rows of a capability's rating in each system."
 struct CapabilityMatrix
@@ -945,17 +1011,18 @@ let rows = reduce(vcat, [[(name, label, trials) for (label, trials) in c.rows] f
     labels = [startswith(name, "Model to Jacobian: ") ? split(name, ": ")[2] * ", " * replace(l, "Brusselator, " => "") : first(l, 46)
               for (name, l, _) in rows]
     ax = Axis(fig[2, 1]; xscale = log10, xlabel = "seconds", yticks = (1:n, labels),
-              yreversed = true, title = "every task's time; hollow: not a correct answer", yticklabelsize = 11)
+              yreversed = true, title = "every task's time; hollow: not a correct answer", subtitle = machine_summary,
+              yticklabelsize = 11)
     for (i, (col, mk)) in enumerate(zip(colours, markers))
         good = [(t[3][i].seconds, j) for (j, t) in enumerate(rows) if t[3][i].seconds !== nothing && t[3][i].status === :ok]
         poor = [(t[3][i].seconds, j) for (j, t) in enumerate(rows) if t[3][i].seconds !== nothing && t[3][i].status !== :ok]
-        isempty(good) || scatter!(ax, first.(good), last.(good); color = col, marker = mk, markersize = 11, label = COLUMNS[i])
+        isempty(good) || scatter!(ax, first.(good), last.(good); color = col, marker = mk, markersize = 11, label = short_versions[COLUMNS[i]])
         isempty(poor) || scatter!(ax, first.(poor), last.(poor); color = :transparent, strokecolor = col, strokewidth = 1.5, marker = mk, markersize = 11)
     end
     # the sections, divided
     edges = cumsum([length(c.rows) for (_, c) in sections])[1:end-1] .+ 0.5
     hlines!(ax, edges; color = :gray40, linewidth = 1)
-    Legend(fig[1, 1], ax; orientation = :horizontal, framevisible = false)
+    Legend(fig[1, 1], ax; orientation = :horizontal, nbanks = 2, framevisible = false)
     fig
 end
 
@@ -973,4 +1040,5 @@ end
 # ╚═╡
 # ╔═╡ Slate.config · per-notebook settings (Settings panel)
 #   docid = e00c1f95-b52d-42d0-9994-884253e0d6bf
+#   format = 2
 # ╚═╡

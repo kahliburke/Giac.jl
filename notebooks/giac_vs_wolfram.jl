@@ -54,6 +54,7 @@ mutable struct Attempt
 end
 
 const LIMIT = 60         # seconds per problem and system
+const WARM = 10          # a Giac.jl answer within this many seconds is computed again and timed
 
 # ---------------------------------------------------------------------------------------------
 # Giac.jl's side: an answer as Julia values
@@ -293,7 +294,8 @@ function giac_data(c::Form, ans)
         n = _tree(ans)
         n isa Giac.MulNode && count(((b, e),) -> !isempty(Giac._symbol_names(b)), n.factors) == c.form[2]
     else
-        !(c.form[2] in _names(ans)) && !_any_part(n -> n isa Giac.CallNode && n.f == c.form[2], ans)
+        # in each entry of a list too
+        all(x -> !(c.form[2] in _names(x)) && !_any_part(n -> n isa Giac.CallNode && n.f == c.form[2], x), _flat(ans))
     end
     d
 end
@@ -357,13 +359,27 @@ function giac_attempt(p::Problem)
     # an earlier failure inside PARI leaves it locked. `pari_unlock` unlocks a locked PARI, but locks
     # one that is free (it tests with a trylock), returning 0: then a second call unlocks it.
     string(giac_eval("pari_unlock()")) == "0" && giac_eval("pari_unlock()")
-    t0 = time()
-    task = Threads.@spawn try (true, Giac.with_timeout(p.giac, LIMIT)) catch e; (false, e) end
+    # timed inside the task, so the time is the answer's and not the wait's. A quick answer is
+    # computed again and that run timed, once Julia has compiled the code the first ran: neither
+    # Giac.jl nor GIAC keeps results, so the second run computes the answer anew.
+    task = Threads.@spawn begin
+        t0 = time()
+        r = try (true, Giac.with_timeout(p.giac, LIMIT)) catch e; (false, e) end
+        t = time() - t0
+        if r[1] && t < WARM
+            t1 = time()
+            try
+                Giac.with_timeout(p.giac, LIMIT)
+                t = time() - t1
+            catch
+            end
+        end
+        (r..., t)
+    end
     if timedwait(() -> istaskdone(task), LIMIT + 15; pollint = 0.05) !== :ok
         return Attempt("no answer within $LIMIT s", "", nothing, :unsolved, "time limit")
     end
-    ok, ans = fetch(task)
-    seconds = time() - t0
+    ok, ans, seconds = fetch(task)
     ok || return Attempt(_shorten(ans isa Giac.GiacTimeout ? "no answer within $LIMIT s" : sprint(showerror, ans)), "", seconds, :unsolved,
                          ans isa Giac.GiacTimeout ? "time limit" : "error")
     a = Attempt(_shorten(string(ans)), _giac_tex(ans), seconds, :unsolved, "")
@@ -409,6 +425,21 @@ attempt[code_Hold, check_] := Module[{t, ans, out},
   Print["@@", json]];
 """
 
+# Mathematica is warmed up on unrelated problems of the kinds in the contest before any is timed,
+# as it loads the code for a kind of problem on first use; each contest problem is then timed
+# once, as a repeat is answered from a cache (Sum and Product remember their results through
+# ClearSystemCache)
+const WL_WARM_UP = raw"""
+Quiet[{Integrate[x^2 Sin[x], x], Integrate[Exp[-x] x^3, {x, 0, Infinity}], Integrate[Log[1 + x]/x, {x, 0, 1}],
+  Sum[1/k^3, {k, 1, Infinity}], Sum[(-1)^k/k^2, {k, 1, Infinity}], Sum[Binomial[m, j], {j, 0, m}], Product[1 + 1/k^3, {k, 1, Infinity}],
+  Limit[(Cos[x] - 1)/x^2, x -> 0], Limit[(1 + 2/x)^x, x -> Infinity], Solve[{u^2 + w^2 == 2, u == w}, {u, w}],
+  Solve[u^4 - 3 u + 1 == 0, u], Reduce[u^2 - 3 u + 2 > 0, u, Reals], Factor[u^12 - 1], Factor[u^4 + 4],
+  Simplify[Sin[u]^2 + Cos[u]^2], FullSimplify[Sqrt[3 + 2 Sqrt[2]]], MinimalPolynomial[Sqrt[2] + Sqrt[7], u],
+  DSolve[w''[u] + w[u] == u, w[u], u], DSolve[w'[u] == w[u]^2, w[u], u], Eigenvalues[{{1, 2}, {3, 4}}], MatrixExp[{{0, 2}, {-2, 0}} s],
+  FactorInteger[2^64 + 1], PrimeQ[2^127 - 1], LaplaceTransform[s^3 Exp[-2 s], s, p], InverseLaplaceTransform[1/(p^2 + 4), p, s],
+  Series[Sin[u], {u, 0, 6}], Resolve[ForAll[u, u^2 + 1 > 0], Reals]}];
+"""
+
 function _wolfram_complex(x)
     x isa AbstractVector && length(x) == 2 && all(v -> v isa Real && !(v isa Bool), x) && return ComplexF64(x[1], x[2])
     x isa AbstractVector && return [_wolfram_complex(v) for v in x]
@@ -418,7 +449,7 @@ end
 _wolfram_data(d::AbstractDict) = Dict{String, Any}(k => (v isa AbstractVector ? _wolfram_complex(v) : v) for (k, v) in d)
 
 function wolfram_attempts(problems)
-    script = WL_PRELUDE * "LIMIT = $LIMIT;\n" *
+    script = WL_PRELUDE * WL_WARM_UP * "LIMIT = $LIMIT;\n" *
              join(["attempt[Hold[$(p.wolfram)], $(wolfram_check(p.check))];" for p in problems], "\n")
     file = tempname() * ".wls"
     write(file, script)
@@ -498,6 +529,63 @@ function Base.show(io::IO, ::MIME"text/markdown", c::Contest)
         println(io, "| ", p.title, " | ", cell(g), " | ", cell(w), " |")
     end
 end
+
+#%% md id=environment_md
+@md"""
+## Environment
+
+What the results were measured on, read when the notebook runs: each system's exact version and the libraries under it, the machine, and the contest's own settings. Giac.jl's commit is marked *modified* when its sources differ from that commit.
+"""
+
+#%% code id=environment
+import Pkg, Dates
+using Markdown
+# `short_versions`: each system and its version, for the plot; `machine_summary`: the machine and
+# Julia in a line
+short_versions, machine_summary, environment = let
+    sh(cmd) = try readchomp(cmd) catch; "" end
+    git(dir, args...) = sh(`git -C $dir $args`)
+    # the packages of the notebook's environment, by name
+    deps = Dict(d.name => d for d in values(Pkg.dependencies()))
+    ver(name) = haskey(deps, name) && deps[name].version !== nothing ? string(deps[name].version) : "—"
+    giac_dir = pkgdir(Giac)
+    giac_commit = git(giac_dir, "rev-parse", "--short", "HEAD") *
+                  (isempty(git(giac_dir, "status", "--porcelain", "--", "src", "ext")) ? "" : " (modified)")
+    wl = JSON.parse(wolfram("-code", "ExportString[<|\"version\" -> \$Version, \"system\" -> \$SystemID, \"processors\" -> \$ProcessorCount|>, \"RawJSON\", \"Compact\" -> True]"))
+    cpu = Sys.cpu_info()
+    software = [
+        "Giac.jl" => "$(pkgversion(Giac)), $(git(giac_dir, "rev-parse", "--abbrev-ref", "HEAD")) at $giac_commit",
+        "GIAC (engine)" => "$(Giac.GiacCxxBindings.giac_version()), GIAC_jll $(ver("GIAC_jll"))",
+        "Giac's C++ wrapper" => "$giac_wrapper (libgiac_julia_jll $(ver("libgiac_julia_jll")), CxxWrap $(ver("CxxWrap")))",
+        "PARI (through GIAC)" => "PARI_jll $(ver("PARI_jll"))",
+        "Nemo / FLINT" => "Nemo $(ver("Nemo")), FLINT_jll $(ver("FLINT_jll"))",
+        "msolve" => "AlgebraicSolving $(ver("AlgebraicSolving")), msolve_jll $(ver("msolve_jll"))",
+        "Sum of squares" => "JuMP $(ver("JuMP")), Clarabel $(ver("Clarabel"))",
+        "Julia" => "$(VERSION), $(Threads.nthreads()) threads, GIAC on its own thread (DedicatedThreads $(ver("DedicatedThreads")))",
+        "Mathematica" => "$(wl["version"]) ($(wl["system"])), kernel sees $(wl["processors"]) processors",
+    ]
+    machine = [
+        "Computer" => sh(`sysctl -n hw.model`),
+        "CPU" => "$(cpu[1].model), $(sh(`sysctl -n hw.perflevel0.physicalcpu`)) performance and $(sh(`sysctl -n hw.perflevel1.physicalcpu`)) efficiency cores",
+        "Memory" => "$(round(Int, Sys.total_memory() / 2^30)) GiB",
+        "Operating system" => "macOS $(sh(`sw_vers -productVersion`)) ($(sh(`sw_vers -buildVersion`))), $(Sys.MACHINE)",
+        "Power" => something(match(r"'(.*?)'", sh(`pmset -g batt`)), (; captures = ["unknown"])).captures[1],
+        # other work on the machine shares its cores: the load average as the contest starts
+        "Load when read" => join(round.(Sys.loadavg(); digits = 2), ", ") * " (1, 5, 15 min)",
+    ]
+    contest_settings = [
+        "Time limit" => "$LIMIT s per problem and system",
+        "Timing" => "Giac.jl: the second of two runs; Mathematica: one run, after a warm-up on unrelated problems",
+        "Run" => string(Dates.format(Dates.now(), "yyyy-mm-dd HH:MM")),
+    ]
+    cell(v) = replace(v, "|" => "\\|", "_" => "\\_", "*" => "\\*")
+    table(title, rows) = "| $title | |\n|:--|:--|\n" * join(["| $k | $(cell(v)) |" for (k, v) in rows], "\n")
+    short = Dict("Giac.jl" => "Giac.jl $(pkgversion(Giac)) at $giac_commit (GIAC $(Giac.GiacCxxBindings.giac_version()))",
+                 "Mathematica" => "Mathematica $(first(split(wl["version"])))")
+    (short, "$(cpu[1].model), macOS $(sh(`sw_vers -productVersion`)), Julia $VERSION, $(Dates.format(Dates.now(), "yyyy-mm-dd"))",
+     Markdown.parse(join([table("Software", software), table("Machine", machine), table("Contest", contest_settings)], "\n\n")))
+end
+environment
 
 #%% code id=symbols
 @giac_var x y z t s n k a b
@@ -739,7 +827,7 @@ simplification = contest("Simplification and algebraic numbers", [
             () -> C.simplify(sin(3x) / sin(x) - cos(3x) / cos(x)), "Simplify[Sin[3 x]/Sin[x] - Cos[3 x]/Cos[x]]",
             Form(Value(2; at = [["x" => "7/10"]]), (:free_of, "x", "x"), "not reduced to a constant")),
     Problem("Gauss's 17-gon", raw"\cos\tfrac{2\pi}{17} \text{ in square roots}",
-            () -> C.simplify(cos(2PI / 17)), "FunctionExpand[Cos[2 Pi/17]]",
+            () -> Giac.in_radicals(cos(2PI / 17)), "FunctionExpand[Cos[2 Pi/17]]",
             Form(Value(cos(2 * big(π) / 17)), :no_trig, "no radicals")),
     Problem("An inverse cosine, with assumptions", raw"\arccos(\cos x) = 2\pi - x \quad (\pi < x < 2\pi)",
             () -> Giac.assuming(() -> C.simplify(acos(cos(x))), x > PI, x < 2PI), "Simplify[ArcCos[Cos[x]], Pi < x < 2 Pi]",
@@ -754,28 +842,29 @@ The Airy and Bessel equations, a Riccati equation whose solutions are Bessel fun
 """
 
 #%% code id=odes
+@giac_var Y(x)
 odes = contest("Differential equations", [
     Problem("Airy", raw"y'' = x\,y",
-            () -> giac_eval("desolve(diff(y(x),x,2) = x*y(x), y(x))"), "DSolve[y''[x] == x y[x], y[x], x]",
+            () -> C.desolve(C.diff(Y, x, 2) ~ x * Y, Y), "DSolve[y''[x] == x y[x], y[x], x]",
             DE(Y -> [C.diff(Y, x, 2) - x * Y], "Function[Y, D[Y, {x, 2}] - x Y]", ["x"], [["3/10"], ["7/10"], ["11/10"]], 2)),
     Problem("Bessel, order ½", raw"x^2 y'' + x y' + \left(x^2 - \tfrac14\right) y = 0",
-            () -> giac_eval("desolve(x^2*diff(y(x),x,2) + x*diff(y(x),x) + (x^2 - 1/4)*y(x) = 0, y(x))"),
+            () -> C.desolve(x^2 * C.diff(Y, x, 2) + x * C.diff(Y, x) + (x^2 - 1 // 4) * Y ~ 0, Y),
             "DSolve[x^2 y''[x] + x y'[x] + (x^2 - 1/4) y[x] == 0, y[x], x]",
             DE(Y -> [x^2 * C.diff(Y, x, 2) + x * C.diff(Y, x) + (x^2 - 1 // 4) * Y], "Function[Y, x^2 D[Y, {x, 2}] + x D[Y, x] + (x^2 - 1/4) Y]",
                ["x"], [["3/10"], ["7/10"], ["11/10"]], 2)),
     Problem("Riccati", raw"y' = x^2 + y^2",
-            () -> giac_eval("desolve(diff(y(x),x) = x^2 + y(x)^2, y(x))"), "DSolve[y'[x] == x^2 + y[x]^2, y[x], x]",
+            () -> C.desolve(C.diff(Y, x) ~ x^2 + Y^2, Y), "DSolve[y'[x] == x^2 + y[x]^2, y[x], x]",
             DE(Y -> [C.diff(Y, x) - x^2 - Y^2], "Function[Y, D[Y, x] - x^2 - Y^2]", ["x"], [["3/10"], ["7/10"], ["11/10"]], 1)),
     Problem("A nonlinear autonomous equation", raw"y\,y'' = y'^2",
-            () -> giac_eval("desolve(y(x)*diff(y(x),x,2) = diff(y(x),x)^2, y(x))"), "DSolve[y[x] y''[x] == y'[x]^2, y[x], x]",
+            () -> C.desolve(Y * C.diff(Y, x, 2) ~ C.diff(Y, x)^2, Y), "DSolve[y[x] y''[x] == y'[x]^2, y[x], x]",
             DE(Y -> [Y * C.diff(Y, x, 2) - C.diff(Y, x)^2], "Function[Y, Y D[Y, {x, 2}] - D[Y, x]^2]", ["x"], [["3/10"], ["7/10"], ["11/10"]], 2)),
     Problem("A forced Euler–Cauchy equation", raw"x^2 y'' - 3x y' + 4y = x^2 \ln x",
-            () -> giac_eval("desolve(x^2*diff(y(x),x,2) - 3*x*diff(y(x),x) + 4*y(x) = x^2*ln(x), y(x))"),
+            () -> C.desolve(x^2 * C.diff(Y, x, 2) - 3x * C.diff(Y, x) + 4Y ~ x^2 * log(x), Y),
             "DSolve[x^2 y''[x] - 3 x y'[x] + 4 y[x] == x^2 Log[x], y[x], x]",
             DE(Y -> [x^2 * C.diff(Y, x, 2) - 3x * C.diff(Y, x) + 4Y - x^2 * log(x)], "Function[Y, x^2 D[Y, {x, 2}] - 3 x D[Y, x] + 4 Y - x^2 Log[x]]",
                ["x"], [["3/10"], ["7/10"], ["11/10"]], 2)),
     Problem("Bernoulli", raw"y' + y = x\,y^3",
-            () -> giac_eval("desolve(diff(y(x),x) + y(x) = x*y(x)^3, y(x))"), "DSolve[y'[x] + y[x] == x y[x]^3, y[x], x]",
+            () -> C.desolve(C.diff(Y, x) + Y ~ x * Y^3, Y), "DSolve[y'[x] + y[x] == x y[x]^3, y[x], x]",
             DE(Y -> [C.diff(Y, x) + Y - x * Y^3], "Function[Y, D[Y, x] + Y - x Y^3]", ["x"], [["3/10"], ["7/10"], ["11/10"]], 1)),
     Problem("A Jordan block", raw"X' = \begin{bmatrix}1&1&0\\0&1&1\\0&0&1\end{bmatrix} X,\ X(0) = (1, 1, 1)",
             () -> exp(t * GiacExpr[1 1 0; 0 1 1; 0 0 1]) * GiacExpr[1, 1, 1], "MatrixExp[t {{1, 1, 0}, {0, 1, 1}, {0, 0, 1}}].{1, 1, 1}",
@@ -973,27 +1062,124 @@ function Base.show(io::IO, ::MIME"text/markdown", b::Scoreboard)
 end
 scoreboard = Scoreboard([integrals, definite, sums, limits, equations, polynomials, simplification, odes, linear, numbers, transforms, control])
 
+#%% md id=performance_md
+@md"""
+## Performance
+
+For each area: how many problems each system solved, and on the problems both solved, how many each answered faster and the typical ratio of their times, the geometric mean of one system's time over the other's. "Giac.jl 3.0× faster" means its answers took a third of Mathematica's time, typically, on the problems both solved. A problem only one system solved is not timed against anything.
+
+Each time is of a system computing an answer it has not seen, with its code ready, so neither Julia compiling Giac.jl's code nor Mathematica loading its own on first use is counted. Giac.jl computes a problem twice and the second run is timed: neither it nor GIAC keeps results, and a new problem of a kind already run takes as long as a repeat. Mathematica cannot be timed that way, as `Sum` and `Product` remember their results through `ClearSystemCache[]` and answer a repeat in a tenth of a millisecond; it is warmed up on unrelated problems of the same kinds (integrals, sums, limits, solving, factoring, differential equations, transforms, matrices) and then times each problem once. Mathematica's time is its kernel's `AbsoluteTiming`. Giac.jl's is the call's time in Julia, through its Julia layers to GIAC and, for the problems that use them, Nemo, msolve and Clarabel. The plot shows every time.
+"""
+
+#%% code id=performance
+"Per area: problems each system solved, and on those both solved, how often each was faster and the typical ratio of their times."
+struct Performance
+    rows::Vector{Pair{String, NamedTuple}}
+end
+const SYSTEMS = ("Giac.jl", "Mathematica")
+
+_solved_time(a::Attempt) = a.outcome === :solved && a.seconds !== nothing && a.seconds > 0 ? a.seconds : nothing
+
+function _performance(pairs)
+    solved = [count(p -> _solved_time(p[i]) !== nothing, pairs) for i in 1:2]
+    both = [(_solved_time(g), _solved_time(w)) for (g, w) in pairs if _solved_time(g) !== nothing && _solved_time(w) !== nothing]
+    faster = (count(((g, w),) -> g < w, both), count(((g, w),) -> w < g, both))
+    # Mathematica's time over Giac.jl's, the geometric mean: above 1, Giac.jl is the faster
+    ratio = isempty(both) ? nothing : exp(sum(log(w / g) for (g, w) in both) / length(both))
+    (; problems = length(pairs), solved, both = length(both), faster, ratio)
+end
+
+_pairs(c::Contest) = [(g, w) for (g, w) in zip(c.giac, c.wolfram)]
+performance = Performance(vcat([c.area => _performance(_pairs(c)) for c in scoreboard.areas],
+                               ["All problems" => _performance(reduce(vcat, _pairs.(scoreboard.areas)))]))
+
+_ratio_text(r) = r === nothing ? "—" : r >= 1 ? "Giac.jl $(_times(r)) faster" : "Mathematica $(_times(1 / r)) faster"
+_times(r) = (r < 10 ? string(round(r; digits = 1)) : string(round(Int, r))) * "×"
+# orange toward Giac.jl, blue toward Mathematica, stronger with the ratio (full at 100×)
+function _ratio_colour(r)
+    r === nothing && return "transparent"
+    a = round(clamp(abs(log10(r)) / 2, 0.05, 1) * 0.45; digits = 2)
+    r >= 1 ? "rgba(255,165,0,$a)" : "rgba(0,191,255,$a)"
+end
+
+function Base.show(io::IO, ::MIME"text/html", p::Performance)
+    print(io, """<style>
+      table.perf { border-collapse: collapse; margin: 6px 0; font-size: .92em; }
+      table.perf th, table.perf td { padding: 7px 12px; border-bottom: 1px solid rgba(128,128,128,.22); text-align: left; }
+      table.perf td.n { font-variant-numeric: tabular-nums; }
+      table.perf td.r { font-weight: 600; }
+      table.perf tr.all td { border-top: 2px solid rgba(128,128,128,.5); font-weight: 600; }
+    </style><table class="perf"><tr><th></th><th>Solved: Giac.jl</th><th>Solved: Mathematica</th><th>Both solved</th>
+    <th>Faster: Giac.jl</th><th>Faster: Mathematica</th><th>Typical time ratio</th></tr>""")
+    for (name, r) in p.rows
+        print(io, name == "All problems" ? "<tr class=\"all\">" : "<tr>", "<td>", _esc(name), "</td>",
+              "<td class=\"n\">$(r.solved[1]) of $(r.problems)</td><td class=\"n\">$(r.solved[2]) of $(r.problems)</td>",
+              "<td class=\"n\">$(r.both)</td><td class=\"n\">$(r.faster[1])</td><td class=\"n\">$(r.faster[2])</td>",
+              "<td class=\"r\" style=\"background:$(_ratio_colour(r.ratio))\">", _ratio_text(r.ratio), "</td></tr>")
+    end
+    print(io, "</table>")
+end
+
+function Base.show(io::IO, ::MIME"text/markdown", p::Performance)
+    println(io, "| | Solved: Giac.jl | Solved: Mathematica | Both solved | Faster: Giac.jl | Faster: Mathematica | Typical time ratio |\n|:--|:--|:--|:--|:--|:--|:--|")
+    for (name, r) in p.rows
+        println(io, "| $name | $(r.solved[1])/$(r.problems) | $(r.solved[2])/$(r.problems) | $(r.both) | $(r.faster[1]) | $(r.faster[2]) | $(_ratio_text(r.ratio)) |")
+    end
+end
+performance
+
+#%% code id=performance_plot
+using CairoMakie
+set_theme!(theme_dark())
+let rows = [(c.area, p.title, (g, w)) for c in scoreboard.areas for (p, g, w) in zip(c.problems, c.giac, c.wolfram)]
+    colours, markers = [:orange, :deepskyblue], [:circle, :rect]
+    n = length(rows)
+    times = [a.seconds for r in rows for a in r[3] if a.seconds !== nothing && a.seconds > 0]
+    decades = floor(Int, log10(minimum(times))):ceil(Int, log10(maximum(times)))
+    fig = Figure(size = (1100, 18n + 120))
+    ax = Axis(fig[2, 1]; xscale = log10, xlabel = "seconds",
+              xticks = (10.0 .^ decades, [d >= 0 ? string(10^d) : "10^$d" for d in decades]),
+              yticks = (1:n, [first(t, 46) for (_, t, _) in rows]), yreversed = true,
+              title = "every problem's time; hollow: not solved", subtitle = machine_summary, yticklabelsize = 10)
+    for (i, (col, mk)) in enumerate(zip(colours, markers))
+        good = [(r[3][i].seconds, j) for (j, r) in enumerate(rows) if r[3][i].seconds !== nothing && r[3][i].seconds > 0 && r[3][i].outcome === :solved]
+        poor = [(r[3][i].seconds, j) for (j, r) in enumerate(rows) if r[3][i].seconds !== nothing && r[3][i].seconds > 0 && r[3][i].outcome !== :solved]
+        isempty(good) || scatter!(ax, first.(good), last.(good); color = col, marker = mk, markersize = 9, label = short_versions[SYSTEMS[i]])
+        isempty(poor) || scatter!(ax, first.(poor), last.(poor); color = :transparent, strokecolor = col, strokewidth = 1.5, marker = mk, markersize = 9)
+    end
+    # the areas: marked off, and named on the right at the middle of each
+    starts = [j for j in 1:n if j == 1 || rows[j][1] != rows[j - 1][1]]
+    hlines!(ax, starts[2:end] .- 0.5; color = (:white, 0.15))
+    ends = [starts[2:end] .- 1; n]
+    areas = Axis(fig[2, 1]; yaxisposition = :right, yreversed = true, backgroundcolor = :transparent,
+                 yticks = ((starts .+ ends) ./ 2, [rows[s][1] for s in starts]), yticklabelsize = 12, yticksvisible = false, ygridvisible = false)
+    hidexdecorations!(areas); hidespines!(areas)
+    linkyaxes!(ax, areas)
+    Legend(fig[1, 1], ax; orientation = :horizontal, framevisible = false)
+    fig
+end
+
 #%% md id=findings_md
 @md raw"""
 ## What the contest shows
 
-Mathematica answers almost everything here; the problems it misses are Ahmed's integral (which Giac.jl misses too), Ramanujan's denesting, a square root it leaves nested, and an inverse cosine its `Simplify` leaves as it is under the assumptions, where Giac.jl gets both of the last two. Giac.jl is level with it on limits, linear algebra, polynomial algebra apart from one factorization, the transforms and special functions, and most equations and number theory, and it has no wrong answers.
+Mathematica answers almost everything here. It misses Ahmed's integral, which Giac.jl misses too, and the discrete logarithm, which takes it a little over the minute. Of the problems asking for a form, it leaves Ramanujan's denesting, a square root it does not denest and an inverse cosine its `Simplify` leaves under the assumptions; Giac.jl does the last two. Giac.jl is level with it on limits, linear algebra, control, the transforms and special functions, and number theory, nearly so on equations, polynomial algebra and definite integrals, and it has no wrong answers. Where both solve a problem Giac.jl is usually the faster, by a wide margin on definite integrals and limits; Mathematica is faster on sums and on its own matrix and control routines.
 
-Some of Giac.jl's answers come from its own layers rather than from GIAC: definite integrals as derivatives of Beta and Gamma integrals (the dilogarithm value, Euler's constant, the log-sine integral), sines and cosines written as exponentials (the Gaussian with a cosine), the mean of an integrand and its reflection (the symmetry trick), infinite sums and products as limits of GIAC's partial ones (the two products), alternating sums in pairs of terms with polygamma values reflected (Dirichlet's β(3)), Chu–Vandermonde for finite hypergeometric sums, `hypergeometric` for series whose Pochhammer ratios are rational, `polynomial_decomposition`, and exact algebraic numbers through Nemo (the heptagon sum).
+Many of Giac.jl's answers come from its own layers rather than from GIAC alone: definite integrals as derivatives of Beta and Gamma integrals, with sines and cosines as exponentials, or averaged over an involution of the interval (Serret's integral, the symmetry trick); infinite sums and products as limits of GIAC's partial ones, alternating sums in pairs of terms with polygamma values reflected, and Chu–Vandermonde for finite hypergeometric sums; `hypergeometric`; `polynomial_decomposition`; exact complex solutions where GIAC's `cSolve` gives decimals; Euler–Cauchy equations in `desolve`; Nemo's exact algebraic numbers (the heptagon sum); Gauss's periods for constructible angles (`in_radicals`); and a sum-of-squares certificate with a positive multiplier (Motzkin's polynomial).
 
 Where it falls behind, the gaps are in a few places:
 
-- **Integration**: GIAC's integrator gives back algebraic integrands that need a clever substitution (Chebyshev's pseudo-elliptic integral, the arctangent of a radical, the fourth root) and a rational function whose denominator has no roots in radicals, which Mathematica writes as a `RootSum`. Serret's integral and $\operatorname{erfc}^2$ stay unevaluated.
+- **Integration**: GIAC's integrator gives back algebraic integrands that need a clever substitution (Chebyshev's pseudo-elliptic integral, the arctangent of a radical, the fourth root) and a rational function whose denominator has no roots in radicals, which Mathematica writes as a `RootSum`; $\int_0^\infty \operatorname{erfc}^2 x\,dx$ stays unevaluated.
 - **Symbolic sums**: harmonic-number and central binomial series, and polylogarithm values; GIAC has no polylogarithm.
-- **Differential equations**: no Airy functions, no Riccati or forced Euler–Cauchy equations, and no partial differential equations at all.
-- **Exact forms**: `cSolve` gives a sextic system's and a solvable quintic's roots numerically, where Mathematica gives exact `Root` objects or radicals; $\cos(2\pi/17)$ is not written in square roots; GIAC's `factor` splits $\Phi_5$ with $\sqrt5$, so $x^{105} - 1$ is not factored over $\mathbb{Q}$.
-- **Missing proofs**: no proof of nonnegativity beyond sums of squares (Motzkin's polynomial needs cylindrical decomposition).
+- **Differential equations**: no Airy functions (GIAC has them but not their derivatives), no Riccati equation with Bessel solutions, and no partial differential equations.
+- **Exact forms**: the solvable quintic's roots are exact but not in radicals, and GIAC's `factor` splits $\Phi_5$ with $\sqrt5$, so $x^{105} - 1$ is not factored over $\mathbb{Q}$.
 
-Some failures are defects rather than missing mathematics: `isprime(2^521 - 1)` fails inside PARI (its APRCL test errs on this number, though it proves other primes of the same size), a PARI error leaves PARI locked for the rest of the session, and `pari_unlock` locks a PARI that is free (the harness works around both).
+One failure is a defect rather than missing mathematics: `isprime(2^521 - 1)` fails inside PARI, whose APRCL test errs on this number though it proves other primes of the same size. A PARI error also leaves PARI locked for the rest of the session, and `pari_unlock` locks a PARI that is free; the harness works around both.
 """
 
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
 #   AlgebraicSolving 0.13.0 66b61cbe-0446-4d5d-9090-1ff510639f9d
+#   CairoMakie 0.15.17 13f3f980-e62b-5c42-98c6-ff1f3baf88f0
 #   Clarabel 0.11.1 61c947e1-3e6d-4ee4-985a-eec8c727bd6e
 #   DedicatedThreads 0.1.0 9d6577c3-9664-4440-a53f-cec765ebc045
 #   GiacSlate 0.1.2 f4c9f34b-fa6a-4506-9309-e8c0bac809fa path=~/devel/GiacSlate.jl
