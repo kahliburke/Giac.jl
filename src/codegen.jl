@@ -1,13 +1,20 @@
 # Julia code from Giac expressions, and native numeric functions compiled from it.
 
 # Giac heads whose Julia function has a different name, or that Julia spells as an operator
-const _JULIA_HEADS = Dict(
+const _JULIA_HEADS = Dict{String, Union{Symbol, GlobalRef}}(
     "+" => :+, "*" => :*, "^" => :^, "-" => :-, "inv" => :inv, "ln" => :log, "log10" => :log10,
     "sqrt" => :sqrt, "abs" => :abs, "sign" => :sign, "exp" => :exp, "floor" => :floor, "ceil" => :ceil,
     "max" => :max, "min" => :min, "atan" => :atan, "asin" => :asin, "acos" => :acos,
     "sin" => :sin, "cos" => :cos, "tan" => :tan, "sinh" => :sinh, "cosh" => :cosh, "tanh" => :tanh,
     "asinh" => :asinh, "acosh" => :acosh, "atanh" => :atanh, "re" => :real, "im" => :imag,
-    "conj" => :conj)
+    "conj" => :conj, "erf" => GlobalRef(SpecialFunctions, :erf), "erfc" => GlobalRef(SpecialFunctions, :erfc),
+    "Gamma" => GlobalRef(SpecialFunctions, :gamma), "Si" => GlobalRef(SpecialFunctions, :sinint),
+    "Ci" => GlobalRef(SpecialFunctions, :cosint), "Ei" => GlobalRef(SpecialFunctions, :expinti),
+    "Heaviside" => GlobalRef(@__MODULE__, :_heaviside))
+
+# GIAC's Heaviside(0) is 1; at a complex number, that of its real part
+_heaviside(x::Real) = x < 0 ? zero(x) : one(x)
+_heaviside(x::Complex) = _heaviside(real(x))
 
 const _JULIA_CONSTANTS = Dict("pi" => :π, "infinity" => :Inf, "inf" => :Inf)
 
@@ -29,7 +36,10 @@ function to_expr(e::GiacExpr)
         head == "+" && return _sum_expr(arguments(e))
         head == "*" && return _product_expr(arguments(e))
         args = map(to_expr, arguments(e))
-        head == "of" && return Expr(:call, args...)            # an undefined function f(a, b)
+        if head == "of"                                         # an undefined function f(a, b)
+            f = _special_name(_node(e)) === nothing ? args[1] : GlobalRef(SpecialFunctions, args[1])
+            return Expr(:call, f, args[2:end]...)
+        end
         haskey(_JULIA_HEADS, head) || throw(ArgumentError("no Julia function for Giac's `$head` in $e"))
         return Expr(:call, _JULIA_HEADS[head], args...)
     end

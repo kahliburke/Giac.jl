@@ -62,6 +62,7 @@ module Giac
 
 using LinearAlgebra
 using Tables
+import SpecialFunctions
 
 # Include source files
 include("types.jl")
@@ -120,6 +121,7 @@ include("inverse_substitution.jl")
 include("binomial_substitution.jl")
 include("sums.jl")
 include("laplace.jl")
+include("special_functions.jl")
 include("polynomial_decomposition.jl")
 include("exact_solve.jl")
 include("ode_transforms.jl")

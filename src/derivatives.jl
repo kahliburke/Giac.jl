@@ -54,6 +54,7 @@ function _derivative(n::MulNode, x::String)
 end
 
 function _derivative(n::CallNode, x::String)
+    n.f == "of" && return _special_derivative(n, x)
     rule = length(n.args) == 1 ? get(_TREE_DERIVATIVES, n.f, nothing) : nothing
     rule === nothing && return x in _symbol_names(n) ? nothing : _ZERO
     u = only(n.args)

@@ -185,6 +185,12 @@ const _CALL_TEX = Dict(
     "re" => "\\operatorname{Re}", "im" => "\\operatorname{Im}", "arg" => "\\arg",
     "trace" => "\\operatorname{tr}", "det" => "\\det")
 const _TRIG = ("sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth")
+# Bessel, Hankel and Airy functions (special_functions.jl): the letter, written with the order as
+# a subscript for the first six
+const _SPECIAL_TEX = Dict(
+    "besselj" => "J", "bessely" => "Y", "besseli" => "I", "besselk" => "K",
+    "hankelh1" => "H^{(1)}", "hankelh2" => "H^{(2)}", "airyai" => "\\operatorname{Ai}",
+    "airybi" => "\\operatorname{Bi}", "airyaiprime" => "\\operatorname{Ai}'", "airybiprime" => "\\operatorname{Bi}'")
 
 function _pnode(e::GiacExpr)
     # numbers, names, sums and products are read off the tree directly
@@ -273,6 +279,7 @@ function _pnode(e::GiacExpr)
         return _PInfix(string(a[1]), _PNode[_pnode(x) for x in a[2:end]])
     end
     haskey(_INFIX_TEX, h) && length(a) == 2 && return _PInfix(h, _PNode[_pnode(x) for x in a])
+    _special_name(_node(e)) === nothing || return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], false)
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
     if h == "subst" && length(a) == 2 && (eqs = _equations(a[2])) !== nothing
@@ -684,7 +691,7 @@ end
 
 # a base that needs parentheses under a power
 _needs_parens(b::_PNode) = b isa _PSum || b isa _PEq || (b isa _PProd) || (b isa _PPow) || (b isa _PInfix) ||
-                           (b isa _PNum && (b.v < 0 || !(b.v isa Integer))) || (b isa _PCall && !b.user && b.f != "abs")
+                           (b isa _PNum && (b.v < 0 || !(b.v isa Integer))) || (b isa _PCall && !b.user && b.f != "abs" && !haskey(_SPECIAL_TEX, b.f))
 
 function _power_tex(n::_PPow, c::_Ctx)
     b, e = n.base, n.exp
@@ -722,6 +729,10 @@ function _tex(n::_PCall, c::_Ctx)
     end
     if n.f == "exp" && c.style.exp === :e
         return "e^{" * _tex(only(n.args), _in_exponent(c)) * "}"
+    end
+    if haskey(_SPECIAL_TEX, n.f)                       # J_ν(x), Ai(x)
+        order = length(n.args) == 2 ? "_{" * _tex(n.args[1], c) * "}" : ""
+        return _SPECIAL_TEX[n.f] * order * "\\left(" * _tex(n.args[end], c) * "\\right)"
     end
     length(n.args) == 1 && return _CALL_TEX[n.f] * _call_argument(n, c)
     return _CALL_TEX[n.f] * "\\left(" * join((_tex(a, c) for a in n.args), ", ") * "\\right)"

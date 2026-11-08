@@ -150,7 +150,7 @@ end
 function _laplace_core(g::GiacExpr, t::GiacExpr, s::GiacExpr, depth::Int)
     r = _giac_or_nothing(:laplace, g, t, s)
     _is_laplace_answer(r, g, t) && _laplace_verdict(g, t, r, s) !== :disagree && return r
-    for rule in (_laplace_pair, _laplace_times_power, _laplace_over_t, _laplace_from_derivative, _laplace_integral)
+    for rule in (_laplace_pair, _laplace_bessel, _laplace_times_power, _laplace_over_t, _laplace_from_derivative, _laplace_integral)
         r = rule(g, t, s, depth)
         r !== nothing && _is_laplace_answer(r, g, t) && _laplace_verdict(g, t, r, s) !== :disagree && return r
     end
@@ -233,9 +233,9 @@ function _power_and_call(g::GiacExpr, x::GiacExpr)
     return p, n.f, GiacExpr(only(n.args))
 end
 
-# u as k√x, k/√x or k/x: :sqrt, :inv_sqrt or :inv, and k
+# u as kx, k√x, k/√x or k/x: :linear, :sqrt, :inv_sqrt or :inv, and k
 function _argument_shape(u::GiacExpr, x::GiacExpr)
-    for (shape, w) in ((:sqrt, sqrt(x)), (:inv_sqrt, 1 / sqrt(x)), (:inv, 1 / x))
+    for (shape, w) in ((:linear, x), (:sqrt, sqrt(x)), (:inv_sqrt, 1 / sqrt(x)), (:inv, 1 / x))
         k = u / w
         _depends_on(k, x) || return shape, k
     end
@@ -264,6 +264,81 @@ function _laplace_pair(g::GiacExpr, t::GiacExpr, s::GiacExpr, depth::Int)
     shape === nothing && return nothing
     F = get(_LAPLACE_PAIRS, (h, shape[1], Rational{Int}(p)), nothing)
     return F === nothing ? nothing : F(shape[2], s)
+end
+
+# g as xᵖ f(ν, u) for a Bessel function f: p, f's name, ν and u
+function _power_and_bessel(g::GiacExpr, x::GiacExpr)
+    p, h = _power_factor(g, x)
+    f = _special_name(_node(h))
+    (f !== nothing && f in _BESSEL) || return nothing
+    return p, f, GiacExpr(_node(h).args[2]), GiacExpr(_node(h).args[3])
+end
+
+# transforms of J_ν(kt) and I_ν(kt), alone, over t and times t^ν; of t^(ν/2) J_ν(k√t) and
+# t^(ν/2) I_ν(k√t); and of K₀(kt) and Y₀(kt)
+function _laplace_bessel(g::GiacExpr, t::GiacExpr, s::GiacExpr, depth::Int)
+    m = _power_and_bessel(g, t)
+    m === nothing && return nothing
+    p, f, ν, u = m
+    _depends_on(ν, t) && return nothing
+    v = _node(ν)
+    v isa NumNode && v.v isa Real && v.v <= -1 && return nothing
+    shape = _argument_shape(u, t)
+    shape === nothing && return nothing
+    form, k = shape
+    P = GiacExpr(NumNode(p))
+    π_ = convert(GiacExpr, π)
+    if form === :linear && f in ("besselj", "besseli")
+        r = f == "besselj" ? sqrt(s^2 + k^2) : sqrt(s^2 - k^2)
+        w = f == "besselj" ? r - s : s - r
+        iszero(p) && return w^ν / (k^ν * r)
+        p == -1 && return w^ν / (ν * k^ν)
+        _is_zero_node(_node(P - ν)) && return (2k)^ν * invoke_cmd(:Gamma, ν + 1 // 2) / (sqrt(π_) * r^(2ν + 1))
+    elseif form === :linear && iszero(p) && _is_zero_node(v) && f == "besselk"
+        r = sqrt(s^2 - k^2)
+        return log((s + r) / k) / r
+    elseif form === :linear && iszero(p) && _is_zero_node(v) && f == "bessely"
+        r = sqrt(s^2 + k^2)
+        return -2 * asinh(s / k) / (π_ * r)
+    elseif form === :sqrt && f in ("besselj", "besseli") && _is_zero_node(_node(P - ν / 2))
+        return (k / 2)^ν * s^(-ν - 1) * exp((f == "besselj" ? -1 : 1) * k^2 / (4s))
+    end
+    return nothing
+end
+
+# inverses of (s² + c)^(-ν-1/2), in J_ν or I_ν by the sign of c, and of e^(k/s)/s^(ν+1); a
+# quadratic s² + bs + c is (s + b/2)² + c - b²/4, its inverse that in s times e^(-bt/2)
+function _ilaplace_bessel(G::GiacExpr, s::GiacExpr, t::GiacExpr, depth::Int)
+    n = _node(G)
+    π_ = convert(GiacExpr, π)
+    if n isa MulNode && isone(n.coef) && length(n.factors) == 1
+        base, e = only(n.factors)
+        if e isa NumNode && e.v isa Rational && e.v < 0 && denominator(e.v) == 2
+            c = GiacExpr(base) - s^2
+            if _depends_on(c, s)
+                _linear_in(_node(c), string(s)) || return nothing
+                b = GiacExpr(_derivative(_node(c), string(s)))
+                h = _ilaplace_bessel((s^2 + substitute(c, s => 0) - b^2 / 4)^GiacExpr(e), s, t, depth)
+                return h === nothing ? nothing : exp(-b * t / 2) * h
+            end
+            ν = GiacExpr(NumNode(-e.v - 1 // 2))
+            positive = _positive_coefficient(c)
+            k = sqrt(positive ? c : -c)
+            f = positive ? SpecialFunctions.besselj : SpecialFunctions.besseli
+            return sqrt(π_) * t^ν * f(ν, k * t) / ((2k)^ν * invoke_cmd(:Gamma, ν + 1 // 2))
+        end
+    end
+    m = _power_and_call(G, s)
+    (m === nothing || m[2] != "exp" || !(m[1] < 0)) && return nothing
+    p, _, u = m
+    shape = _argument_shape(u, s)
+    (shape === nothing || shape[1] !== :inv) && return nothing
+    k = shape[2]
+    ν = GiacExpr(NumNode(-p - 1))
+    positive = _positive_coefficient(k)
+    a = positive ? k : -k
+    f = positive ? SpecialFunctions.besseli : SpecialFunctions.besselj
+    return (t / a)^(ν / 2) * f(ν, 2 * sqrt(a * t))
 end
 
 function _ilaplace_by_terms(F::GiacExpr, s::GiacExpr, t::GiacExpr, depth::Int = 0)
@@ -295,7 +370,7 @@ function _ilaplace_core(G::GiacExpr, s::GiacExpr, t::GiacExpr, depth::Int)
     g === nothing || return g
     r = _giac_or_nothing(:ilaplace, G, s, t)
     _is_inverse_answer(r, s) && _laplace_verdict(r, t, G, s) !== :disagree && return r
-    for rule in (_ilaplace_pair, _ilaplace_over_s, _ilaplace_by_derivative, _ilaplace_convolution)
+    for rule in (_ilaplace_pair, _ilaplace_bessel, _ilaplace_over_s, _ilaplace_by_derivative, _ilaplace_convolution)
         r = rule(G, s, t, depth)
         r !== nothing && _is_inverse_answer(r, s) && return r
     end
@@ -492,8 +567,10 @@ function _exp_sinh_laplace(f::GiacExpr, t::GiacExpr, s0::Real)
     return (value = q, err = abs(q - q2))
 end
 
-# f at each of the points, from one GIAC call
+# f at each of the points, from one GIAC call, or compiled where it has functions GIAC has no
+# values for
 function _values_at(f::GiacExpr, t::GiacExpr, ts::Vector{Float64})
+    _has_special(f) && return _compiled_values_at(f, t, ts)
     v = try
         to_julia(invoke_cmd(:evalf, invoke_cmd(:map, giac_eval("[" * join(repr.(ts), ",") * "]"), invoke_cmd(:unapply, f, t))))
     catch e
@@ -501,5 +578,24 @@ function _values_at(f::GiacExpr, t::GiacExpr, ts::Vector{Float64})
         return nothing
     end
     (v isa AbstractVector && length(v) == length(ts) && all(x -> x isa Number, v)) || return nothing
+    return any(x -> x isa Complex, v) ? ComplexF64.(v) : Float64.(v)
+end
+
+function _compiled_values_at(f::GiacExpr, t::GiacExpr, ts::Vector{Float64})
+    g = try
+        _compile(f, (t,))
+    catch e
+        e isa ArgumentError || rethrow()
+        return nothing
+    end
+    v = map(ts) do x
+        try
+            g(x)
+        catch e
+            e isa DomainError || rethrow()
+            g(complex(x))
+        end
+    end
+    all(x -> x isa Number, v) || return nothing
     return any(x -> x isa Complex, v) ? ComplexF64.(v) : Float64.(v)
 end

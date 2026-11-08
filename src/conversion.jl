@@ -99,7 +99,9 @@ function _convert_by_type(g::GiacExpr, t::T)
         # variables, reduce it numerically through evalf and recurse — this
         # is what callers asking "give me a Julia value" almost always want
         # (Issue #3). Otherwise return the GiacExpr unchanged.
-        if is_constant(g)
+        v = _special_constant_value(g)
+        v === nothing || return v
+        if _has_value(g)
             # 18 digits, not `evalf`'s default. With no argument Giac reduces
             # to a DOUBLE and prints it at the global `Digits` — 12 — so every
             # constant reached Julia with four digits missing and
@@ -239,7 +241,9 @@ function Base.AbstractFloat(ex::GiacExpr)
     # 18 digits, not 16: a Float64 needs 17 to round-trip, and rounding the
     # exact value to 17 first still costs an ulp on values such as sqrt(2).
     # STRNG is excluded — a Giac string is constant, and is not a number.
-    if T != STRNG && is_constant(ex)
+    v = _special_constant_value(ex)
+    v === nothing || return float(v)
+    if T != STRNG && _has_value(ex)
         value = to_julia(Commands.evalf(ex, 18))
         value isa Number && return float(value)
     end

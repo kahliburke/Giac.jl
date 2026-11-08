@@ -1,6 +1,8 @@
 # Laplace transforms: GIAC's answers checked against the defining integral, and the transforms it
 # misses found term by term
 
+import SpecialFunctions
+
 @testset "Laplace transforms" begin
     @giac_var t s a
     C = Giac.Commands
@@ -18,6 +20,7 @@
         @test at(L(exp(-t^2)), s, 1.7) ≈ at(sqrt(π_) / 2 * erfc_half, s, 1.7)
         @test at(L(sqrt(t) * exp(2t)), s, 3.5) ≈ at(sqrt(π_) / (2(s - 2)^(3 // 2)), s, 3.5)
         @test occursin("laplace", string(L(Giac.invoke_cmd(:BesselJ, 0, t))))           # held, not infinity
+        @test occursin("laplace", string(L(Giac.invoke_cmd(:Ci, t) * sqrt(t))))          # held
         @test Giac._laplace_verdict(C.erf(t), t, -C.erf(s / 2) * exp(s^2 / 4) / s, s) === :disagree
     end
 
@@ -46,6 +49,25 @@
         @test at(IL(exp(-sqrt(s))), t, 0.8) ≈ at(exp(-1 / (4t)) / (2sqrt(π_) * t^(3 // 2)), t, 0.8)
         @test IL(exp(-1 / s) / sqrt(s)) == cos(2sqrt(t)) / sqrt(π_ * t)
         @test IL(exp(1 / s) / s^(3 // 2)) == sinh(2sqrt(t)) / sqrt(π_)
+    end
+
+    @testset "Bessel functions" begin
+        J, I, K, Y = SpecialFunctions.besselj, SpecialFunctions.besseli, SpecialFunctions.besselk, SpecialFunctions.bessely
+        @giac_var ν
+        @test L(J(0, t)) == 1 / sqrt(s^2 + 1)
+        @test L(J(ν, a * t)) == (sqrt(s^2 + a^2) - s)^ν / (a^ν * sqrt(s^2 + a^2))
+        @test L(I(0, 2t)) == 1 / sqrt(s^2 - 4)
+        @test L(J(1, t) / t) == sqrt(s^2 + 1) - s
+        @test L(t * J(0, t)) == s / (s^2 + 1)^(3 // 2)
+        @test L(J(0, 2sqrt(t))) == exp(-1 / s) / s
+        @test at(L(K(0, t)), s, 1.7) ≈ at(log(s + sqrt(s^2 - 1)) / sqrt(s^2 - 1), s, 1.7)
+        @test at(L(Y(0, t)), s, 1.7) ≈ at(-2asinh(s) / (π_ * sqrt(s^2 + 1)), s, 1.7)
+        @test L(exp(-t) * J(0, t)) == 1 / sqrt((s + 1)^2 + 1)
+        @test IL(1 / sqrt(s^2 + 1)) == J(0, t)
+        @test IL(1 / sqrt(s^2 - 4)) == I(0, 2t)
+        @test IL((s^2 + 1)^(-3 // 2)) == t * J(1, t)
+        @test IL(exp(-1 / s) / s) == J(0, 2sqrt(t))
+        @test IL(1 / sqrt(s^2 + 2s + 2)) == exp(-t) * J(0, t)
     end
 
     @testset "transforms from the theorems" begin

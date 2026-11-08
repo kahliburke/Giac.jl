@@ -171,7 +171,12 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
     # a simplify that writes trigonometric functions in angles the expression did not have, and is
     # not clearly shorter for it, is not taken (trig_simplify.jl)
     if cmd === :simplify && length(args) == 1 && args[1] isa GiacExpr && !_fastpath_disabled[]
-        return parentmodule(@__MODULE__)._trig_safe_simplify(args[1])
+        return parentmodule(@__MODULE__)._simplify_cmd(args[1])
+    end
+
+    # Bessel and Airy functions at numbers have their values from SpecialFunctions (special_functions.jl)
+    if cmd === :evalf && !isempty(args) && args[1] isa GiacExpr && parentmodule(@__MODULE__)._has_special(args[1])
+        return parentmodule(@__MODULE__)._evalf_special(args...)
     end
 
     # a polynomial is expanded as a polynomial (collect.jl)
