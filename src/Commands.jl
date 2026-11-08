@@ -186,6 +186,13 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._product_cmd(args...)
     end
 
+    # Laplace transforms are checked, and found term by term where GIAC fails (laplace.jl)
+    if cmd === :laplace && length(args) == 3
+        return parentmodule(@__MODULE__)._laplace_cmd(args...)
+    elseif cmd in (:ilaplace, :invlaplace) && length(args) == 3
+        return parentmodule(@__MODULE__)._ilaplace_cmd(args...)
+    end
+
     # complex solutions GIAC gives as decimals are found exactly where the equations are (exact_solve.jl)
     if cmd === :cSolve && length(args) == 2 && !parentmodule(@__MODULE__)._plain_csolve()
         return parentmodule(@__MODULE__)._csolve_cmd(args...)
