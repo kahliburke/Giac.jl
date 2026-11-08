@@ -83,9 +83,9 @@ Dict(k => length(v) for (k, v) in selections)
 Locked: it runs only when run deliberately. The integrals are shared among several worker processes, each a Julia with Giac.jl that integrates one integral after another, as a session would, after a few integrals of each kind that compile the code they share, so that no timed integral includes compiling it. An integral without an answer in 30 seconds has its worker stopped and replaced: GIAC's own timeout leaves the process unusable once it fires. Each result is kept as it comes, so a run that is stopped continues where it left off when run again under the same name.
 """
 
-#%% code id=units
+#%% code id=units nocache
 # the selection to integrate, as the sweep's units: the integrals GIAC can state (the others are
-# N/A without a run), and what integrates them
+# N/A without a run), and what integrates them. Never cached: `code_version` reads the checkouts.
 run_selection = "sample"
 units = [S.unit(e) for e in selections[run_selection] if e.integrand !== nothing]
 version = S.code_version()
@@ -95,8 +95,25 @@ version = S.code_version()
 # Each integral is a unit: integrated by Giac.jl with a 30 s limit, then graded. A process takes a
 # chunk of units in turn, as one session would. `version` names the code: a change to Giac.jl,
 # its wrapper library or the grading starts a new sweep. GIAC runs on a thread of its own
-# (DedicatedThreads), which lets `with_timeout` stop an integration that runs over.
-integration = @sweep(paramgrid(units); plot = false) do p
+# (DedicatedThreads), which lets `with_timeout` stop an integration that runs over. The card
+# draws each chapter's grades as they land.
+grade_colours = ["A" => "#4eee94", "B" => "#9acd32", "C" => "#daa520", "?" => "#999999", "F" => "#ff6347",
+                 "F(-1)" => "#da70d6", "F(-2)" => "#9370db"]
+function grade_chart(rows)
+    landed = [r for r in rows if r.status == "ok" && r.record !== nothing]
+    isempty(landed) && return nothing
+    chapters = unique(r.params.chapter for r in landed)
+    n = Dict(c => count(r -> r.params.chapter == c, landed) for c in chapters)
+    share(c, g) = round(count(r -> r.params.chapter == c && r.record.grade == g, landed) / n[c]; digits = 3)
+    solved(c) = round(Int, 100 * count(r -> r.params.chapter == c && r.record.correct == 1, landed) / n[c])
+    echart(; title = (text = "grades by chapter, as they land", left = "center"),
+           yAxis = (type = :category, inverse = true, data = ["$c ($(n[c]), $(solved(c))% solved)" for c in chapters]),
+           xAxis = (type = :value, max = 1, name = "share"), grid = (left = 300, right = 30),
+           legend = (top = 28,), height = 420,
+           series = [(type = :bar, name = g, stack = "grades", itemStyle = (color = colour,),
+                      data = [share(c, g) for c in chapters]) for (g, colour) in grade_colours])
+end
+integration = @sweep(paramgrid(units); plot = grade_chart) do p
     using DedicatedThreads, Giac
     isdefined(Main, :IntegrationGrading) ||
         Base.include(Main, joinpath(pkgdir(Giac), "bench", "integration_suite", "grading.jl"))

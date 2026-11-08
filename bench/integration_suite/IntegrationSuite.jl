@@ -277,10 +277,10 @@ end
 """
     unit(e::Integral)
 
-What a sweep's unit needs of an integral: its integrand and variable, and what is known of its
-optimal antiderivative ("" and 0 when nothing is).
+What a sweep's unit needs of an integral: its chapter, for the sweep's chart, its integrand and
+variable, and what is known of its optimal antiderivative ("" and 0 when nothing is).
 """
-unit(e::Integral) = (id = e.id, integrand = e.integrand, variable = e.variable,
+unit(e::Integral) = (id = e.id, chapter = e.chapter, integrand = e.integrand, variable = e.variable,
                      optimal_giac = something(e.optimal_giac, ""), optimal_mma_size = something(e.optimal_mma_size, 0),
                      optimal_special = e.optimal_special, optimal_complex = e.optimal_complex)
 

@@ -159,9 +159,10 @@ end
     integrate_unit(p; limit = 30, check_limit = 60)
 
 Integrate the integral `p` (its `integrand` and `variable` in GIAC's syntax, and what is known of
-its optimal antiderivative) with Giac.jl and grade the answer: the grade, a note on it, the
-seconds the integration took, the answer and its size. An integration still running after
-`limit` seconds is stopped (F(-1)), and so is a check after `check_limit` (?).
+its optimal antiderivative) with Giac.jl and grade the answer: whether it is correct (1, a grade
+of A, B or C, else 0), the grade, a note on it, the seconds the integration took, the answer and
+its size. An integration still running after `limit` seconds is stopped (F(-1)), and so is a
+check after `check_limit` (?).
 """
 function integrate_unit(p; limit = 30, check_limit = 60)
     warm_up!()
@@ -173,8 +174,8 @@ function integrate_unit(p; limit = 30, check_limit = 60)
         error = e isa Giac.GiacTimeout ? "" : first(sprint(showerror, e), 300)
     end
     answer === nothing && return isempty(error) ?
-        (grade = "F(-1)", note = "no answer within $limit s", seconds, answer = missing, size = missing) :
-        (grade = "F(-2)", note = error, seconds, answer = missing, size = missing)
+        (correct = 0, grade = "F(-1)", note = "no answer within $limit s", seconds, answer = missing, size = missing) :
+        (correct = 0, grade = "F(-2)", note = error, seconds, answer = missing, size = missing)
     g, note = try
         Giac.with_timeout(() -> grade(answer, integrand, x, optimal_size(p.optimal_giac, p.optimal_mma_size),
                                       p.optimal_special, p.optimal_complex), check_limit)
@@ -182,7 +183,7 @@ function integrate_unit(p; limit = 30, check_limit = 60)
         ("?", e isa Giac.GiacTimeout ? "not checked within $check_limit s" : "not checked: " * first(sprint(showerror, e), 200))
     end
     size = try leaf_count(answer) catch; missing end
-    (grade = g, note, seconds, answer = string(answer), size)
+    (correct = Int(g in ("A", "B", "C")), grade = g, note, seconds, answer = string(answer), size)
 end
 
 end
