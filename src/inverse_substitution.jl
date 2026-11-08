@@ -179,11 +179,41 @@ function _with_inverse_hyperbolics(f::GiacExpr, x::GiacExpr)
     n = _node(f)
     kept = _restore_inverse_hyperbolics(n)
     isequal(kept, n) && return nothing
-    r = with_settings(:keep_acosh_asinh => true) do
-        invoke_cmd(:integrate, GiacExpr(kept), x)
-    end
+    r = with_settings(() -> invoke_cmd(:integrate, GiacExpr(kept), x), :keep_acosh_asinh => true)
     _integral_left(r) && return nothing
+    r = _without_compositions(r)
     return _is_antiderivative(r, f, x) ? r : nothing
+end
+
+# GIAC's answers with acosh and asinh kept hold cosh(acosh(u)) and the like: written without them.
+# The forms with √(u−1)√(u+1) hold for every u on the principal branches.
+const _COMPOSITIONS = Dict(
+    ("cosh", "acosh") => u -> u, ("sinh", "acosh") => u -> sqrt(u - 1) * sqrt(u + 1),
+    ("exp", "acosh") => u -> u + sqrt(u - 1) * sqrt(u + 1),
+    ("sinh", "asinh") => u -> u, ("cosh", "asinh") => u -> sqrt(1 + u^2), ("exp", "asinh") => u -> u + sqrt(1 + u^2))
+
+function _inverse_compositions(n::Node)
+    if n isa CallNode
+        args = Node[_inverse_compositions(a) for a in n.args]
+        if length(args) == 1 && args[1] isa CallNode && length(args[1].args) == 1
+            rule = get(_COMPOSITIONS, (n.f, args[1].f), nothing)
+            rule === nothing || return _node(rule(GiacExpr(args[1].args[1])))
+        end
+        # exp(k F(u)) for an integer k, as exp(F(u))ᵏ
+        if n.f == "exp" && length(args) == 1 && args[1] isa MulNode && isinteger(args[1].coef) &&
+           length(args[1].factors) == 1 && isequal(args[1].factors[1][2], _ONE)
+            F = args[1].factors[1][1]
+            if F isa CallNode && length(F.args) == 1 && haskey(_COMPOSITIONS, ("exp", F.f))
+                return _node(_COMPOSITIONS[("exp", F.f)](GiacExpr(F.args[1]))^Int(args[1].coef))
+            end
+        end
+        return _call(n.f, args)
+    elseif n isa AddNode
+        return _add((_scale(_inverse_compositions(m), c) for (m, c) in n.terms)...)
+    elseif n isa MulNode
+        return _mul(NumNode(n.coef), (_pow(_inverse_compositions(b), _inverse_compositions(e)) for (b, e) in n.factors)...)
+    end
+    return n
 end
 
 # `n` with each logarithm that is acosh or asinh written as that function

@@ -42,9 +42,22 @@ function _integrate(f::GiacExpr, x::GiacExpr)
         g = _antiderivative(f, x)
         return g === nothing ? r : g
     end
-    _integral_left(r) || return r
+    _integral_left(r) || return _without_compositions(r)
     g = _search_integral(f, x)
     return g === nothing ? r : g
+end
+
+# `r` without cosh(acosh(u)) and the like, which GIAC's integrator leaves (it keeps acosh and asinh
+# while it works), if that is shorter, as it is, or simplified, with acosh and asinh kept
+function _without_compositions(r::GiacExpr)
+    n = _node(r)
+    _any_node(m -> m isa CallNode && m.f in ("cosh", "sinh", "exp") &&
+                   _any_node(k -> k isa CallNode && k.f in ("acosh", "asinh"), m), n) || return r
+    return with_settings(:keep_acosh_asinh => true) do
+        w = GiacExpr(_inverse_compositions(n))
+        s = try invoke_cmd(:simplify, w) catch e; _stopped(e) && rethrow(); w end
+        argmin(c -> _size(_node(c)), (r, w, s))
+    end
 end
 
 # ∫ f dx by the methods after GIAC's, within the depth and time left to the search
