@@ -668,6 +668,10 @@ GIAC's `integrate`, except that where GIAC returns `infinity` for an indefinite 
 expression with derivatives of unknown functions (`∫(η′p + ηp′) dt`), the antiderivative is found by
 taking off one derivative term at a time: `∫ V u′ uᵖ dt = V uᵖ⁺¹/(p+1) - ∫ V′ uᵖ⁺¹/(p+1) dt`.
 
+Bessel functions times whole powers, `xᵖ Z_ν(kx)` with `p ± ν` odd and positive, are integrated
+by parts from `(x^ν Z_ν)′ = k x^ν Z_(ν-1)` and `(x^(-ν) Z_ν)′ = -k x^(-ν) Z_(ν+1)`, and `Ai′` and
+`x Ai` to `Ai` and `Ai′`.
+
 A definite integral on [0, 1] or [0, ∞) that GIAC leaves unevaluated is tried term by term as a
 derivative of a Beta or Gamma integral in its parameters, for terms such as
 `xᵅ (1-x)ᵝ (ln x)ᵐ (ln(1-x))ⁿ`, `xᵅ e⁻ᵏˣ (ln x)ᵐ` and `xᵅ (1+x)⁻ᵞ (ln x)ᵐ (ln(1+x))ⁿ`. A term

@@ -30,6 +30,8 @@ _share_spent(e) = e isa GiacTimeout && time() < get(task_local_storage(), :giac_
 
 # `Commands.integrate(f, x)`
 function _integrate(f::GiacExpr, x::GiacExpr)
+    g = _special_terms_integral(f, x)                  # Bessel and Airy functions (special_functions.jl)
+    g === nothing || return g
     limit = get(task_local_storage(), :giac_cancel, nothing)
     r = try
         limit === nothing ? invoke_cmd(:integrate, f, x) :

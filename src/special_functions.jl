@@ -221,3 +221,84 @@ function _whole_difference(a::Node, b::Node)
     d = _node(GiacExpr(a) - GiacExpr(b))
     return d isa NumNode && d.v isa Integer ? Int(d.v) : nothing
 end
+
+# ---------------------------------------------------------------------------------------------
+# Antiderivatives
+# ---------------------------------------------------------------------------------------------
+
+# ∫ f dx term by term where f has the functions in it: theirs from the rules below, the others by
+# the whole integration; nothing where a term is not integrated
+function _special_terms_integral(f::GiacExpr, x::GiacExpr)
+    _has_special(f) || return nothing
+    parts = GiacExpr[]
+    for m in _terms(_node(f))
+        g = _has_special(m) ? _special_integral(GiacExpr(m), x) : _integrate_or_nothing(GiacExpr(m), x)
+        g === nothing && return nothing
+        push!(parts, g)
+    end
+    return sum(parts)
+end
+
+# ∫ c xᵖ Z_ν(kx) dx, from
+#     (x^μ Z_μ(kx))' = k x^μ Z_(μ-1)(kx),   (x^(-μ) Z_μ(kx))' = -k x^(-μ) Z_(μ+1)(kx)
+# for Z = J, Y, H⁽¹⁾, H⁽²⁾ (I takes + in the second, K - in the first), by parts down to one of
+# them: where p - ν is odd and positive, ∫ xᵖ Z_ν = xᵖ Z_(ν+1)/k - (p-ν-1)/k ∫ xᵖ⁻¹ Z_(ν+1),
+# and where p + ν is, ∫ xᵖ Z_ν = -xᵖ Z_(ν-1)/k + (p+ν-1)/k ∫ xᵖ⁻¹ Z_(ν-1). Airy functions:
+# ∫ Ai' = Ai and ∫ x Ai = Ai'. Nothing for other integrands.
+function _special_integral(f::GiacExpr, x::GiacExpr)
+    n = _node(f)
+    c, rest = n isa MulNode ? (GiacExpr(NumNode(n.coef)), n.factors) : (one(GiacExpr), Pair{Node, Node}[n => _ONE])
+    p, call = 0, nothing
+    for (b, e) in rest
+        factor = _pow(b, e)
+        if !(string(x) in _symbol_names(factor))
+            c *= GiacExpr(factor)
+        elseif b isa SymNode && b.name == string(x) && e isa NumNode && e.v isa Integer
+            p += e.v
+        elseif call === nothing && _is_one_node(e) && _special_name(b) !== nothing
+            call = b
+        else
+            return nothing
+        end
+    end
+    call === nothing && return nothing
+    g = _special_antiderivative(_special_name(call), call, p, x)
+    return g === nothing ? nothing : c * g
+end
+
+_is_one_node(e::Node) = e isa NumNode && isone(e.v)
+
+function _special_antiderivative(f::String, call::CallNode, p::Integer, x::GiacExpr)
+    name = string(x)
+    if f in _AIRY
+        u = call.args[2]
+        (u isa SymNode && u.name == name) || return nothing
+        f == "airyaiprime" && p == 0 && return GiacExpr(_special("airyai", u))
+        f == "airybiprime" && p == 0 && return GiacExpr(_special("airybi", u))
+        f == "airyai" && p == 1 && return GiacExpr(_special("airyaiprime", u))
+        f == "airybi" && p == 1 && return GiacExpr(_special("airybiprime", u))
+        return nothing
+    end
+    ν, u = GiacExpr(call.args[2]), call.args[3]
+    _depends_on(ν, x) && return nothing
+    (_linear_in(u, name) && _is_zero_node(_node(substitute(GiacExpr(u), x => 0)))) || return nothing
+    return _bessel_antiderivative(f, ν, u, GiacExpr(_derivative(u, name)), p, x)
+end
+
+function _bessel_antiderivative(f::String, ν::GiacExpr, u::Node, k::GiacExpr, p::Integer, x::GiacExpr)
+    Z(m) = GiacExpr(_bessel(f, _node(m), u))
+    up = _whole_difference(_node(p - ν), _ZERO)          # p - ν
+    down = _whole_difference(_node(p + ν), _ZERO)        # p + ν
+    if up !== nothing && up > 0 && isodd(up)
+        sign = f == "besselk" ? -1 : 1                   # (x^μ Z_μ)' = sign k x^μ Z_(μ-1)
+        rest = up == 1 ? zero(GiacExpr) : _bessel_antiderivative(f, ν + 1, u, k, p - 1, x)
+        rest === nothing && return nothing
+        return sign * (x^p * Z(ν + 1) - (up - 1) * rest) / k
+    elseif down !== nothing && down > 0 && isodd(down)
+        sign = f == "besseli" ? 1 : -1                   # (x^(-μ) Z_μ)' = sign k x^(-μ) Z_(μ+1)
+        rest = down == 1 ? zero(GiacExpr) : _bessel_antiderivative(f, ν - 1, u, k, p - 1, x)
+        rest === nothing && return nothing
+        return sign * (x^p * Z(ν - 1) - (down - 1) * rest) / k
+    end
+    return nothing
+end

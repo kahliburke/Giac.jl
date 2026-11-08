@@ -46,6 +46,19 @@ import SpecialFunctions as SF
         @test isempty(Giac._free_names(SF.besselj(1, two)))
     end
 
+    @testset "antiderivatives" begin
+        ∫(f) = Giac.Commands.integrate(f, x)
+        @test ∫(x * SF.besselj(0, x)) == x * SF.besselj(1, x)
+        @test ∫(SF.besselj(1, x) + x^2) == -SF.besselj(0, x) + x^3 / 3
+        @test ∫(x^3 * SF.besselj(0, x)) == x^3 * SF.besselj(1, x) - 2x^2 * SF.besselj(2, x)
+        @test ∫(x * SF.besselk(0, 3x)) == -x * SF.besselk(1, 3x) / 3
+        @test ∫(x * SF.airyai(x)) == SF.airyaiprime(x)
+        for f in (x^3 * SF.besseli(0, 2x), x^2 * SF.bessely(1, x), SF.hankelh1(1, x))
+            @test iszero(Giac.invoke_cmd(:simplify, D(∫(f)) - f))
+        end
+        @test occursin("integrate", string(∫(x^2 * SF.besselj(0, x))))        # a Struve function
+    end
+
     @testset "LaTeX" begin
         L = Giac.giac_latex
         @test L(SF.besselj(n, x)) == "J_{n}\\left(x\\right)"
