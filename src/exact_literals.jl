@@ -38,13 +38,27 @@ _exact_call(x) = Expr(:call, GlobalRef(Base, :convert), GlobalRef(@__MODULE__, :
 `expr` with its numbers kept exact: `@exact 2π * x` is 2πx with Giac's π rather than 6.283…·x,
 and `@exact sqrt(2) / 2` is √2/2. A function cannot do this, as `2π` is a float before any
 function sees it. See [`_exact_literals`](@ref Giac._exact_literals) for what is rewritten; a
-block works too.
+block works too. A name assigned an integer or a rational by the macro's own assignments (those of
+its block, not of a loop or function inside it) is bound to the Giac number, so that what is
+computed from it later is exact as well.
 
 ```julia
 @giac_var x a::positive
 φ = @exact sqrt(2 / a) * sin(2π * x / a)     # √(2/a) sin(2πx/a)
+@exact three = 3                             # a Giac 3: sqrt(three) is √3
 ```
 """
 macro exact(ex)
-    return esc(_exact_literals(ex))
+    return esc(_exact_bindings(_exact_literals(ex)))
 end
+
+_exact_bindings(ex) = ex
+function _exact_bindings(ex::Expr)
+    ex.head === :block && return Expr(:block, map(_exact_bindings, ex.args)...)
+    ex.head === :(=) && ex.args[1] isa Symbol &&
+        return Expr(:(=), ex.args[1], Expr(:call, GlobalRef(@__MODULE__, :_exact_number), _exact_bindings(ex.args[2])))
+    return ex
+end
+
+_exact_number(v::Union{Integer, Rational}) = v isa Bool ? v : convert(GiacExpr, v)
+_exact_number(v) = v

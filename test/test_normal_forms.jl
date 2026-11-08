@@ -61,6 +61,16 @@
         @giac_var a::positive
         @test string(@exact sqrt(2 / a) * sin(2π * x / a)) == string(sqrt(2 // 1 / a) * sin(2 * convert(GiacExpr, π) * x / a))
         @test !occursin(".", string(@exact 2π * x + sqrt(2)))
+        @exact three = 3
+        @test three isa GiacExpr && sqrt(three) == 3 / sqrt(three)
+        @exact begin
+            h = 1 / 2
+            n = 0
+            for k in 1:2
+                n = k                                 # not the macro's own assignment
+            end
+        end
+        @test h isa GiacExpr && string(h) == "1/2" && n === 2
         @giac_var a
     end
 end
