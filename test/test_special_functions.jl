@@ -76,6 +76,24 @@ import SpecialFunctions as SF
               "c_0*besselj(n,3*x)+c_1*bessely(n,3*x)"
     end
 
+    @testset "substitution and series" begin
+        z = convert(GiacExpr, 0)
+        @test substitute(SF.besselj(0, x), x => 0) == 1
+        @test substitute(SF.besselj(n + 1 // 2, x), n => 0) == sqrt(2 / (π_ * x)) * sin(x)
+        @test substitute(SF.besselj(0, x), x => 2.0) ≈ SF.besselj(0, 2.0)
+        Γ(p) = Giac.invoke_cmd(:Gamma, p)
+        @test SF.airyai(z) == 1 / (convert(GiacExpr, 3)^(2 // 3) * Γ(2 // 3))
+        @test to_julia(SF.airybiprime(z)) ≈ SF.airybiprime(0.0)
+        S(f, a, k) = Giac.Commands.series(f, x, a, k)
+        order(h, k) = h^(k + 1) * Giac.invoke_cmd(:order_size, h)
+        @test S(SF.besselj(0, x), 0, 4) == 1 - x^2 / 4 + x^4 / 64 + order(x, 4)
+        @test S(SF.besseli(1, 2x), 0, 3) == x + x^3 / 2 + order(x, 3)
+        @test S(SF.airyai(x), 0, 2) == SF.airyai(z) + SF.airyaiprime(z) * x + order(x, 2)
+        o = convert(GiacExpr, 1)
+        @test S(SF.besselj(1, x), 1, 1) == SF.besselj(1, o) + (SF.besselj(0, o) - SF.besselj(2, o)) / 2 * (x - 1) + order(x - 1, 1)
+        @test occursin("series", string(S(SF.besselk(0, x), 0, 2)))           # log x at 0: GIAC's
+    end
+
     @testset "LaTeX" begin
         L = Giac.giac_latex
         @test L(SF.besselj(n, x)) == "J_{n}\\left(x\\right)"

@@ -72,7 +72,15 @@ function _bessel(f::String, ν::Node, x::Node)
     return _special(f, ν, x)
 end
 
+# Ai(0) = 1/(3^(2/3) Γ(2/3)), Ai'(0) = -1/(3^(1/3) Γ(1/3)), Bi(0) = 1/(3^(1/6) Γ(2/3)),
+# Bi'(0) = 3^(1/6)/Γ(1/3)
 function _airy(f::String, x::Node)
+    if _is_zero_node(x)
+        three, Γ = convert(GiacExpr, 3), p -> invoke_cmd(:Gamma, p)
+        v = f == "airyai" ? 1 / (three^(2 // 3) * Γ(2 // 3)) : f == "airyaiprime" ? -1 / (three^(1 // 3) * Γ(1 // 3)) :
+            f == "airybi" ? 1 / (three^(1 // 6) * Γ(2 // 3)) : three^(1 // 6) / Γ(1 // 3)
+        return _node(v)
+    end
     if _inexact(x)
         v = _special_value(f, x.v)
         v === nothing || return NumNode(v)
@@ -368,4 +376,58 @@ function _monomial_degree(e::GiacExpr, x::GiacExpr)
         end
     end
     return m
+end
+
+# ---------------------------------------------------------------------------------------------
+# Series
+# ---------------------------------------------------------------------------------------------
+
+# The Taylor polynomial of degree n of f in x at a, from its derivatives on the tree, where f has
+# the functions in it and they are analytic at a; nothing at a point where a Bessel function of
+# the second kind, a K or a Hankel function, or a J or I of an order that is not whole, is not
+function _special_taylor(f::GiacExpr, x::GiacExpr, a, n::Integer)
+    _has_special(f) || return nothing
+    name = string(x)
+    terms = GiacExpr[]
+    g = _node(f)
+    for k in 0:n
+        v = GiacExpr(_node(substitute(GiacExpr(g), x => a)))
+        _singular_special(_node(v)) && return nothing
+        push!(terms, v * (x - a)^k / factorial(big(k)))
+        k == n && break
+        g = _derivative(g, name)
+        g === nothing && return nothing
+    end
+    return sum(terms)
+end
+
+# a call of the functions where it is not analytic: at 0, of Y, K or a Hankel function, or of J
+# or I of an order that is not a whole number
+_singular_special(n::Node) = _any_node(n) do m
+    f = _special_name(m)
+    (f === nothing || f in _AIRY) && return false
+    _is_zero_node(m.args[3]) || return false
+    f in ("bessely", "besselk", "hankelh1", "hankelh2") && return true
+    ν = m.args[2]
+    return !(ν isa NumNode && ν.v isa Integer)
+end
+
+# the functions in a tree read again through their rules, as after a substitution: J₀(0) = 1,
+# J_(1/2) in sin, a float argument to its value
+_rebuilt_specials(e::GiacExpr) = _has_special(e) ? GiacExpr(_rebuilt_specials(_node(e))) : e
+_rebuilt_specials(n::Node) = _replace_nodes(n) do m
+    f = _special_name(m)
+    f === nothing && return nothing
+    args = Node[_rebuilt_specials(a) for a in m.args[2:end]]
+    return f in _AIRY ? _airy(f, args[1]) : _bessel(f, args[1], args[2])
+end
+
+# `series(f, x, a, n)` of an expression with the functions in it, as GIAC writes a series: the
+# Taylor polynomial and (x - a)ⁿ⁺¹ order_size(x - a); nothing for GIAC to answer
+function _special_series(f, x, a, n)
+    (f isa GiacExpr && x isa GiacExpr && _node(x) isa SymNode && n isa Integer && n >= 0) || return nothing
+    p = _special_taylor(f, x, a, n)
+    p === nothing && return nothing
+    h = x - a
+    return p + h^(n + 1) * invoke_cmd(:order_size, h)
 end

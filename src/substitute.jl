@@ -60,7 +60,7 @@ function substitute(expr::GiacExpr, dict::AbstractDict{<:GiacExpr})::GiacExpr
     expr = _substitute_functions(expr, dict)
     vars = collect(GiacExpr, keys(dict))
     vals = collect(values(dict))
-    return _take_derivatives(_giac_subst_vec_tier1(expr, vars, vals))
+    return _rebuilt_specials(_take_derivatives(_giac_subst_vec_tier1(expr, vars, vals)))
 end
 
 # A function of several variables substituted for, `ψ(x, t) => φ(x) T(t)`, is replaced in the tree

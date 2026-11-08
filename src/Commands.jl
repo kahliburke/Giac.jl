@@ -174,6 +174,14 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._simplify_cmd(args[1])
     end
 
+    # a series of Bessel and Airy functions from their derivatives, held where they are not analytic
+    # (special_functions.jl): GIAC returns such a function as its own series
+    if cmd === :series && length(args) == 4 && args[1] isa GiacExpr && args[2] isa GiacExpr && args[4] isa Integer &&
+       parentmodule(@__MODULE__)._has_special(args[1])
+        r = parentmodule(@__MODULE__)._special_series(args...)
+        return r === nothing ? parentmodule(@__MODULE__)._hold(:series, map(a -> convert(GiacExpr, a), args)) : r
+    end
+
     # Bessel and Airy functions at numbers have their values from SpecialFunctions (special_functions.jl)
     if cmd === :evalf && !isempty(args) && args[1] isa GiacExpr && parentmodule(@__MODULE__)._has_special(args[1])
         return parentmodule(@__MODULE__)._evalf_special(args...)
