@@ -62,25 +62,28 @@ end
     @test same(log(x) / (1 + x^2), 0, ∞, "0")
 end
 
+# The search for antiderivatives after GIAC's needs GIAC on a thread of its own
 @testset "Substituting for an inverse function" begin
-    @giac_var x
-    C = Giac.Commands
-    # GIAC fails on each (one raises an internal error); with x = sin(t)/c and the like they become
-    # polynomials in t times sines and cosines
-    for s in ("(-pi*c^2*x^2+pi)^(1/2)*(a+b*acos(c*x))", "(-c^2*d*x^2+d)^(3/2)*(a+b*asin(c*x))^2",
-              "x^2*(pi*c^2*x^2+pi)^(3/2)*(a+b*asinh(c*x))", "(a+b*asinh(c*x))/(pi*c^2*x^2+pi)^(1/2)",
-              "asin(a*x)^(5/2)/(-a^2*c*x^2+c)^(1/2)")
-        f = giac_eval(s)
+    if Giac._giac_threaded() && Giac._wrapper_interrupts()
+        @giac_var x
+        C = Giac.Commands
+        # GIAC fails on each (one raises an internal error); with x = sin(t)/c and the like they become
+        # polynomials in t times sines and cosines
+        for s in ("(-pi*c^2*x^2+pi)^(1/2)*(a+b*acos(c*x))", "(-c^2*d*x^2+d)^(3/2)*(a+b*asin(c*x))^2",
+                  "x^2*(pi*c^2*x^2+pi)^(3/2)*(a+b*asinh(c*x))", "(a+b*asinh(c*x))/(pi*c^2*x^2+pi)^(1/2)",
+                  "asin(a*x)^(5/2)/(-a^2*c*x^2+c)^(1/2)")
+            f = giac_eval(s)
+            F = C.integrate(f, x)
+            @test !occursin("integrate", string(F))
+            @test Giac._is_antiderivative(F, f, x)
+        end
+        # sines and cosines made multiple angles before integrating: no half-angle tangents
+        f = giac_eval("x^3*acos(a*x)^2")
         F = C.integrate(f, x)
-        @test !occursin("integrate", string(F))
-        @test Giac._is_antiderivative(F, f, x)
+        @test Giac._is_antiderivative(F, f, x) && !occursin("tan", string(F))
+        # sinh and cosh integrated as exponentials come back as roots, not exp(asinh(c x))
+        @test !occursin("exp", string(C.integrate(giac_eval("x^2*(pi*c^2*x^2+pi)^(3/2)*(a+b*asinh(c*x))"), x)))
     end
-    # sines and cosines made multiple angles before integrating: no half-angle tangents
-    f = giac_eval("x^3*acos(a*x)^2")
-    F = C.integrate(f, x)
-    @test Giac._is_antiderivative(F, f, x) && !occursin("tan", string(F))
-    # sinh and cosh integrated as exponentials come back as roots, not exp(asinh(c x))
-    @test !occursin("exp", string(C.integrate(giac_eval("x^2*(pi*c^2*x^2+pi)^(3/2)*(a+b*asinh(c*x))"), x)))
 end
 
 # A failed GIAC limit (a definite integral may take one) leaves GIAC's series flags changed, and

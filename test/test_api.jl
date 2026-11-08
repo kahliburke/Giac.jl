@@ -221,7 +221,7 @@ end
 
 # An inner time limit inside an outer one: the earlier of the two holds
 @testset "with_timeout nested" begin
-    if Giac._giac_threaded()
+    if Giac._giac_threaded() && Giac._wrapper_interrupts()
         # an integral GIAC works at for minutes
         slow = "x*(1+x)^(2/3)*(1-x)^(1/2)/(-(1-x)^(5/6)*(1+x)^(1/3)+(1-x)^(2/3)*(1+x)^(1/2))"
         t = @elapsed @test_throws Giac.GiacTimeout Giac.with_timeout(1) do

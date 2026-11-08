@@ -13,7 +13,9 @@
 # all of it), what it leaves over going to the next; a method's own search has only its share, and
 # a method still running at the end of its share is stopped and the next one tried. Under a time
 # limit (`with_timeout`) GIAC's first attempt has half of it; without one, the methods after it
-# have `_SEARCH_SECONDS`.
+# have `_SEARCH_SECONDS`. The search runs only with GIAC on a thread of its own (Julia started with
+# more than one thread, or DedicatedThreads loaded) and a wrapper library that interrupts it, as
+# only then can GIAC be stopped at any moment.
 
 const _SEARCH_DEPTH = 3
 const _SEARCH_SECONDS = 20.0
@@ -62,6 +64,10 @@ end
 
 # ∫ f dx by the methods after GIAC's, within the depth and time left to the search
 function _search_integral(f::GiacExpr, x::GiacExpr)
+    # the shares of time are kept by stopping GIAC, which needs GIAC on a thread of its own and a
+    # wrapper library that stops it whenever asked: without them a search could run on without end,
+    # and there is none
+    _giac_threaded() && _wrapper_interrupts() || return nothing
     tls = task_local_storage()
     depth = get(tls, :giac_integral_depth, 0)
     depth >= _SEARCH_DEPTH && return nothing
