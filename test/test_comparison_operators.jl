@@ -176,3 +176,15 @@ using Giac.Commands: assume, about, sign, purge, additionally
     end
 
 end
+
+@testset "approximate equality" begin
+    @giac_var x y
+    N(v) = convert(GiacExpr, v)
+    p = N(π)
+    @test @exact(sqrt(3) ≈ 3 / sqrt(3)) && sqrt(N(2)) ≈ 1.4142135623730951 && !(sqrt(N(2)) ≈ 1.41)
+    @test isapprox(sqrt(N(2)), 1.41; atol = 0.01) && !(p ≈ 355 // 113) && isapprox(p, 355 // 113; rtol = 1e-6)
+    @test !(N(1e-12) ≈ 0) && isapprox(N(1e-12), 0; atol = 1e-9) && exp(im * p) ≈ -1
+    # in symbols: equal, or the coefficients of the monomials approximately so
+    @test sin(x)^2 + cos(x)^2 ≈ 1 && 2.0sin(x) ≈ 2sin(x) && (x + 1e-12)^2 ≈ x^2 + 2e-12x
+    @test 1.0000000001x + y ≈ x + y && !(1.001x + y ≈ x + y) && !(x ≈ x + 1)
+end

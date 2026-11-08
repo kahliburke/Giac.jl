@@ -122,6 +122,49 @@ Base.:(==)(a::GiacExpr, b::Number) = a == convert(GiacExpr, b)
 Base.:(==)(a::Number, b::GiacExpr) = convert(GiacExpr, a) == b
 
 """
+    isapprox(a::GiacExpr, b::GiacExpr; atol = 0, rtol, nans = false)
+    a ≈ b
+
+Approximate equality, with Julia's tolerances. Expressions without free symbols are compared by
+their numeric values: `sqrt(GiacExpr(2)) ≈ 1.4142135623730951`. Expressions in symbols are equal
+if `a == b`, and otherwise compared term by term, as vectors of the numeric coefficients of their
+monomials in the symbols: `1.0000000001x + y ≈ x + y`. An expression with no numeric value, or a
+coefficient without one, is approximately equal only to what it equals.
+"""
+function Base.isapprox(a::GiacExpr, b::GiacExpr; atol::Real = 0, rtol::Real = atol > 0 ? 0 : sqrt(eps(Float64)),
+                       nans::Bool = false)
+    isequal(a, b) && return true
+    names = union(_free_names(a), _free_names(b))
+    if isempty(names)
+        x, y = _approx_value(a), _approx_value(b)
+        (x === nothing || y === nothing) && return a == b
+        return isapprox(x, y; atol, rtol, nans)
+    end
+    a == b && return true
+    vars = [giac_identifier(n) for n in sort!(collect(names))]
+    ca, cb = coefficients(a, vars), coefficients(b, vars)
+    monomials = union(keys(ca), keys(cb))
+    x = [_approx_value(get(ca, m, zero(GiacExpr))) for m in monomials]
+    y = [_approx_value(get(cb, m, zero(GiacExpr))) for m in monomials]
+    (any(isnothing, x) || any(isnothing, y)) && return false
+    return isapprox(x, y; atol, rtol, nans)
+end
+Base.isapprox(a::GiacExpr, b::Number; kw...) = isapprox(a, convert(GiacExpr, b); kw...)
+Base.isapprox(a::Number, b::GiacExpr; kw...) = isapprox(convert(GiacExpr, a), b; kw...)
+
+# the value of an expression with no free symbols as a Julia float or complex float, or nothing
+function _approx_value(e::GiacExpr)
+    v = try
+        to_julia(invoke_cmd(:evalf, e))
+    catch
+        return nothing
+    end
+    v isa Real && return Float64(v)
+    v isa Complex && return ComplexF64(v)
+    return nothing
+end
+
+"""
     isequal(a::GiacExpr, b::GiacExpr)
 
 Structural equality: the same tree, with the terms of a sum and the factors of a product in any
