@@ -225,6 +225,3 @@ function _restore_inverse_hyperbolics(n::Node)
     n isa MulNode && return _mul(NumNode(n.coef), (_pow(_restore_inverse_hyperbolics(b), _restore_inverse_hyperbolics(e)) for (b, e) in n.factors)...)
     return n
 end
-
-# the methods of the integration search, in the order they are tried
-const _INDEFINITE_METHODS = Function[_with_inverse_hyperbolics, _inverse_substitution]

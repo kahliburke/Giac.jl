@@ -86,6 +86,24 @@ end
     end
 end
 
+# Binomial differentials xᵐ (a + b xⁿ)ᵖ, which GIAC leaves unevaluated, by Chebyshev's substitutions
+@testset "Chebyshev's substitutions for binomial differentials" begin
+    if Giac._giac_threaded() && Giac._wrapper_interrupts()
+        @giac_var x
+        C = Giac.Commands
+        # (m+1)/n + p an integer, (m+1)/n an integer, p an integer, and a sum of terms
+        for s in ("1/(b*x^4+a)^(17/4)", "1/(-b*x^3+a)^(1/3)", "(b*x^4+a)^(5/4)/x^2", "x^(7/4)/(b*x+a)^(3/4)",
+                  "x^3*(b*x^2+a)^(1/3)", "1/(x*(1+x^(1/3))^2)", "(d*x^4+c)^2/(b*x^4+a)^(17/4)")
+            f = giac_eval(s)
+            F = C.integrate(f, x)
+            @test !occursin("integrate", string(F))
+            @test Giac._is_antiderivative(F, f, x)
+        end
+        # none of Chebyshev's cases: not elementary
+        @test Giac._binomial_substitution(giac_eval("(b*x^2+a)^(1/5)"), x) === nothing
+    end
+end
+
 # A failed GIAC limit (a definite integral may take one) leaves GIAC's series flags changed, and
 # later results with them; the wrapper restores the flags after each call
 @testset "A failed limit leaves later results as they were" begin
