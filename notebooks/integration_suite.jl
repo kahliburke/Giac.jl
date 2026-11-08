@@ -80,7 +80,7 @@ Dict(k => length(v) for (k, v) in selections)
 @md"""
 ## A run
 
-Locked: it runs only when run deliberately. The integrals are shared among several worker processes, each a Julia with Giac.jl that integrates one integral after another, as a session would, after a few integrals of each kind that compile the code they share, so that no timed integral includes compiling it. An integral without an answer in 30 seconds has its worker stopped and replaced: GIAC's own timeout leaves the process unusable once it fires. Each result is kept as it comes, so a run that is stopped continues where it left off when run again under the same name.
+Locked: it runs only when run deliberately. The integrals are shared among several worker processes, each a Julia with Giac.jl that integrates one integral after another, as a session would, after a few integrals of each kind that compile the code they share, so that no timed integral includes compiling it. An integral without an answer in 30 seconds is stopped (`Giac.with_timeout`) and the process goes on to the next. Each result is kept as it comes, so a run that is stopped continues where it left off when run again under the same name.
 """
 
 #%% code id=units nocache
@@ -176,6 +176,29 @@ Markdown.parse("| Run | Selection | Integrals | Giac.jl | Wrapper | Grading | GI
                join(["| $(md_text(m["name"])) | $(md_text(m["selection"])) | $(m["count"]) | $(m["version"]["giac_jl"]) | " *
                      "$(m["version"]["wrapper"]) | $(m["version"]["grading"]) | $(m["version"]["giac"]) | $(first(m["finished"], 16)) |"
                      for m in kept], "\n"))
+
+#%% code id=against_earlier
+# This run against the kept run before it, on the integrals both have: per chapter, the share each
+# solved, and how many this one solves that the earlier did not, and the reverse
+earlier = [m for m in kept if m["name"] != run_name]
+if isempty(earlier)
+    Markdown.parse("No earlier run to compare with.")
+else
+    earlier_name = last(sort(earlier; by = m -> string(m["finished"])))["name"]
+    before = Dict(r.id => r for r in S.load_results(earlier_name))
+    is_solved(r) = r.grade in ("A", "B", "C")
+    both = [(e = x.e, now = x.r, then = before[x.r.id]) for x in graded if haskey(before, x.r.id)]
+    rows = map(unique(string(y.e.chapter) for y in both)) do c
+        ys = [y for y in both if string(y.e.chapter) == c]
+        n = length(ys)
+        pct(f) = round(Int, 100 * count(f, ys) / n)
+        (c, n, pct(y -> is_solved(y.then)), pct(y -> is_solved(y.now)),
+         count(y -> is_solved(y.now) && !is_solved(y.then), ys), count(y -> is_solved(y.then) && !is_solved(y.now), ys))
+    end
+    Markdown.parse("Against **$(md_text(earlier_name))**, on $(length(both)) integrals both have.\n\n" *
+                   "| Chapter | Integrals | Solved then | Solved now | Gained | Lost |\n|:--|--:|--:|--:|--:|--:|\n" *
+                   join(["| $c | $n | $a% | $b% | $g | $l |" for (c, n, a, b, g, l) in rows], "\n"))
+end
 
 #%% code id=grades_plot
 let systems = ["Giac.jl"; [S.SYSTEM_NAMES[s] for s in S.SYSTEMS_2024]]
