@@ -59,6 +59,23 @@ import SpecialFunctions as SF
         @test occursin("integrate", string(∫(x^2 * SF.besselj(0, x))))        # a Struve function
     end
 
+    @testset "Bessel's and Airy's equations" begin
+        @giac_var y(x)
+        d(f, k = 1) = Giac.Commands.diff(f, x, k)
+        for (L, head) in ((Y -> x^2 * d(Y, 2) + x * d(Y) + (x^2 - 4) * Y, "besselj"),
+                          (Y -> x^2 * d(Y, 2) + x * d(Y) + (9x^2 - n^2) * Y, "bessely"),
+                          (Y -> x^2 * d(Y, 2) + x * d(Y) - (x^2 + 1) * Y, "besselk"),
+                          (Y -> x * d(Y, 2) + d(Y) + x * Y, "besselj"),
+                          (Y -> d(Y, 2) - x * Y, "airyai"),
+                          (Y -> d(Y, 2) + 4x * Y, "airybi"))
+            sol = Giac.Commands.desolve(L(y) ~ 0, y)
+            @test occursin(head, string(sol))
+            @test iszero(Giac.invoke_cmd(:simplify, L(sol)))
+        end
+        @test string(Giac.Commands.desolve(x^2 * d(y, 2) + x * d(y) + (9x^2 - n^2) * y ~ 0, y)) ==
+              "c_0*besselj(n,3*x)+c_1*bessely(n,3*x)"
+    end
+
     @testset "LaTeX" begin
         L = Giac.giac_latex
         @test L(SF.besselj(n, x)) == "J_{n}\\left(x\\right)"

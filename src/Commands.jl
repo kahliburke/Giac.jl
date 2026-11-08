@@ -720,9 +720,12 @@ function desolve(eqs, y::GiacExpr)
         err isa GiacError || rethrow()
         err
     end
-    # an equation GIAC gives up on is tried as an Euler–Cauchy equation (ode_transforms.jl)
+    # an equation GIAC gives up on is tried as an Euler–Cauchy equation (ode_transforms.jl), and as
+    # Bessel's or Airy's (special_functions.jl)
     if eqs isa GiacExpr && (r isa GiacError || parentmodule(@__MODULE__)._gave_up(r))
         v = parentmodule(@__MODULE__)._euler_cauchy(eqs, giac_eval(String(t)), y)
+        v === nothing || return v
+        v = parentmodule(@__MODULE__)._bessel_equation(eqs, giac_eval(String(t)), y)
         v === nothing || return v
     end
     r isa GiacError && throw(r)

@@ -302,3 +302,70 @@ function _bessel_antiderivative(f::String, ν::GiacExpr, u::Node, k::GiacExpr, p
     end
     return nothing
 end
+
+# ---------------------------------------------------------------------------------------------
+# Equations
+# ---------------------------------------------------------------------------------------------
+
+# The general solution of y'' + P y' + Q y = 0 where it is of Bessel's or Airy's form: with
+# a = (1 - xP)/2 constant and x²Q = A + B x^m,
+#     y = x^a (C₁ Z_ν(b x^c) + C₂ W_ν(b x^c)),   c = m/2, b = √|B|/c, ν = √(a² - A)/c,
+# Z, W = J, Y where B > 0 and I, K where B < 0; and for P = 0, Q = -k x, y = C₁ Ai(k^(1/3) x) +
+# C₂ Bi(k^(1/3) x). Nothing for other equations.
+function _bessel_equation(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
+    c = _linear_coefficients(eq, x, y)
+    (c === nothing || length(c.q) != 3 || !_is_zero_expr(c.f)) && return nothing
+    P = invoke_cmd(:simplify, c.q[2] / c.q[3])
+    Q = invoke_cmd(:simplify, c.q[1] / c.q[3])
+    C1, C2 = GiacExpr(SymNode("c_0")), GiacExpr(SymNode("c_1"))
+    if _is_zero_expr(P)
+        k = -invoke_cmd(:simplify, Q / x)
+        if !_depends_on(k, x)
+            r = cbrt(k)
+            return C1 * SpecialFunctions.airyai(r * x) + C2 * SpecialFunctions.airybi(r * x)
+        end
+    end
+    a = invoke_cmd(:simplify, (1 - x * P) / 2)
+    _depends_on(a, x) && return nothing
+    X = invoke_cmd(:expand, x^2 * Q)
+    A = substitute(X, x => 0)
+    rest = invoke_cmd(:simplify, X - A)
+    m = _monomial_degree(rest, x)
+    (m === nothing || iszero(m)) && return nothing
+    B = invoke_cmd(:simplify, rest / x^m)
+    half = GiacExpr(NumNode(m // 2))
+    positive = _positive_coefficient(B)
+    b = _square_root(positive ? B : -B) / abs(half)
+    ν = _square_root(invoke_cmd(:simplify, (a^2 - A) / half^2))
+    u = b * x^half
+    Z, W = positive ? (SpecialFunctions.besselj, SpecialFunctions.bessely) : (SpecialFunctions.besseli, SpecialFunctions.besselk)
+    return x^a * (C1 * Z(ν, u) + C2 * W(ν, u))
+end
+
+# √e with the even powers in it halved, n for n², as an order or a scale may be taken either sign
+function _square_root(e::GiacExpr)
+    n = _node(e)
+    if n isa MulNode && n.coef isa Union{Integer, Rational} && n.coef > 0 &&
+       all(((b, k),) -> k isa NumNode && k.v isa Integer && iseven(k.v), n.factors)
+        r = sqrt(GiacExpr(NumNode(n.coef)))
+        return r * GiacExpr(_mul((_pow(b, NumNode(k.v ÷ 2)) for (b, k) in n.factors)...))
+    end
+    return sqrt(e)
+end
+
+# the exponent m of a monomial B xᵐ in x, B free of x; nothing for anything else
+function _monomial_degree(e::GiacExpr, x::GiacExpr)
+    n = _node(e)
+    n isa SymNode && n.name == string(x) && return 1
+    n isa MulNode || return nothing
+    m = nothing
+    for (b, k) in n.factors
+        if b isa SymNode && b.name == string(x)
+            (k isa NumNode && k.v isa Union{Integer, Rational}) || return nothing
+            m = k.v
+        elseif string(x) in _symbol_names(_pow(b, k))
+            return nothing
+        end
+    end
+    return m
+end
