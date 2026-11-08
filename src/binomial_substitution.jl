@@ -87,8 +87,20 @@ function _binomial_term(t::Node, x::SymNode)
     return (_mul(coef...), m, binomial, p)
 end
 
-# f as a sum of binomial terms, at least one with a fractional power; or nothing
+# whether `n` is made of x and expressions free of it by sums, products and rational powers
+_algebraic_in(n::Node, x::SymNode) = _free_of(n, x) || _is_symbol(n, x) ||
+    (n isa AddNode && all(((m, c),) -> _algebraic_in(m, x), n.terms)) ||
+    (n isa MulNode && all(((b, e),) -> _algebraic_in(b, x) && _rational(e) !== nothing, n.factors)) ||
+    (n isa CallNode && n.f == "sqrt" && length(n.args) == 1 && _algebraic_in(n.args[1], x))
+
+# whether one of Chebyshev's cases holds for xᵐ (a + b xⁿ)ᵖ
+_chebyshev_case(m, binomial, p) = binomial === nothing || isinteger(p) || isinteger((m + 1) / binomial[3]) ||
+                                  isinteger((m + 1) / binomial[3] + p)
+
+# f as a sum of binomial terms, each in one of Chebyshev's cases and at least one with a fractional
+# power; or nothing
 function _binomial_terms(f::Node, x::SymNode)
+    _algebraic_in(f, x) || return nothing
     one_term = _binomial_term(f, x)
     terms = if one_term !== nothing
         [one_term]
@@ -100,6 +112,7 @@ function _binomial_terms(f::Node, x::SymNode)
         ts
     end
     any(((c, m, B, p),) -> !isinteger(m) || !isinteger(p) || (B !== nothing && !isinteger(B[3])), terms) || return nothing
+    all(((c, m, B, p),) -> _chebyshev_case(m, B, p), terms) || return nothing
     return terms
 end
 
