@@ -232,3 +232,14 @@ end
         @test t < 20
     end
 end
+
+# Calls under a time limit return as soon as GIAC does, though the watcher that would stop them
+# shares a thread with their callers
+@testset "with_timeout's calls return at once" begin
+    if Giac._giac_threaded()
+        e = giac_eval("x^2+1")
+        calls() = for _ in 1:50; Giac.invoke_cmd(:simplify, e); end
+        Giac.with_timeout(calls, 10)
+        @test @elapsed(Giac.with_timeout(calls, 10)) < 1
+    end
+end

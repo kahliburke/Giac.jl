@@ -164,12 +164,17 @@ const _WATCHER = Ref{Union{Nothing, Task}}(nothing)
 const _WATCHER_LOCK = ReentrantLock()
 const _WATCH = Threads.Condition()          # notified when a job with a cancel check starts
 
-# A tenth of a second's wait that needs neither Julia's event loop, which may not be run while
-# every other thread is idle and GIAC computes, nor holds up a garbage collection
-function _nap()
+# A tenth of a second's wait while `job` runs, that needs neither Julia's event loop, which may not
+# be run while every other thread is idle and GIAC computes, nor holds up a garbage collection. It
+# waits a millisecond at a time and gives way to other tasks between, as the thread it holds is
+# shared: a GIAC call's caller may be waiting there for its reply. It ends when the job does.
+function _nap(job)
     @static if VERSION >= v"1.12"
-        @ccall gc_safe = true usleep(100_000::Cuint)::Cint
-        yield()
+        for _ in 1:100
+            @ccall gc_safe = true usleep(1_000::Cuint)::Cint
+            yield()
+            _RUNNING[] === job || break
+        end
     else
         sleep(0.1)
     end
@@ -194,9 +199,9 @@ function _start_cancel_watcher()
                     wait(_WATCH)
                 end
             end
-            _nap()
             job = _RUNNING[]
-            _watched(job) && (try Base.invokelatest(job.check) catch; false end) && _cancel_job!(job)
+            _nap(job)
+            _RUNNING[] === job && _watched(job) && (try Base.invokelatest(job.check) catch; false end) && _cancel_job!(job)
         end
     end
     return
