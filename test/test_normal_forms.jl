@@ -61,6 +61,7 @@
         @giac_var a::positive
         @test string(@exact sqrt(2 / a) * sin(2π * x / a)) == string(sqrt(2 // 1 / a) * sin(2 * convert(GiacExpr, π) * x / a))
         @test !occursin(".", string(@exact 2π * x + sqrt(2)))
+        @test @exact(sqrt(1/2)) == 1 / sqrt(convert(GiacExpr, 2)) && !occursin(".", string(@exact sqrt(1/2)))
         @exact three = 3
         @test three isa GiacExpr && sqrt(three) == 3 / sqrt(three)
         @exact begin

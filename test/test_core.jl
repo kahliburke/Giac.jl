@@ -33,6 +33,12 @@
         @test S(N(typemax(Int)) + 1) == "9223372036854775808"
         @test S(sqrt(N(2))^2) == "2" && S(N(4)^(1 // 2)) == "2"
         @test S(N(im) * N(im)) == "-1"
+        # an integer's root takes in the powers of the integer in its coefficient
+        r3 = sqrt(N(3))
+        @test S(r3 - 3 / r3) == "0" && S(6 / r3) == "2*sqrt(3)" && S(r3 / 3) == "1/sqrt(3)"
+        @test S(N(3)^(3 // 2)) == "3*sqrt(3)" && S(N(3)^(-3 // 2)) == "1/(3*sqrt(3))"
+        @test S(x * r3 / 3 + x / r3) == "2*x/sqrt(3)" && S(r3 / 3 - 1 / r3) == "0"
+        @test S(-1 / sqrt(N(2)) - 3 / sqrt(N(2))) == "-2*sqrt(2)"           # like terms merged, then folded
         @test to_julia(N(3) / 4) === 3 // 4 && to_julia(x - x + 5) === 5
     end
 

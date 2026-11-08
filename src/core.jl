@@ -154,8 +154,13 @@ function _scale(m::Node, c::Number)
     iszero(c) && return NumNode(c isa AbstractFloat ? 0.0 : 0)
     (m === _UNIT || isequal(m, _UNIT)) && return NumNode(c)
     isone(c) && return m
+    # an integer's root takes in the integer's powers in the new coefficient (see `_mul`)
+    _has_numeric_root(m) && return _mul(NumNode(c), m)
     return m isa MulNode ? MulNode(c, m.factors) : MulNode(c, Pair{Node, Node}[m => _ONE])
 end
+
+_has_numeric_root(m::Node) = false
+_has_numeric_root(m::MulNode) = any(((b, e),) -> b isa NumNode && b.v isa Integer && e isa NumNode && e.v isa Rational, m.factors)
 
 _add(a::NumNode, b::NumNode) = NumNode(_nadd(a.v, b.v))
 
@@ -213,6 +218,14 @@ function _mul(xs::Node...)
         elseif b isa NumNode && e isa NumNode && e.v isa Integer
             p = _npow(b.v, e.v)
             p === nothing ? push!(kept, b => e) : (coef = _nmul(coef, p))
+        elseif b isa NumNode && b.v isa Integer && b.v > 1 && e isa NumNode && e.v isa Rational && coef isa Union{Integer, Rational}
+            # the powers of the base in the coefficient go into its exponent, and the whole part of
+            # that comes out, leaving one between -1 and 1: 3/√3 = √3, 3^(3/2) = 3√3, √3/3 = 1/√3
+            k = _multiplicity(b.v, coef)
+            t = e.v + k
+            w = trunc(Integer, t)
+            coef = _nmul(coef, _npow(b.v, w - k))
+            push!(kept, b => NumNode(_canonical(t - w)))
         else
             push!(kept, b => e)
         end
@@ -221,6 +234,21 @@ function _mul(xs::Node...)
     isempty(kept) && return NumNode(coef)
     _isone_exact(coef) && length(kept) == 1 && isequal(last(kept[1]), _ONE) && return first(kept[1])
     return MulNode(coef, kept)
+end
+
+# the power of the integer b > 1 in the rational c: 2 for 18 and b = 3, -1 for 1/6 and b = 2
+function _multiplicity(b::Integer, c)
+    k = 0
+    num, den = numerator(c), denominator(c)
+    while !iszero(num) && iszero(rem(num, b))
+        num = div(num, b)
+        k += 1
+    end
+    while iszero(rem(den, b))
+        den = div(den, b)
+        k -= 1
+    end
+    return k
 end
 
 # e^a e^b as e^{a+b}, for exponentials to whole powers
@@ -259,7 +287,7 @@ function _pow(b::Node, e::Node)
         end
         r = _numeric_root(b.v, e.v)
         r === nothing || return r
-        return MulNode(1, Pair{Node, Node}[b => e])
+        return _mul(MulNode(1, Pair{Node, Node}[b => e]))
     end
     if b isa MulNode && e isa NumNode && e.v isa Integer
         # an integer power distributes over a product

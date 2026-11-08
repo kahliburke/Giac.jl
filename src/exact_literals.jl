@@ -5,10 +5,11 @@
     _exact_literals(ex)
 
 The code `ex` with the constants and literal arithmetic Julia would evaluate in floating point
-made exact: `π` and `pi` as Giac's π, `ℯ` as e, `sqrt(2)` and `cbrt(2)` of an integer literal as
-roots, `2^(1//3)` of an integer literal to a fractional power as a root, and `1/2` of two integer
-literals as a `Rational`. Integer arithmetic and float literals are left as written. Meant for the
-symbolic code a macro runs, not for numeric code, where π should stay a float.
+made exact: `π` and `pi` as Giac's π, `ℯ` as e, `sqrt(2)` and `cbrt(2)` of an integer literal or
+a fraction of two (`sqrt(1/2)`) as roots, `2^(1//3)` of an integer literal to a fractional power
+as a root, and `1/2` of two integer literals as a `Rational`. Integer arithmetic and float
+literals are left as written. Meant for the symbolic code a macro runs, not for numeric code,
+where π should stay a float.
 """
 _exact_literals(ex) = ex
 function _exact_literals(s::Symbol)
@@ -18,8 +19,9 @@ function _exact_literals(s::Symbol)
 end
 function _exact_literals(ex::Expr)
     ex.head in (:quote, :inert, :macrocall) && return ex
-    if ex.head === :call && length(ex.args) == 2 && ex.args[1] in (:sqrt, :cbrt) && ex.args[2] isa Integer
-        return Expr(:call, GlobalRef(Base, ex.args[1]), _exact_call(ex.args[2]))
+    if ex.head === :call && length(ex.args) == 2 && ex.args[1] in (:sqrt, :cbrt)
+        a = _exact_literals(ex.args[2])
+        _is_literal_number(a) && return Expr(:call, GlobalRef(Base, ex.args[1]), _exact_call(a))
     end
     if ex.head === :call && length(ex.args) == 3 && ex.args[1] === :/ && ex.args[2] isa Integer && ex.args[3] isa Integer
         return Expr(:call, GlobalRef(Base, ://), ex.args[2], ex.args[3])
@@ -29,6 +31,10 @@ function _exact_literals(ex::Expr)
     end
     return Expr(ex.head, map(_exact_literals, ex.args)...)
 end
+
+# an integer literal, or a fraction of two as rewritten above
+_is_literal_number(a) = a isa Integer ||
+    a isa Expr && a.head === :call && length(a.args) == 3 && a.args[1] == GlobalRef(Base, ://) && all(x -> x isa Integer, a.args[2:3])
 
 _exact_call(x) = Expr(:call, GlobalRef(Base, :convert), GlobalRef(@__MODULE__, :GiacExpr), x)
 
