@@ -36,7 +36,8 @@ end
     @test T(Giac.Commands.ln(x)) == :(log(x))
     @test T(giac_eval("1/3")) == 1 // 3
     @test T(giac_eval("f(x, 2)")) == :(f(x, 2))
-    @test_throws ArgumentError T(giac_eval("erf(x)"))
+    @test T(giac_eval("erf(x)")) == Expr(:call, GlobalRef(Giac.SpecialFunctions, :erf), :x)
+    @test_throws ArgumentError T(giac_eval("Psi(x, 2)"))
 end
 
 @testset "build_function: arrays and the :julia backend" begin
