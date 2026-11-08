@@ -92,9 +92,6 @@ _is_inverse_answer(r, s::GiacExpr) = r !== nothing && _is_finite_value(r) && !_h
 # that of Si(t), which comes from that of Si'(t) = sin(t)/t
 const _TRANSFORM_DEPTH = 4
 
-_terms(n::AddNode) = Node[_scale(m, c) for (m, c) in n.terms]
-_terms(n::Node) = Node[n]
-
 _depends_on(f::GiacExpr, x::GiacExpr) = string(x) in _symbol_names(_node(f))
 
 function _laplace_by_terms(f::GiacExpr, t::GiacExpr, s::GiacExpr, depth::Int = 0)
