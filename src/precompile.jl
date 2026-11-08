@@ -36,21 +36,33 @@ function _forget_giac_objects!()
     GC.gc(true)
     _free_doomed!()
     _initialized[] = false
+    # addresses in this process
+    _GIAC_FLAGS[] = (C_NULL, C_NULL)
+    for r in (_giac_lib_handle, _cxxwrap_lib_handle, _wrapper_lib_handle,
+              GiacCxxBindings._giac_handle, GiacCxxBindings._cxxwrap_handle)
+        r[] = C_NULL
+    end
     return nothing
 end
 
-# The globals of the package's modules that hold a GIAC object, which would be stale when loaded
+# The globals of the package's modules that hold a GIAC object or an address, which would be stale
+# when loaded. A constant address is the package's own (a sentinel); CxxWrap's pointer table is
+# filled again when it loads.
 function _giac_objects_in_globals()
     found = String[]
     seen = IdSet{Any}()
     holds(v, depth) = begin
         depth > 8 && return false
-        (isbits(v) || v isa Union{Module, Function, Type, Symbol, String}) && return false
+        v isa Ptr && return depth > 0 && v != C_NULL
+        v isa Tuple && return any(e -> holds(e, depth + 1), v)
+        # a Regex is compiled again when loaded
+        (isbits(v) || v isa Union{Module, Function, Type, Symbol, String, Regex}) && return false
         v in seen && return false
         push!(seen, v)
-        v isa GiacExpr && (getfield(v, :ptr) != C_NULL || getfield(v, :replaced) != C_NULL) && return true
-        v isa GiacMatrix && getfield(v, :ptr) != C_NULL && return true
-        v isa GiacContext && getfield(v, :ptr) ∉ (C_NULL, _SHARED_CONTEXT_PTR) && return true
+        v isa GiacExpr && return getfield(v, :ptr) != C_NULL || getfield(v, :replaced) != C_NULL ||
+                                holds(getfield(v, :node), depth + 1) || holds(getfield(v, :args), depth + 1)
+        v isa GiacMatrix && return getfield(v, :ptr) != C_NULL || holds(getfield(v, :_source), depth + 1)
+        v isa GiacContext && return getfield(v, :ptr) ∉ (C_NULL, _SHARED_CONTEXT_PTR)
         parentmodule(typeof(v)) === GiacCxxBindings && return true
         v isa AbstractDict && return any(p -> holds(p.first, depth + 1) || holds(p.second, depth + 1), v)
         v isa Union{AbstractArray, Tuple, AbstractSet} && return any(e -> holds(e, depth + 1), v)
@@ -63,7 +75,7 @@ function _giac_objects_in_globals()
     while !isempty(modules)
         m = pop!(modules)
         for name in names(m; all = true)
-            isdefined(m, name) || continue
+            isdefined(m, name) && !startswith(string(name), "__cxxwrap") || continue
             v = getfield(m, name)
             if v isa Module
                 v !== m && parentmodule(v) === m && push!(modules, v)
@@ -77,7 +89,11 @@ end
 
 if ccall(:jl_generating_output, Cint, ()) == 1 && GiacCxxBindings._have_library
     Base.CoreLogging.with_logger(__init__, Base.CoreLogging.NullLogger())
-    @compile_workload _precompile_workload()
+    @compile_workload begin
+        _precompile_workload()
+        # the GIAC thread's side, which compiling runs without (calls run in place then)
+        precompile(_giac_serve, ())
+    end
     _forget_giac_objects!()
     let left = _giac_objects_in_globals()
         isempty(left) || error("GIAC objects left in globals of the package image: ", join(left, ", "))

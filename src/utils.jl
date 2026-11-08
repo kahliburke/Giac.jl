@@ -21,8 +21,22 @@ const GIAC_LOCK = ReentrantLock()
 # thread of its own instead, with any number of threads. The task starts at the first GIAC call
 # after loading, so the extension has to be loaded before then.
 
+# A job and its outcome cross between tasks as these, one type each, so that handing over a job
+# compiles once rather than for each function's closure and each result's type
+struct _GiacReply
+    ok::Bool
+    value::Any
+end
+
+struct _GiacRequest
+    f::Any
+    frame::Any
+    reply::Channel{_GiacReply}
+    job::Any
+end
+
 const _GIAC_TASK = Ref{Union{Nothing, Task}}(nothing)
-const _GIAC_INBOX = Channel{Tuple{Any, Any, Channel{Any}, Any}}(Inf)
+const _GIAC_INBOX = Channel{_GiacRequest}(Inf)
 const _GIAC_START_LOCK = ReentrantLock()
 const _ACTIVE_FRAME = Ref{Any}(nothing)     # the frame of the task whose job the GIAC thread is running
 const _INLINE_DEPTH = Ref(0)                # how deeply `GIAC_LOCK` is held when calls run in place
@@ -55,34 +69,34 @@ end
 # A job runs in the latest world: this task outlives the methods defined after it started (a
 # REPL's closures, a Revise edit), which its own world couldn't call
 function _giac_serve()
-    for (f, frame, reply, job) in _GIAC_INBOX
+    for (; f, frame, reply, job) in _GIAC_INBOX
         # a job cancelled while it waited is not run
         if !_start_job(job)
-            put!(reply, (false, InterruptException()))
+            put!(reply, _GiacReply(false, InterruptException()))
             continue
         end
         _ACTIVE_FRAME[] = frame
         result = try
-            (true, Base.invokelatest(_run_giac_job, f))
+            _GiacReply(true, Base.invokelatest(_run_giac_job, f))
         catch e
-            (false, e)
+            _GiacReply(false, e)
         finally
             _ACTIVE_FRAME[] = nothing
         end
         # a job stopped because it was cancelled ends in an InterruptException
-        _finish_job(job) && !first(result) && (result = (false, InterruptException()))
+        _finish_job(job) && !result.ok && (result = _GiacReply(false, InterruptException()))
         put!(reply, result)
     end
 end
 
-function _run_giac_job(f)
+function _run_giac_job(@nospecialize f)
     _free_doomed!()          # objects finalizers left to free, see wrapper.jl
     _sync_local_names!()
     return f()
 end
 
 # Each task waits for its replies on a channel of its own
-_reply_channel() = get!(() -> Channel{Any}(1), task_local_storage(), :giac_reply)::Channel{Any}
+_reply_channel() = get!(() -> Channel{_GiacReply}(1), task_local_storage(), :giac_reply)::Channel{_GiacReply}
 
 """
     with_giac_lock(f)
@@ -110,8 +124,8 @@ function with_giac_lock(f)
     _giac_task()
     reply = _reply_channel()
     job = _GiacJob(_cancel_predicate())
-    put!(_GIAC_INBOX, (f, _current_frame(), reply, job))
-    ok, r = try
+    put!(_GIAC_INBOX, _GiacRequest(f, _current_frame(), reply, job))
+    (; ok, value) = try
         take!(reply)
     catch e
         # the reply is still to come, so this task's next call takes a channel of its own
@@ -127,8 +141,8 @@ function with_giac_lock(f)
         end
         rethrow()
     end
-    ok || throw(r)
-    return r
+    ok || throw(value)
+    return value
 end
 
 # Note: to_julia, is_numeric, and is_symbolic have been moved to
