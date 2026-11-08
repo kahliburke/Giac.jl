@@ -501,14 +501,13 @@ const _ARRAY_PROTOCOL = Set([:axes, :copy, :cat, :stack, :reverse, :repeat, :sor
                              :cumsum, :extrema, :zeros, :rank, :nullspace, :dot, :⋅, :cross, :×])
 _giac_matrix_method(cmd::Symbol) = cmd ∉ _ARRAY_PROTOCOL
 
+# whether the command functions are made: while the package compiled (precompile.jl), so in its
+# image, or by this process's load of it
+const _COMMANDS_MADE = Ref(false)
+
 function _generate_command_functions()
-    # Skip generation during precompilation of extensions to avoid
-    # "Evaluation into closed module" errors. The functions will be
-    # generated when the package is actually loaded at runtime.
-    if ccall(:jl_generating_output, Cint, ()) != 0
-        @debug "Skipping command function generation during precompilation"
-        return
-    end
+    _COMMANDS_MADE[] && return
+    _COMMANDS_MADE[] = true
 
     for cmd in exportable_commands()  # exportable_commands() returns Vector{Symbol}
         # Skip if already defined IN THIS MODULE (not inherited from Base)

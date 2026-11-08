@@ -318,11 +318,8 @@ loads the GIAC library, and initializes the command registry.
 # Initialization Steps
 1. Initialize the GIAC library and default context
 2. Populate the command registry from GIAC's help database
-3. Generate wrapper functions for all exportable commands in Giac.Commands
-
-# Performance
-- Total initialization typically completes in < 5 seconds
-- Runtime function generation adds ~1 second for ~2000 functions
+3. Generate wrapper functions for all exportable commands in Giac.Commands, when the package was
+   loaded without its compiled image (they are in the image otherwise; see precompile.jl)
 
 # Note
 Command generation is triggered here (not in Commands.__init__) because nested
@@ -423,5 +420,7 @@ M = GiacMatrix([1 2; 3 4])  # Renders as LaTeX matrix in Pluto
 function Base.show(io::IO, ::MIME"text/latex", m::GiacMatrix)
     print(io, "\$\$", giac_latex(m), "\$\$")      # the same as any matrix of GiacExpr
 end
+
+include("precompile.jl")       # last: it runs the package as loaded
 
 end # module Giac
