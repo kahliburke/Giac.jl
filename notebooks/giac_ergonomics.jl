@@ -125,7 +125,7 @@ _md_code(s) = (t = _md_cell(s); occursin('`', t) ? "`` " * t * " ``" : "`" * t *
 function _example_md(v)
     v isa Exception && return _md_code("error: " * first(sprint(showerror, v), 120))
     v isa Tuple && return join(map(_example_md, v), ", ")
-    _has_tex(v) && return "\$\$" * replace(_value_tex(v), "|" => "\\vert ") * "\$\$"
+    _has_tex(v) && return "\$" * replace(_value_tex(v), "|" => "\\vert ") * "\$"
     return _md_code(join(strip.(split(_plain(v), '\n')), "; "))
 end
 function Base.show(io::IO, ::MIME"text/markdown", ex::Examples)
