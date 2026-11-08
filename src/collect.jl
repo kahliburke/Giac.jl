@@ -98,3 +98,19 @@ function _power(factors, v::String)
     end
     return 0
 end
+
+# A polynomial in its names is expanded by GIAC's `normal`, which multiplies in its sparse
+# polynomials; GIAC's `expand` multiplies symbolic sums, and is many times slower on large ones.
+function _expand_cmd(e::GiacExpr)
+    _is_polynomial(_node(e)) && return _invoke_cmd_direct(:normal, (e,))
+    return _invoke_cmd_direct(:expand, (e,))
+end
+
+# Whether a tree is a polynomial in its names with exact coefficients
+_is_polynomial(n::Node) = false
+_is_polynomial(n::SymNode) = true
+_is_polynomial(n::NumNode) = n.v isa Union{Integer, Rational}
+_is_polynomial(n::AddNode) = all(((m, c),) -> c isa Union{Integer, Rational} && _is_polynomial(m), n.terms)
+_is_polynomial(n::MulNode) =
+    n.coef isa Union{Integer, Rational} &&
+    all(((b, k),) -> k isa NumNode && k.v isa Integer && k.v >= 0 && _is_polynomial(b), n.factors)

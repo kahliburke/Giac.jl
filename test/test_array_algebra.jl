@@ -125,7 +125,7 @@ end
         @test string.(S) == ["s11" "s12"; "s12" "s22"]
         @test !@isdefined(s21)                   # the shared entry is bound once, as s12
         @giac_var u[1:2]
-        @test string(Giac.Commands.expand(u' * S * u)) == "s11*u1^2+s22*u2^2+2*s12*u1*u2"
+        @test string(Giac.Commands.expand(u' * S * u)) == "s11*u1^2+2*s12*u1*u2+s22*u2^2"
     end
 end
 

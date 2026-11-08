@@ -44,6 +44,15 @@
         @giac_var a ħ m
     end
 
+    @testset "expanding polynomials" begin
+        e = C.expand((1 + x + y + u)^20)
+        @test length(Giac.arguments(e)) == 1771
+        @test string(C.expand((x // 2 + 1 // 3)^3)) == "1/8*x^3+1/4*x^2+1/6*x+1/27"
+        @test isequal(C.expand((x + 1)^2 - 1), x^2 + 2x)
+        @test string(C.expand((x + 1)^2 / (y + 1))) == "x^2/(y+1)+2*x/(y+1)+1/(y+1)"   # not a polynomial: over each term
+        @test !Giac._is_polynomial(Giac._node((x + y)^2 * sin(x))) && !Giac._is_polynomial(Giac._node((1.5x + 1)^2))
+    end
+
     @testset "exact literals" begin
         ex = Giac._exact_literals(:(sin(2π * x) + sqrt(2) * x^(1 / 2) + 2^(1 // 3) * ℯ))
         @test string(Base.invokelatest(eval(:(x -> $ex)), x)) == string(sin(2 * convert(GiacExpr, π) * x) + sqrt(convert(GiacExpr, 2)) * x^(1 // 2) +

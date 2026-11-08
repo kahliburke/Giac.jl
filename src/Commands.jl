@@ -174,6 +174,11 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._trig_safe_simplify(args[1])
     end
 
+    # a polynomial is expanded as a polynomial (collect.jl)
+    if cmd === :expand && length(args) == 1 && args[1] isa GiacExpr && !_fastpath_disabled[]
+        return parentmodule(@__MODULE__)._expand_cmd(args[1])
+    end
+
     # sums and products GIAC leaves unevaluated are tried as limits and in pairs of terms (sums.jl)
     if cmd === :sum && length(args) == 4
         return parentmodule(@__MODULE__)._sum_cmd(args...)
