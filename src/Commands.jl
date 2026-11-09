@@ -681,6 +681,9 @@ by parts from `(x^ν Z_ν)′ = k x^ν Z_(ν-1)` and `(x^(-ν) Z_ν)′ = -k x^(
 is even and not negative they end in Struve functions (`∫ J₀ = x J₀ + πx(J₁H₀ - J₀H₁)/2`). `Ai′`
 and `x Ai` integrate to `Ai` and `Ai′`.
 
+An erf of an imaginary argument in an antiderivative is written with erfi: `∫ e^(x²) dx` is
+`√π erfi(x)/2`.
+
 A definite integral on [0, 1] or [0, ∞) that GIAC leaves unevaluated is tried term by term as a
 derivative of a Beta or Gamma integral in its parameters, for terms such as
 `xᵅ (1-x)ᵝ (ln x)ᵐ (ln(1-x))ⁿ`, `xᵅ e⁻ᵏˣ (ln x)ᵐ` and `xᵅ (1+x)⁻ᵞ (ln x)ᵐ (ln(1+x))ⁿ`. A term
@@ -693,7 +696,7 @@ integrate(log(x) * log(1 - x), x, 0, 1)      # (-pi^2+12)/6
 ```
 """
 integrate(args...) = invoke_cmd(:integrate, args...)
-integrate(f::GiacExpr, x::GiacExpr) = parentmodule(@__MODULE__)._integrate(f, x)
+integrate(f::GiacExpr, x::GiacExpr) = (G = parentmodule(@__MODULE__); G._erfi_form(G._integrate(f, x)))
 integrate(f::GiacExpr, x::GiacExpr, a, b) = parentmodule(@__MODULE__)._integrate(f, x, a, b)
 export integrate      # written here, so the generated commands' export skips it
 

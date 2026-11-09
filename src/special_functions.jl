@@ -9,6 +9,9 @@
 const _BESSEL = ("besselj", "bessely", "besseli", "besselk", "hankelh1", "hankelh2")
 const _AIRY = ("airyai", "airybi", "airyaiprime", "airybiprime")
 const _STRUVE = ("struveh", "struvel")
+# the functions of one argument, analytic everywhere; erfi, which GIAC does not know, writes the
+# erf of an imaginary argument: erf(iu) = i erfi(u)
+const _ENTIRE = (_AIRY..., "erfi")
 
 # the Julia function of the name, from SpecialFunctions or, for the Struve functions, Giac
 _special_module(f::AbstractString) = f in _STRUVE ? (@__MODULE__) : SpecialFunctions
@@ -21,7 +24,7 @@ function _special_name(n::CallNode)
     (n.f == "of" && length(n.args) >= 2 && n.args[1] isa SymNode) || return nothing
     f = n.args[1].name
     f in _BESSEL && length(n.args) == 3 && return f
-    f in _AIRY && length(n.args) == 2 && return f
+    f in _ENTIRE && length(n.args) == 2 && return f
     f in _STRUVE && length(n.args) == 3 && return f
     return nothing
 end
@@ -52,6 +55,29 @@ end
 for f in Symbol.(_AIRY)
     @eval SpecialFunctions.$f(x::GiacExpr) = GiacExpr(_airy($(string(f)), _node(x)))
 end
+SpecialFunctions.erfi(x::GiacExpr) = GiacExpr(_erfi(_node(x)))
+
+# erfi(u), odd: -erfi(-u) for u with a negative coefficient, 0 at 0, and the value at a float
+function _erfi(u::Node)
+    _is_zero_node(u) && return _ZERO
+    if _inexact(u)
+        v = _special_value("erfi", u.v)
+        v === nothing || return NumNode(v)
+    end
+    c = u isa NumNode ? u.v : u isa MulNode ? u.coef : 1
+    c isa Real && c < 0 && return _neg(_special("erfi", _neg(u)))
+    return _special("erfi", u)
+end
+
+# e with each erf of an imaginary multiple of u, erf(ibu), written i erfi(bu)
+_erfi_form(e::GiacExpr) = _any_node(m -> m isa CallNode && m.f == "erf", _node(e)) ?
+    GiacExpr(_replace_nodes(_node(e)) do m
+        (m isa CallNode && m.f == "erf" && length(m.args) == 1) || return nothing
+        u = m.args[1]
+        c = u isa NumNode ? u.v : u isa MulNode ? u.coef : nothing
+        (c isa Complex && iszero(real(c)) && !iszero(imag(c))) || return nothing
+        return _mul(NumNode(im), _erfi(_node(GiacExpr(u) / convert(GiacExpr, im))))
+    end) : e
 
 """
     struveh(ν, x)
@@ -215,6 +241,12 @@ end
 function _special_derivative(n::CallNode, x::String)
     f = _special_name(n)
     f === nothing && return x in _symbol_names(n) ? nothing : _ZERO
+    if f == "erfi"                                      # 2 e^(u²)/√π
+        u = n.args[2]
+        du = _derivative(u, x)
+        (du === nothing || _is_zero_node(du)) && return du
+        return _mul(du, _node(2 * exp(GiacExpr(u)^2) / sqrt(convert(GiacExpr, π))))
+    end
     if f in _AIRY
         u = n.args[2]
         du = _derivative(u, x)
@@ -363,6 +395,7 @@ _is_one_node(e::Node) = e isa NumNode && isone(e.v)
 
 function _special_antiderivative(f::String, call::CallNode, p::Integer, x::GiacExpr)
     name = string(x)
+    f == "erfi" && return nothing
     if f in _AIRY
         u = call.args[2]
         (u isa SymNode && u.name == name) || return nothing
@@ -502,7 +535,7 @@ end
 # or I of an order that is not a whole number
 _singular_special(n::Node) = _any_node(n) do m
     f = _special_name(m)
-    (f === nothing || f in _AIRY) && return false
+    (f === nothing || f in _ENTIRE) && return false
     _is_zero_node(m.args[3]) || return false
     f in ("bessely", "besselk", "hankelh1", "hankelh2") && return true
     ν = m.args[2]
@@ -516,7 +549,7 @@ _rebuilt_specials(n::Node) = _replace_nodes(n) do m
     f = _special_name(m)
     f === nothing && return nothing
     args = Node[_rebuilt_specials(a) for a in m.args[2:end]]
-    return f in _AIRY ? _airy(f, args[1]) : f in _STRUVE ? _struve(f, args[1], args[2]) : _bessel(f, args[1], args[2])
+    return f == "erfi" ? _erfi(args[1]) : f in _AIRY ? _airy(f, args[1]) : f in _STRUVE ? _struve(f, args[1], args[2]) : _bessel(f, args[1], args[2])
 end
 
 # `series(f, x, a, n)` of an expression with the functions in it, as GIAC writes a series: the
@@ -535,7 +568,7 @@ _special_calls(n::Node) = (calls = CallNode[]; _any_node(m -> (_special_name(m) 
 
 # whether the argument of a Bessel or Struve function call is 0 at x = a
 function _vanishes_at(m::CallNode, x::GiacExpr, a)
-    _special_name(m) in _AIRY && return false
+    _special_name(m) in _ENTIRE && return false
     return _is_zero_node(_node(substitute(GiacExpr(m.args[3]), x => a)))
 end
 
@@ -543,7 +576,7 @@ end
 # its expansion there (_expansion_at_zero), elsewhere as its Taylor polynomial, both to a degree
 # past n by enough for the negative powers of Y and K; nothing where one cannot be
 function _series_by_expansion(f::GiacExpr, calls, x::GiacExpr, a, n::Integer)
-    orders = [_approx_value(GiacExpr(m.args[2])) for m in calls if !(_special_name(m) in _AIRY)]
+    orders = [_approx_value(GiacExpr(m.args[2])) for m in calls if !(_special_name(m) in _ENTIRE)]
     N = n + 2 + 2 * min(10, maximum((abs(v) for v in orders if v isa Real); init = 0) |> ceil |> Int)
     replacements = Dict{Node, Node}()
     for m in calls
