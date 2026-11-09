@@ -111,6 +111,8 @@ end
 # with sines and cosines written as exponentials, or as the mean of f and its image under an
 # involution of the interval
 function _integrate(f::GiacExpr, x::GiacExpr, a, b)
+    v = _special_definite_integral(f, x, a, b)       # Bessel and Airy functions (special_functions.jl)
+    v === nothing || return v
     r = invoke_cmd(:integrate, f, x, a, b)
     _integral_left(r) || return r
     for method in (_parametric_integral, _exponential_integral, _reflected_integral)

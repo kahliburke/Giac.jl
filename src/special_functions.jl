@@ -431,3 +431,62 @@ function _special_series(f, x, a, n)
     h = x - a
     return p + h^(n + 1) * invoke_cmd(:order_size, h)
 end
+
+# ---------------------------------------------------------------------------------------------
+# Definite integrals
+# ---------------------------------------------------------------------------------------------
+
+# ∫ₐᵇ f dx for f with the functions in it: on [0, ∞) the limit at s → 0⁺ of its Laplace
+# transform, where the integral converges (_bessel_integral_converges); elsewhere F(b) - F(a) for
+# the antiderivative F, where both are finite and f has no singularity at 0 between a and b
+function _special_definite_integral(f::GiacExpr, x::GiacExpr, a, b)
+    (_has_special(f) && _node(x) isa SymNode) || return nothing
+    A, B = convert(GiacExpr, a), convert(GiacExpr, b)
+    if _is_zero_node(_node(A)) && _is_plus_infinity(_node(B))
+        _bessel_integral_converges(f, x) || return nothing
+        s = _fresh_symbol(_node(f), "s")
+        F = invoke_cmd(:laplace, f, x, s)
+        _has_transform_call(_node(F)) && return nothing
+        v = _giac_or_nothing(:limit, F, s, 0, 1)
+        (v === nothing || !_is_finite_value(v) || _unevaluated(v, "limit")) && return nothing
+        return invoke_cmd(:simplify, v)
+    end
+    (_is_finite_value(A) && _is_finite_value(B)) || return nothing
+    F = _special_terms_integral(f, x)
+    F === nothing && return nothing
+    lo, hi = _approx_value(A), _approx_value(B)
+    inside = !(lo isa Real && hi isa Real) || min(lo, hi) <= 0 <= max(lo, hi)
+    if inside
+        f0 = substitute(f, x => 0)
+        (_is_finite_value(f0) && !_singular_special(_node(f0))) || return nothing
+    end
+    Fa, Fb = substitute(F, x => A), substitute(F, x => B)
+    for v in (Fa, Fb)
+        (_is_finite_value(v) && !_singular_special(_node(v))) || return nothing
+    end
+    return _smaller_form(Fb - Fa)
+end
+
+# whether ∫₀^∞ c xᵖ e^(-αx) Z_ν(kx) dx converges, for numbers p, α, ν and k > 0: at 0 where
+# p + ν > -1 for J and I, p - |ν| > -1 for Y, K and the Hankel functions (p > -1 at ν = 0); at ∞,
+# as J, Y and the Hankel functions fall off as x^(-1/2) with oscillation, where α > 0 or α = 0 and
+# p < 1/2, and as I and K grow and fall as e^(±kx) x^(-1/2), where α > k (α > -k for K), or at
+# equality p < -1/2
+function _bessel_integral_converges(f::GiacExpr, x::GiacExpr)
+    c, a, g = _exponential_factor(f, x)
+    m = _power_and_bessel(g, x)
+    m === nothing && return false
+    p, Z, ν, u = m
+    shape = _argument_shape(u, x)
+    (shape !== nothing && shape[1] === :linear) || return false
+    vals = map(_approx_value, (-a, ν, shape[2]))
+    all(v -> v isa Real, vals) || return false
+    α, ν, k = vals
+    k > 0 || return false
+    p = float(p)
+    at0 = Z in ("besselj", "besseli") ? p + ν > -1 : iszero(ν) ? p > -1 : p - abs(ν) > -1
+    at∞ = Z == "besseli" ? (α > k || α == k && p < -1 // 2) :
+          Z == "besselk" ? (α > -k || α == -k && p < -1 // 2) :
+          (α > 0 || α == 0 && p < 1 // 2)
+    return at0 && at∞
+end

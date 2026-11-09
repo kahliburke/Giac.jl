@@ -59,6 +59,21 @@ import SpecialFunctions as SF
         @test occursin("integrate", string(∫(x^2 * SF.besselj(0, x))))        # a Struve function
     end
 
+    @testset "definite integrals" begin
+        ∞ = convert(GiacExpr, Inf)
+        ∫(f, a = 0, b = ∞) = Giac.Commands.integrate(f, x, a, b)
+        @test ∫(SF.besselj(0, x)) == 1
+        @test ∫(SF.besselj(1, x) / x) == 1
+        @test ∫(SF.besselj(0, 2x)) == 1 // 2
+        @test ∫(exp(-x) * SF.besselj(0, x)) == 1 / sqrt(two)
+        @test ∫(SF.besselk(0, x)) == π_ / 2
+        @test ∫(exp(-2x) * SF.besseli(0, x)) == 1 / sqrt(convert(GiacExpr, 3))
+        @test occursin("integrate", string(∫(x * SF.besselj(0, x))))              # diverges
+        @test occursin("integrate", string(∫(exp(-x) * SF.besseli(0, x))))        # diverges
+        @test ∫(x * SF.besselj(0, x), 0, 1) == SF.besselj(1, convert(GiacExpr, 1))
+        @test ∫(SF.besselj(1, x), 0, 2) == 1 - SF.besselj(0, two)
+    end
+
     @testset "Bessel's and Airy's equations" begin
         @giac_var y(x)
         d(f, k = 1) = Giac.Commands.diff(f, x, k)
