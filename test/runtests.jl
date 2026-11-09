@@ -50,6 +50,7 @@ using LinearAlgebra
     include("test_laplace_checks.jl")
     include("test_special_functions.jl")
     include("test_kovacic.jl")
+    include("test_elliptic.jl")
     include("test_pde.jl")
     include("test_rootsum.jl")
     include("test_radicals.jl")

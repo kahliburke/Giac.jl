@@ -49,6 +49,8 @@ function _integrate(f::GiacExpr, x::GiacExpr)
     _integral_left(r) || return _without_compositions(r)
     g = _rootsum_integral(f, x)                        # a rational function (rootsum.jl)
     g === nothing || return g
+    g = _elliptic_integral(f, x)                       # elliptic integrals (elliptic.jl)
+    g === nothing || return g
     g = _search_integral(f, x)
     return g === nothing ? r : g
 end
@@ -114,6 +116,8 @@ end
 # involution of the interval
 function _integrate(f::GiacExpr, x::GiacExpr, a, b)
     v = _special_definite_integral(f, x, a, b)       # Bessel and Airy functions (special_functions.jl)
+    v === nothing || return v
+    v = _elliptic_definite_integral(f, x, a, b)      # GIAC can take long over these
     v === nothing || return v
     r = invoke_cmd(:integrate, f, x, a, b)
     _integral_left(r) || return r
@@ -345,6 +349,21 @@ end
 function _antiderivative_integral(f::GiacExpr, x::GiacExpr, a, b)
     F = _integral_or_parts(f, x)
     F === nothing && return nothing
+    return _between_ends(F, f, x, a, b)
+end
+
+# ∫ₐᵇ f dx from an elliptic antiderivative (elliptic.jl), which needs no search
+function _elliptic_definite_integral(f::GiacExpr, x::GiacExpr, a, b)
+    F = _elliptic_integral(f, x)
+    F === nothing && return nothing
+    # the numeric integral of an integrand singular at an end, as these often are, is good to
+    # about 1e-7 in doubles; a wrong antiderivative is far further off
+    return _between_ends(F, f, x, a, b; trial = true, tol = 1e-6)
+end
+
+# F(b⁻) - F(a⁺) where it agrees with the integral of f computed numerically, within `tol`, else
+# nothing; with `trial`, parameters are given values for the comparison
+function _between_ends(F::GiacExpr, f::GiacExpr, x::GiacExpr, a, b; trial::Bool = false, tol::Real = 1e-8)
     ends = GiacExpr[]
     for (point, side) in ((b, -1), (a, 1))
         v = try
@@ -355,16 +374,19 @@ function _antiderivative_integral(f::GiacExpr, x::GiacExpr, a, b)
             return nothing
         end
         (_is_finite_value(v) && !_unevaluated(v, "limit")) || return nothing
-        push!(ends, v)
+        push!(ends, _rebuilt_specials(v))
     end
     value = invoke_cmd(:simplify, ends[1] - ends[2])
+    names = trial ? setdiff(_free_names(f + value + convert(GiacExpr, a) + convert(GiacExpr, b)), [string(x)]) : String[]
+    at = Dict(giac_identifier(n) => 1 // 2 + k // 7 for (k, n) in enumerate(sort(collect(names))))
+    on(e) = isempty(at) ? convert(GiacExpr, e) : substitute(convert(GiacExpr, e), at)
     numeric = try
-        _approx_value(invoke_cmd(:evalf, _hold(:integrate, (f, x, convert(GiacExpr, a), convert(GiacExpr, b)))))
+        _approx_value(invoke_cmd(:evalf, _hold(:integrate, (on(f), x, on(a), on(b)))))
     catch e
         _stopped(e) && rethrow()
         nothing
     end
-    exact = _approx_value(value)
-    (numeric isa Number && exact isa Number && abs(numeric - exact) <= 1e-8 * max(1, abs(exact))) || return nothing
+    exact = _approx_value(on(value))
+    (numeric isa Number && exact isa Number && abs(numeric - exact) <= tol * max(1, abs(exact))) || return nothing
     return value
 end

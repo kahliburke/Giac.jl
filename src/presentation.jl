@@ -192,7 +192,7 @@ const _SPECIAL_TEX = Dict(
     "hankelh1" => "H^{(1)}", "hankelh2" => "H^{(2)}", "airyai" => "\\operatorname{Ai}",
     "airybi" => "\\operatorname{Bi}", "airyaiprime" => "\\operatorname{Ai}'", "airybiprime" => "\\operatorname{Bi}'",
     "struveh" => "\\mathbf{H}", "struvel" => "\\mathbf{L}", "erfi" => "\\operatorname{erfi}",
-    "polylog" => "\\operatorname{Li}")
+    "polylog" => "\\operatorname{Li}", "ellipk" => "K", "ellipe" => "E", "ellipf" => "F", "ellippi" => "\\Pi")
 
 function _pnode(e::GiacExpr)
     # numbers, names, sums and products are read off the tree directly
@@ -737,6 +737,11 @@ function _tex(n::_PCall, c::_Ctx)
         body = _tex(n.args[3], c)
         n.args[3] isa _PSum && (body = "\\left(" * body * "\\right)")
         return "\\sum_{" * _tex(n.args[1], c) * " = 0} " * body
+    end
+    if n.f in _ELLIPTIC && length(n.args) >= 2          # F(φ | m), Π(n; φ | m)
+        a = [_tex(v, c) for v in n.args]
+        inner = length(a) == 3 ? a[1] * "; " * a[2] : a[1]
+        return _SPECIAL_TEX[n.f] * "\\left(" * inner * " \\middle| " * a[end] * "\\right)"
     end
     if haskey(_SPECIAL_TEX, n.f)                       # J_ν(x), Ai(x)
         order = length(n.args) == 2 ? "_{" * _tex(n.args[1], c) * "}" : ""

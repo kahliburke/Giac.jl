@@ -15,7 +15,7 @@ const _ENTIRE = (_AIRY..., "erfi")
 
 # the Julia function of the name, from SpecialFunctions or, for the Struve functions and the
 # polylogarithm, Giac
-_special_module(f::AbstractString) = f in _STRUVE || f == "polylog" ? (@__MODULE__) : SpecialFunctions
+_special_module(f::AbstractString) = f in _STRUVE || f == "polylog" || f in _ELLIPTIC ? (@__MODULE__) : SpecialFunctions
 
 _special(f::String, args::Node...) = CallNode("of", Node[SymNode(f), args...])
 
@@ -28,6 +28,7 @@ function _special_name(n::CallNode)
     f in _ENTIRE && length(n.args) == 2 && return f
     f in _STRUVE && length(n.args) == 3 && return f
     f == "polylog" && length(n.args) == 3 && return f
+    f in _ELLIPTIC && _elliptic_arity(f, length(n.args) - 1) && return f         # elliptic.jl
     return nothing
 end
 
@@ -202,6 +203,7 @@ function _special_value(f::String, args::Number...)
         all(a -> a isa Real, args) || return nothing
         return _struve_number(f, args...)
     end
+    f in _ELLIPTIC && return _elliptic_number(f, args...)
     if f == "polylog"
         s, z = args
         (s isa Integer || s isa Real && isinteger(s)) || return nothing
@@ -257,6 +259,7 @@ function _special_derivative(n::CallNode, x::String)
     parts === nothing || return _rootsum_derivative(parts..., x)
     f = _special_name(n)
     f === nothing && return x in _symbol_names(n) ? nothing : _ZERO
+    f in _ELLIPTIC && return _elliptic_derivative(f, n, x)
     if f == "erfi"                                      # 2 e^(u²)/√π
         u = n.args[2]
         du = _derivative(u, x)
@@ -431,7 +434,7 @@ _is_one_node(e::Node) = e isa NumNode && isone(e.v)
 
 function _special_antiderivative(f::String, call::CallNode, p::Integer, x::GiacExpr)
     name = string(x)
-    f == "erfi" && return nothing
+    (f == "erfi" || f in _ELLIPTIC) && return nothing
     if f in _AIRY
         u = call.args[2]
         (u isa SymNode && u.name == name) || return nothing
@@ -572,6 +575,7 @@ end
 _singular_special(n::Node) = _any_node(n) do m
     f = _special_name(m)
     (f === nothing || f in _ENTIRE) && return false
+    f in _ELLIPTIC && return _elliptic_singular(m)
     _is_zero_node(m.args[3]) || return false
     f in ("bessely", "besselk", "hankelh1", "hankelh2") && return true
     ν = m.args[2]
@@ -585,6 +589,7 @@ _rebuilt_specials(n::Node) = _replace_nodes(n) do m
     f = _special_name(m)
     f === nothing && return nothing
     args = Node[_rebuilt_specials(a) for a in m.args[2:end]]
+    f in _ELLIPTIC && return _elliptic(f, args...)
     return f == "erfi" ? _erfi(args[1]) : f in _AIRY ? _airy(f, args[1]) : f in _STRUVE ? _struve(f, args[1], args[2]) :
            f == "polylog" ? _polylog(args[1], args[2]) : _bessel(f, args[1], args[2])
 end
@@ -606,6 +611,7 @@ _special_calls(n::Node) = (calls = CallNode[]; _any_node(m -> (_special_name(m) 
 # whether the argument of a Bessel or Struve function call is 0 at x = a
 function _vanishes_at(m::CallNode, x::GiacExpr, a)
     _special_name(m) in _ENTIRE && return false
+    _special_name(m) in _ELLIPTIC && return _elliptic_vanishes_at(m, x, a)
     return _is_zero_node(_node(substitute(GiacExpr(m.args[3]), x => a)))
 end
 
@@ -613,12 +619,14 @@ end
 # its expansion there (_expansion_at_zero), elsewhere as its Taylor polynomial, both to a degree
 # past n by enough for the negative powers of Y and K; nothing where one cannot be
 function _series_by_expansion(f::GiacExpr, calls, x::GiacExpr, a, n::Integer)
-    orders = [_approx_value(GiacExpr(m.args[2])) for m in calls if !(_special_name(m) in _ENTIRE)]
+    orders = [_approx_value(GiacExpr(m.args[2])) for m in calls if !(_special_name(m) in _ENTIRE || _special_name(m) in _ELLIPTIC)]
     N = n + 2 + 2 * min(10, maximum((abs(v) for v in orders if v isa Real); init = 0) |> ceil |> Int)
     replacements = Dict{Node, Node}()
     for m in calls
         any(_has_special, m.args[2:end]) && return nothing
-        E = if _vanishes_at(m, x, a)
+        E = if _special_name(m) in _ELLIPTIC && _vanishes_at(m, x, a)
+            _elliptic_expansion(_special_name(m), GiacExpr(m.args[2]), N)
+        elseif _vanishes_at(m, x, a)
             _expansion_at_zero(_special_name(m), GiacExpr(m.args[2]), GiacExpr(m.args[3]), N)
         else
             _special_taylor(GiacExpr(m), x, a, N)
