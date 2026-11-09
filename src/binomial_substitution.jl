@@ -260,4 +260,4 @@ end
 
 # the methods of the integration search, in the order they are tried
 const _INDEFINITE_METHODS = Function[_with_inverse_hyperbolics, _inverse_substitution, _binomial_substitution,
-                                     _reciprocal_substitution, _parts_antiderivative]
+                                     _pseudo_elliptic, _reciprocal_substitution, _parts_antiderivative]

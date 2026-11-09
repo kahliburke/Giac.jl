@@ -140,6 +140,23 @@ end
     @test C.integrate(C.erfc(x)^2, x, 0, ∞) == (2 - sqrt(convert(GiacExpr, 2))) / sqrt(convert(GiacExpr, π))
 end
 
+# Pseudo-elliptic integrals, from a unit U + V√P of the continued fraction of √P
+@testset "Pseudo-elliptic integrals" begin
+    @giac_var x
+    C = Giac.Commands
+    off(F, f) = maximum(abs(to_julia(C.evalf(substitute(C.diff(F, x) - f, x => v)))) for v in (-1.61, 0.83, 5.3))
+    P = x^4 + 10x^2 - 96x - 71
+    U = x^8 + 20x^6 - 128x^5 + 54x^4 - 1408x^3 + 3124x^2 + 10001
+    V = x^6 + 15x^4 - 80x^3 + 27x^2 - 528x + 781
+    F = Giac._pseudo_elliptic(x / sqrt(P), x)                                     # Chebyshev's
+    @test F == log(U + V * sqrt(P)) / 8
+    @test C.integrate(x / sqrt(P), x) == F
+    F = Giac._pseudo_elliptic(3x / sqrt(4P), x)                                   # a square leading coefficient
+    @test F !== nothing && off(F, 3x / sqrt(4P)) < 1e-9
+    @test Giac._pseudo_elliptic(1 / sqrt(P), x) === nothing                       # elliptic
+    @test Giac._pseudo_elliptic(x / sqrt(x^4 + 1 + x), x) === nothing
+end
+
 @testset "Factoring over the rationals" begin
     @giac_var x
     C = Giac.Commands
