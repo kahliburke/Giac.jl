@@ -17,6 +17,7 @@
 end
 
 @testset "Cube roots denested" begin
+    @giac_var x
     C = Giac.Commands
     c(n) = convert(GiacExpr, n)^(1 // 3)
     value(e) = to_julia(C.evalf(e, 30))
@@ -28,5 +29,7 @@ end
         @test value(r) ≈ value(e) rtol = 1e-25
     end
     @test C.simplify((3c(3) - 4)^(1 // 3)) == (3c(3) - 4)^(1 // 3)               # does not denest
+    r = C.simplify(2 * (c(2) - 1)^(1 // 3) * x)                                  # a factor of a product
+    @test !occursin("-1)^(1/3)", string(r)) && C.simplify(r - 2x * (1 - c(2) + c(4)) / c(9)) == 0
     @test Giac._cubic_cube(Rational{BigInt}[1, -1, 1], 2) == [-9, 9, 0]         # (1 - ∛2 + ∛4)³ = 9(∛2 - 1)
 end

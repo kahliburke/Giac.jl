@@ -320,18 +320,16 @@ end
 # `simplify`, also with the Bessel functions of three or more orders in a family written in the
 # two lowest where that is simpler (trig_simplify.jl for the rest)
 function _simplify_cmd(e::GiacExpr)
-    e = _rootsums_summed(e)
-    # a cube root denested is kept as it is where GIAC's simplify of it is no shorter
-    d = _denested_cube_roots(e)
-    if d !== e
-        s = _trig_safe_simplify(d)
-        return Rules.expression_size(d) <= Rules.expression_size(s) ? d : s
-    end
+    # cube roots that denest are names while GIAC simplifies (it writes them, and products with
+    # their denested forms, as rootof) and their denested forms after (cube_root_denesting.jl)
+    e, denested = _cube_root_placeholders(_rootsums_summed(e))
     r = _trig_safe_simplify(e)
     c = _contiguous(e)
-    c === nothing && return r
-    q = _trig_safe_simplify(c)
-    return Rules.expression_size(q) < Rules.expression_size(r) ? q : r
+    if c !== nothing
+        q = _trig_safe_simplify(c)
+        Rules.expression_size(q) < Rules.expression_size(r) && (r = q)
+    end
+    return GiacExpr(foldl(((n, (k, v)) -> _replace_node(n, _node(k), _node(v))), denested; init = _node(r)))
 end
 
 # The contiguous relations: in a family f(ν + k, u) with whole k, of three orders or more, each

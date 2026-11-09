@@ -4,17 +4,35 @@
 # β = p + qt + st² comes from cube roots of rα at the three embeddings t ↦ ωᵏt, its rational
 # coordinates recognized from high precision, and β³ = rα is checked exactly.
 
-# e with each cube root of a positive number of Q(∛m) that denests written denested
-_denested_cube_roots(e::GiacExpr) = _any_node(_cube_root_of_cubic_number, _node(e)) ?
-    GiacExpr(_replace_nodes(_node(e)) do n
-        _cube_root_of_cubic_number(n) || return nothing
-        v = _denest_cube_root(only(n.factors)[1])
-        return v === nothing ? nothing : _node(v)
-    end) : e
+# e with each cube root of a positive number of Q(∛m) that denests, a factor of a product, written
+# as a fresh name, and the names' denested values
+function _cube_root_placeholders(e::GiacExpr)
+    denested = Dict{GiacExpr, GiacExpr}()
+    _any_node(_has_cubic_cube_root, _node(e)) || return (e, denested)
+    taken = _node(e)
+    r = _replace_nodes(taken) do n
+        _has_cubic_cube_root(n) || return nothing
+        parts, changed = Node[NumNode(n.coef)], false
+        for (b, k) in n.factors
+            v = _is_cube_root(k) ? _denest_cube_root(b) : nothing
+            if v === nothing
+                push!(parts, _pow(b, k))
+            else
+                name = _fresh_symbol(_mul(taken, (_node(p) for p in keys(denested))...), "cuberoot")
+                denested[name] = v
+                push!(parts, _node(name))
+                changed = true
+            end
+        end
+        return changed ? _mul(parts...) : nothing
+    end
+    return (GiacExpr(r), denested)
+end
 
-# whether n is ∛α for α a sum of rationals times powers k/3 of one integer
-_cube_root_of_cubic_number(n::Node) = n isa MulNode && n.coef == 1 && length(n.factors) == 1 &&
-    only(n.factors)[2] isa NumNode && only(n.factors)[2].v == 1 // 3 && _cubic_coordinates(only(n.factors)[1]) !== nothing
+_is_cube_root(k::Node) = k isa NumNode && k.v == 1 // 3
+
+# whether n is a product with a factor ∛α, α a sum of rationals times powers k/3 of one integer
+_has_cubic_cube_root(n::Node) = n isa MulNode && any(((b, k),) -> _is_cube_root(k) && _cubic_coordinates(b) !== nothing, n.factors)
 
 # (m, [a, b, c]) for α = a + b∛m + c∛m², m > 1 cube-free; nothing for other α
 function _cubic_coordinates(α::Node)
