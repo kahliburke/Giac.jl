@@ -49,6 +49,7 @@ using LinearAlgebra
     include("test_sums.jl")
     include("test_laplace_checks.jl")
     include("test_special_functions.jl")
+    include("test_kovacic.jl")
     include("test_matrix_iteration.jl")
     include("test_memory.jl")
 

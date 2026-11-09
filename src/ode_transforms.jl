@@ -2,12 +2,12 @@
 # Σₖ aₖ xᵏ y⁽ᵏ⁾ = f(x) has constant coefficients in s = ln x, as xᵏ dᵏ/dxᵏ = θ(θ−1)⋯(θ−k+1) for
 # θ = d/ds; GIAC solves that one and the solution is taken back to x.
 
-# the equation `eq` in the function `y` of `x` as Σₖ qₖ y⁽ᵏ⁾ = f: the coefficients q₀, …, qₙ, f,
-# and the tree of `eq`; nothing where it is not linear in y and its derivatives
-function _linear_coefficients(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
+# the equation `eq` in the function `y` of `x` with each derivative y⁽ᵏ⁾ a symbol dₖ, y itself d₀:
+# the expression `E` (the equation's sides subtracted), the symbols `d`, and the tree of `eq`;
+# nothing where y has no derivative in it
+function _derivative_symbols(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
     e = _node(_is_equation(eq) ? lhs(eq) - rhs(eq) : eq)
     (_node(x) isa SymNode) || return nothing
-    # each derivative y⁽ᵏ⁾ as a symbol dₖ, y itself as d₀
     derivatives = Dict{Int, Node}()
     _any_node(e) do m
         if m isa CallNode && m.f == "diff"
@@ -23,15 +23,23 @@ function _linear_coefficients(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
     for (k, m) in derivatives
         t = _replace_node(t, m, _node(d[k + 1]))
     end
-    E = GiacExpr(_replace_node(t, _node(y), _node(d[1])))
+    return (E = GiacExpr(_replace_node(t, _node(y), _node(d[1]))), d = d, e = e)
+end
+
+# the equation `eq` in the function `y` of `x` as Σₖ qₖ y⁽ᵏ⁾ = f: the coefficients q₀, …, qₙ, f,
+# and the tree of `eq`; nothing where it is not linear in y and its derivatives
+function _linear_coefficients(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
+    S = _derivative_symbols(eq, x, y)
+    S === nothing && return nothing
+    E, d = S.E, S.d
     names = Set(string.(d))
     q = GiacExpr[]
-    for k in 0:order
-        c = invoke_cmd(:diff, E, d[k + 1])
+    for k in eachindex(d)
+        c = invoke_cmd(:diff, E, d[k])
         isempty(intersect(_free_names(c), names)) || return nothing
         push!(q, c)
     end
-    return (q = q, f = -substitute(E, [v => 0 for v in d]...), e = e)
+    return (q = q, f = -substitute(E, [v => 0 for v in d]...), e = S.e)
 end
 
 # the general solution of the equation `eq` in the function `y` of `x` when it is an Euler–Cauchy
