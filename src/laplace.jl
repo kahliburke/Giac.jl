@@ -21,9 +21,11 @@
 function _laplace_cmd(f, t, s)
     f, t, s = convert(GiacExpr, f), convert(GiacExpr, t), convert(GiacExpr, s)
     (_node(t) isa SymNode && _node(s) isa SymNode) || return _giac_cmd(:laplace, f, t, s)
+    exponential = _exponential_polynomial(_node(f), string(t))
+    !exponential && _superexponential(f, t) && return _hold(:laplace, (f, t, s))
     r = _giac_or_nothing(:laplace, f, t, s)
     if _is_laplace_answer(r, f, t)
-        _exponential_polynomial(_node(f), string(t)) && return r
+        exponential && return r
         _laplace_verdict(f, t, r, s) !== :disagree && return r
     end
     g = _laplace_by_terms(f, t, s)
@@ -40,6 +42,26 @@ function _ilaplace_cmd(F, s, t)
     end
     g = _ilaplace_by_terms(F, s, t)
     return g === nothing ? _hold(:ilaplace, (F, s, t)) : g
+end
+
+# whether f(t) grows faster than every exponential, so that it has no transform: ln|f(T)|/T, read
+# exactly at T = 25, 50, …, 400, keeps rising by steps that do not shrink (e^(t²), tᵗ), where an
+# exponential's settles (e^(5t-100)). Only for f in t alone.
+function _superexponential(f::GiacExpr, t::GiacExpr)
+    _free_names(f) == Set([string(t)]) || return false
+    r = Float64[]
+    for T in (25, 50, 100, 200, 400)
+        v = try
+            to_julia(invoke_cmd(:evalf, invoke_cmd(:simplify, log(abs(substitute(f, t => T)))) / T))
+        catch e
+            _stopped(e) && rethrow()
+            return false
+        end
+        (v isa Real && isfinite(v)) || return false
+        push!(r, v)
+    end
+    Δ = diff(r)
+    return all(>(0), Δ) && Δ[end] >= 0.9 * Δ[1] && Δ[end] > 0.05
 end
 
 function _giac_or_nothing(cmd::Symbol, args...)
@@ -105,6 +127,17 @@ function _laplace_by_terms(f::GiacExpr, t::GiacExpr, s::GiacExpr, depth::Int = 0
     return _tidied(parts)
 end
 
+# r or its simplified form, whichever is smaller: the theorems build answers up a step at a time
+function _smaller_form(r::GiacExpr)
+    q = try
+        invoke_cmd(:simplify, r)
+    catch e
+        _stopped(e) && rethrow()
+        return r
+    end
+    return Rules.expression_size(q) < Rules.expression_size(r) ? q : r
+end
+
 # the sum of the terms' transforms, over a common denominator where that is smaller
 function _tidied(parts::Vector{GiacExpr})
     F = sum(parts)
@@ -152,7 +185,7 @@ function _laplace_core(g::GiacExpr, t::GiacExpr, s::GiacExpr, depth::Int)
     _is_laplace_answer(r, g, t) && _laplace_verdict(g, t, r, s) !== :disagree && return r
     for rule in (_laplace_pair, _laplace_bessel, _laplace_times_power, _laplace_over_t, _laplace_from_derivative, _laplace_integral)
         r = rule(g, t, s, depth)
-        r !== nothing && _is_laplace_answer(r, g, t) && _laplace_verdict(g, t, r, s) !== :disagree && return r
+        r !== nothing && _is_laplace_answer(r, g, t) && _laplace_verdict(g, t, r, s) !== :disagree && return _smaller_form(r)
     end
     return nothing
 end
@@ -372,7 +405,7 @@ function _ilaplace_core(G::GiacExpr, s::GiacExpr, t::GiacExpr, depth::Int)
     _is_inverse_answer(r, s) && _laplace_verdict(r, t, G, s) !== :disagree && return r
     for rule in (_ilaplace_pair, _ilaplace_bessel, _ilaplace_over_s, _ilaplace_by_derivative, _ilaplace_convolution)
         r = rule(G, s, t, depth)
-        r !== nothing && _is_inverse_answer(r, s) && return r
+        r !== nothing && _is_inverse_answer(r, s) && return _smaller_form(r)
     end
     return nothing
 end

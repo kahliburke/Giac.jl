@@ -21,6 +21,11 @@ import SpecialFunctions
         @test at(L(sqrt(t) * exp(2t)), s, 3.5) ≈ at(sqrt(π_) / (2(s - 2)^(3 // 2)), s, 3.5)
         @test occursin("laplace", string(L(Giac.invoke_cmd(:BesselJ, 0, t))))           # held, not infinity
         @test occursin("laplace", string(L(Giac.invoke_cmd(:Ci, t) * sqrt(t))))          # held
+        for f in (exp(t^2), t^t, sin(t) * exp(t^2), exp(t^(3 // 2)))                    # no transform
+            @test occursin("laplace", string(L(f)))
+        end
+        @test at(L(exp(5t - 100) * sqrt(t)), s, 7.0) ≈ at(exp(convert(GiacExpr, -100)) * sqrt(π_) / (2(s - 5)^(3 // 2)), s, 7.0)
+        @test Giac.Rules.expression_size(L(exp(-t^2))) < 40
         @test Giac._laplace_verdict(C.erf(t), t, -C.erf(s / 2) * exp(s^2 / 4) / s, s) === :disagree
     end
 
