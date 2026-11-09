@@ -181,3 +181,95 @@ _exp_powers(n::Node) = _replace_nodes(n) do m
     return _mul(NumNode(m.coef), (whole(b, k) ? _exp(_mul(k, _exp_powers(only(b.args)))) : _pow(_exp_powers(b), _exp_powers(k))
                                   for (b, k) in m.factors)...)
 end
+
+# ---------------------------------------------------------------------------------------------
+# Forcing terms and conditions
+# ---------------------------------------------------------------------------------------------
+
+const _DESOLVE_METHODS = (:_euler_cauchy, :_bessel_equation, :_kovacic, :_riccati)
+
+# the solution of `eqs`, an equation or a vector of one and conditions on y and its derivatives at
+# points, by the methods after GIAC's: the equation's general solution, with a forcing term by
+# variation of parameters, and its constants fitted to the conditions; nothing where none applies
+function _desolve_methods(eqs, x::GiacExpr, y::GiacExpr)
+    eq, conditions = eqs isa GiacExpr ? (eqs, Any[]) : (first(eqs), collect(Any, eqs[2:end]))
+    eq isa GiacExpr || return nothing
+    S = _general_solution(eq, x, y)
+    S === nothing && return nothing
+    return isempty(conditions) ? S : _fit_conditions(S, conditions, x, y)
+end
+
+function _general_solution(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
+    for m in _DESOLVE_METHODS
+        v = getfield(@__MODULE__, m)(eq, x, y)
+        v === nothing || return v
+    end
+    return _forced_solution(eq, x, y)
+end
+
+# q₂y'' + q₁y' + q₀y = f with f ≠ 0: the homogeneous equation's solutions y₁, y₂ (GIAC's, or from
+# the methods above) and y = c₀y₁ + c₁y₂ - y₁ ∫ y₂g/W + y₂ ∫ y₁g/W, g = f/q₂, W = y₁y₂' - y₁'y₂
+function _forced_solution(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
+    c = _linear_coefficients(eq, x, y)
+    (c === nothing || length(c.q) != 3 || _is_zero_expr(c.f)) && return nothing
+    D(f, k = 1) = Commands.diff(f, x, k)
+    homogeneous = c.q[3] * D(y, 2) + c.q[2] * D(y) + c.q[1] * y ~ 0
+    H = try
+        Commands.desolve(homogeneous, y)
+    catch e
+        _stopped(e) && rethrow()
+        return nothing
+    end
+    (H isa GiacExpr && !_gave_up(H)) || return nothing
+    C0, C1 = GiacExpr(SymNode("c_0")), GiacExpr(SymNode("c_1"))
+    y1, y2 = substitute(H, Dict(C0 => 1, C1 => 0)), substitute(H, Dict(C0 => 0, C1 => 1))
+    W = invoke_cmd(:simplify, y1 * D(y2) - D(y1) * y2)
+    _is_zero_expr(W) && return nothing
+    g = c.f / c.q[3]
+    I1 = Commands.integrate(invoke_cmd(:simplify, y2 * g / W), x)
+    I2 = Commands.integrate(invoke_cmd(:simplify, y1 * g / W), x)
+    return H + _exp_powers(_smaller_form(_erfi_form(y2 * I2 - y1 * I1)))
+end
+
+# S with its constants c_0, c_1 fitted to conditions y⁽ᵏ⁾(x₀) = v, written y(x₀), y'(x₀), …
+function _fit_conditions(S::GiacExpr, conditions::Vector, x::GiacExpr, y::GiacExpr)
+    parsed = _function_call(y)
+    parsed === nothing && return nothing
+    name = String(parsed[1])
+    constants = [GiacExpr(SymNode(c)) for c in ("c_0", "c_1") if c in _free_names(S)]
+    length(constants) == length(conditions) || return nothing
+    equations = GiacExpr[]
+    for q in conditions
+        parts = _condition_parts(q)
+        parts === nothing && return nothing
+        m = match(r"^(\w+)('*)\((.*)\)$", parts[1])
+        (m === nothing || m[1] != name) && return nothing
+        k, x0 = length(m[2]), giac_eval(m[3])
+        v = substitute(Commands.diff(S, x, k), x => x0)
+        _is_finite_value(v) || return nothing
+        push!(equations, v - parts[2])
+    end
+    sol = try
+        invoke_cmd(:solve, equations, constants)
+    catch e
+        _stopped(e) && rethrow()
+        return nothing
+    end
+    (giac_type(sol) == GenTypes.VECT && length(sol) == 1) || return nothing
+    values = sol[1]
+    values = giac_type(values) == GenTypes.VECT ? collect(values) : [values]
+    length(values) == length(constants) || return nothing
+    return _exp_powers(invoke_cmd(:simplify, substitute(S, Dict(zip(constants, values)))))
+end
+
+_function_call(y::GiacExpr) = _parse_function_args(string(y))
+
+# a condition's sides, the left as written (y(0), y'(1)): from an equation, or from a derivative
+# condition's string
+_condition_parts(q) = nothing
+_condition_parts(q::GiacExpr) = _is_equation(q) ? (string(lhs(q)), rhs(q)) : nothing
+function _condition_parts(q::DerivativeCondition)
+    i = findfirst('=', q.condition_str)
+    i === nothing && return nothing
+    return (strip(q.condition_str[1:(i - 1)]), giac_eval(q.condition_str[(i + 1):end]))
+end

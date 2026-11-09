@@ -46,6 +46,26 @@ import SpecialFunctions as SF
         @test occursin("airyaiprime", string(sol)) && residual(A, sol) < 1e-10
     end
 
+    @testset "forcing terms and conditions" begin
+        L = Y -> d(Y, 2) - (x^2 + 1) * Y
+        f = x * exp(-x^2 / 2)
+        residual_f(sol) = maximum(abs(to_julia(Giac.invoke_cmd(:evalf, substitute(L(sol) - f, Dict(x => v, C0 => 0.7, C1 => -1.3)))))
+                                  for v in (0.4, 1.1))
+        @test residual_f(Giac.Commands.desolve(L(y) ~ f, y)) < 1e-10                 # variation of parameters
+        at(e, v) = to_julia(Giac.invoke_cmd(:evalf, substitute(e, x => v)))
+        y′ = Giac.invoke_cmd(:diff, y, x)
+        @test Giac.Commands.desolve([L(y) ~ 0, y(0) ~ 1, y′(0) ~ 0], y) == exp(x^2 / 2)
+        s = Giac.Commands.desolve([L(y) ~ f, y(0) ~ 0, y′(0) ~ 1], y)
+        @test residual_f(s) < 1e-10 && abs(at(s, 0)) < 1e-14 && at(d(s), 0) ≈ 1
+        @test !occursin(")^2", string(s))                                             # e^(x²), not (e^(x²/2))²
+        B = Y -> x^2 * d(Y, 2) + x * d(Y) + (x^2 - 4) * Y
+        s = Giac.Commands.desolve([B(y) ~ 0, y(1) ~ 1, y′(1) ~ 0], y)
+        @test at(s, 1) ≈ 1 && abs(at(d(s), 1)) < 1e-12 && abs(at(B(s), 1.7)) < 1e-12
+        R = Y -> d(Y) - (Y^2 - x^2 + 1)
+        s = Giac.Commands.desolve([R(y) ~ 0, y(0) ~ 1], y)
+        @test at(s, 0) ≈ 1 && abs(at(R(s), 0.6)) < 1e-10
+    end
+
     @testset "erfi" begin
         π_ = convert(GiacExpr, π)
         @test Giac.Commands.integrate(exp(x^2), x) == sqrt(π_) * SF.erfi(x) / 2
