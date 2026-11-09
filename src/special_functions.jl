@@ -329,6 +329,7 @@ function _simplify_cmd(e::GiacExpr)
         q = _trig_safe_simplify(c)
         Rules.expression_size(q) < Rules.expression_size(r) && (r = q)
     end
+    isempty(denested) && return r
     return GiacExpr(foldl(((n, (k, v)) -> _replace_node(n, _node(k), _node(v))), denested; init = _node(r)))
 end
 
