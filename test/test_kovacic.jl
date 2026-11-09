@@ -1,4 +1,4 @@
-# Second-order linear equations by the first case of Kovacic's algorithm, Riccati equations
+# Second-order linear equations by the first two cases of Kovacic's algorithm, Riccati equations
 # through their linear equations, and erfi for the erf of an imaginary argument
 
 import SpecialFunctions as SF
@@ -34,6 +34,21 @@ import SpecialFunctions as SF
               C0 * exp(a * x^2 / 2) + C1 * exp(a * x^2 / 2) * sqrt(convert(GiacExpr, π)) * SF.erf(sqrt(a) * x) / (2sqrt(a))
         @test occursin("exp(k*x^3/3)", string(solve(Y -> d(Y, 2) - (k^2 * x^4 + 2k * x) * Y)))
         @test Giac._gave_up(solve(Y -> d(Y, 2) - (x^2 + a) * Y))                    # parabolic cylinder
+    end
+
+    @testset "solutions of the second case" begin
+        # cos √(x²+1), sin √(x²+1): GIAC gives up
+        L = Y -> d(Y, 2) - d(Y) / (x * (x^2 + 1)) + x^2 / (x^2 + 1) * Y
+        @test solve(L) == C0 * cos(sqrt(x^2 + 1)) + C1 * sin(sqrt(x^2 + 1))
+        # e^(±√(x²+1)): GIAC's answer, e^(4√(x²+1)), fails the equation and is checked
+        L = Y -> d(Y, 2) - d(Y) / (x * (x^2 + 1)) - x^2 / (x^2 + 1) * Y
+        @test solve(L) == C0 * exp(sqrt(x^2 + 1)) + C1 * exp(-sqrt(x^2 + 1))
+        # z'' = -(3/(16x²) + 1/(4x)) z: x^(1/4) times a cosine and a sine of √x
+        E, f1, f2 = Giac._kovacic_case2(giac_eval("-3/(16*x^2) - 1/(4*x)"), x)
+        @test (E, f1, f2) == (x^(1 // 4), cos(sqrt(x)), sin(sqrt(x)))
+        @test Giac._kovacic_case2(convert(GiacExpr, 2) * x, x) === nothing          # Airy's: no pole
+        @test Giac._fails_equation(L(y) ~ 0, exp(sqrt(x^2 + 1))^4, x, y)
+        @test !Giac._fails_equation(L(y) ~ 0, C0 * exp(sqrt(x^2 + 1)), x, y)
     end
 
     @testset "Riccati equations" begin

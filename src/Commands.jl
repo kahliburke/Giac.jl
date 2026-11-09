@@ -772,11 +772,16 @@ function desolve(eqs, y::GiacExpr)
     # an equation GIAC gives up on is tried as an Euler–Cauchy equation (ode_transforms.jl), as
     # Bessel's or Airy's (special_functions.jl), by Kovacic's algorithm and as a Riccati equation
     # (kovacic.jl); with a forcing term by variation of parameters, and conditions fitted after
-    if (eqs isa GiacExpr || eqs isa AbstractVector) && (r isa GiacError || parentmodule(@__MODULE__)._gave_up(r))
+    # (and one GIAC gets wrong, which happens: its solutions of linear equations are checked)
+    G = parentmodule(@__MODULE__)
+    eq = eqs isa AbstractVector ? first(eqs) : eqs
+    wrong = r isa GiacExpr && eq isa GiacExpr && G._fails_equation(eq, r, giac_eval(String(t)), y)
+    if (eqs isa GiacExpr || eqs isa AbstractVector) && (r isa GiacError || G._gave_up(r) || wrong)
         v = parentmodule(@__MODULE__)._desolve_methods(eqs, giac_eval(String(t)), y)
         v === nothing || return v
     end
     r isa GiacError && throw(r)
+    wrong && return giac_eval("[\"Unable to solve differential equation\"]")
     return r
 end
 

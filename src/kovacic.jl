@@ -1,8 +1,9 @@
-# Second-order linear equations y'' + a y' + b y = 0 with rational coefficients, by the first case
-# of Kovacic's algorithm (J. Symbolic Computation 2, 1986): with y = e^(-∫a/2) z the equation is
-# z'' = r z, r = a²/4 + a'/2 - b, and a solution z = P e^(∫ω), P a polynomial and ω rational, is
+# Second-order linear equations y'' + a y' + b y = 0 with rational coefficients, by the first two
+# cases of Kovacic's algorithm (J. Symbolic Computation 2, 1986): with y = e^(-∫a/2) z the equation
+# is z'' = r z, r = a²/4 + a'/2 - b, and a solution z = P e^(∫ω), P a polynomial and ω rational, is
 # found from the poles of r and its behaviour at infinity, where there is one. The second
-# solution is y₁ ∫ e^(-∫a)/y₁². Riccati equations y' = q₀ + q₁y + q₂y² are solved through the
+# solution is y₁ ∫ e^(-∫a)/y₁². Without one, the second case gives both solutions, with ω of
+# degree 2 over the rational functions. Riccati equations y' = q₀ + q₁y + q₂y² are solved through the
 # linear equation of y = -u'/(q₂u).
 
 function _kovacic(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
@@ -13,9 +14,15 @@ function _kovacic(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
     all(q -> _is_rational_in(_node(q), string(x)), (a, b)) || return nothing
     r = invoke_cmd(:normal, a^2 / 4 + invoke_cmd(:diff, a, x) / 2 - b)
     z = _kovacic_case1(r, x)
-    z === nothing && return nothing
     half = _integrate_or_nothing(a / 2, x)
     half === nothing && return nothing
+    if z === nothing
+        pair = _kovacic_case2(r, x)
+        pair === nothing && return nothing
+        E, f1, f2 = pair
+        common = invoke_cmd(:simplify, exp(-half) * E)
+        return GiacExpr(SymNode("c_0")) * common * f1 + GiacExpr(SymNode("c_1")) * common * f2
+    end
     y1 = invoke_cmd(:simplify, exp(-half) * z)
     w = _integrate_or_nothing(invoke_cmd(:simplify, exp(-2half) / y1^2), x)
     second = w === nothing ? Commands.integrate(invoke_cmd(:simplify, exp(-2half) / y1^2), x) : w
@@ -79,10 +86,16 @@ end
 
 # the monic polynomial P of degree d with P'' + 2ωP' + (ω' + ω² - r)P = 0, or nothing
 function _kovacic_polynomial(ω::GiacExpr, r::GiacExpr, x::GiacExpr, d::Integer)
-    p = [_fresh_symbol(_node(ω + r), "p$(k)__") for k in 0:(d - 1)]
-    P = x^d + sum((p[k + 1] * x^k for k in 0:(d - 1)); init = zero(GiacExpr))
     D(f) = invoke_cmd(:diff, f, x)
-    E = invoke_cmd(:numer, invoke_cmd(:normal, D(D(P)) + 2ω * D(P) + (D(ω) + ω^2 - r) * P))
+    return _monic_polynomial(P -> D(D(P)) + 2ω * D(P) + (D(ω) + ω^2 - r) * P, ω + r, x, d)
+end
+
+# the monic polynomial P of degree d with L(P) = 0, L linear, or nothing; its coefficients are
+# names fresh in `seed`
+function _monic_polynomial(L, seed::GiacExpr, x::GiacExpr, d::Integer)
+    p = [_fresh_symbol(_node(seed), "p$(k)__") for k in 0:(d - 1)]
+    P = x^d + sum((p[k + 1] * x^k for k in 0:(d - 1)); init = zero(GiacExpr))
+    E = invoke_cmd(:numer, invoke_cmd(:normal, L(P)))
     _is_zero_expr(E) && return P
     d == 0 && return nothing
     n = to_julia(invoke_cmd(:degree, E, x))
@@ -95,8 +108,77 @@ function _kovacic_polynomial(ω::GiacExpr, r::GiacExpr, x::GiacExpr, d::Integer)
     end
     (giac_type(sol) == GenTypes.VECT && length(sol) == d) || return nothing
     Q = invoke_cmd(:normal, substitute(P, Dict(zip(p, collect(sol)))))
-    _is_zero_expr(invoke_cmd(:normal, D(D(Q)) + 2ω * D(Q) + (D(ω) + ω^2 - r) * Q)) || return nothing
+    _is_zero_expr(invoke_cmd(:normal, L(Q))) || return nothing
     return Q
+end
+
+# solutions e^(∫ω) of z'' = r z with ω of degree 2 over the rational functions, by the second case
+# of Kovacic's algorithm: ω = φ/2 ± √(4r - φ² - 2φ')/2 for φ = θ + P'/P, θ = Σ eᶜ/(2(x - c)) from
+# exponents eᶜ at the poles and P a polynomial. The pair (e^(∫φ/2), f₁, f₂) with z = e^(∫φ/2) fₖ,
+# f₁, f₂ a cosine and a sine where the root is imaginary for large x; nothing where there is none
+function _kovacic_case2(r::GiacExpr, x::GiacExpr)
+    s, t = invoke_cmd(:numer, r), invoke_cmd(:denom, r)
+    _is_zero_expr(s) && return nothing
+    R = invoke_cmd(:roots, t)
+    poles, choices, orders = GiacExpr[], Vector{Vector{Int}}(), Int[]
+    for i in 1:length(R)
+        c, m = R[i][1], to_julia(R[i][2])
+        push!(poles, c)
+        push!(orders, m)
+        push!(choices, m == 1 ? [4] : m == 2 ? _case2_exponents(first(_laurent_coefficients(r, x, c, 2, 1))) : [m])
+    end
+    # this case needs a pole of order 2 or of odd order past 2
+    any(m -> m == 2 || (isodd(m) && m > 2), orders) || return nothing
+    o = to_julia(invoke_cmd(:degree, t, x)) - to_julia(invoke_cmd(:degree, s, x))
+    push!(choices, o > 2 ? [0, 2, 4] : o == 2 ? _case2_exponents(invoke_cmd(:lcoeff, s, x) / invoke_cmd(:lcoeff, t, x)) : [o])
+    D(f) = invoke_cmd(:diff, f, x)
+    for pick in Iterators.product(choices...)
+        twice = last(pick) - sum(pick[1:(end - 1)]; init = 0)
+        (twice >= 0 && iseven(twice)) || continue
+        θ = invoke_cmd(:normal, sum((pick[i] // 2 / (x - poles[i]) for i in eachindex(poles)); init = zero(GiacExpr)))
+        L(P) = D(D(D(P))) + 3θ * D(D(P)) + (3θ^2 + 3D(θ) - 4r) * D(P) + (D(D(θ)) + 3θ * D(θ) + θ^3 - 4r * θ - 2D(r)) * P
+        P = _monic_polynomial(L, θ + r, x, twice ÷ 2)
+        P === nothing && continue
+        φ = invoke_cmd(:normal, θ + D(P) / P)
+        Q = invoke_cmd(:normal, 4r - φ^2 - 2D(φ))
+        _is_zero_expr(Q) && continue
+        H = _integrate_or_nothing(φ / 2, x)
+        H === nothing && continue
+        imaginary = to_julia(invoke_cmd(:evalf, substitute(Q, x => giac_eval("1000+pi")))) < 0
+        J = _integrate_or_nothing(_root_of_squares(imaginary ? -Q : Q, x) / 2, x)
+        J === nothing && continue
+        J = invoke_cmd(:simplify, J)
+        E = invoke_cmd(:simplify, exp(_without_abs(H)))
+        return imaginary ? (E, cos(J), sin(J)) : (E, exp(J), exp(-J))
+    end
+    return nothing
+end
+
+# √q for q rational in x, its squared factors taken out, as either sign of the root will do
+function _root_of_squares(q::GiacExpr, x::GiacExpr)
+    n = _node(invoke_cmd(:factor, q))
+    n isa MulNode || return sqrt(q)
+    out, rest = Node[], Node[NumNode(n.coef)]
+    for (b, k) in n.factors
+        if k isa NumNode && k.v isa Integer
+            push!(out, _pow(b, NumNode(fld(k.v, 2))))
+            isodd(k.v) && push!(rest, b)
+        else
+            push!(rest, _pow(b, k))
+        end
+    end
+    return GiacExpr(_mul(out...)) * sqrt(GiacExpr(_mul(rest...)))
+end
+
+# the whole exponents of {2, 2 ± 2√(1 + 4b)} for a pole of order 2 with leading coefficient b
+function _case2_exponents(b::GiacExpr)
+    q = invoke_cmd(:simplify, 2sqrt(1 + 4b))
+    out = Int[2]
+    for e in (2 + q, 2 - q)
+        k = _whole_number(invoke_cmd(:simplify, e))
+        k === nothing || k in out || push!(out, k)
+    end
+    return out
 end
 
 # the coefficients ρ₀, …, ρₙ₋₁ of r at its pole c of order m: r = Σ ρⱼ (x - c)^(j - m)
