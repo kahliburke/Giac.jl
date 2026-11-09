@@ -182,6 +182,14 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return r === nothing ? parentmodule(@__MODULE__)._hold(:series, map(a -> convert(GiacExpr, a), args)) : r
     end
 
+    # GIAC's evalf to n digits of a rootof leaves epsilon at 10⁻ⁿ for the session, after which
+    # numeric integrals return two estimates: epsilon is put back
+    if cmd === :evalf && length(args) >= 2 && !get(task_local_storage(), :giac_evalf_kept, false)
+        return parentmodule(@__MODULE__)._keeping_epsilon() do
+            task_local_storage(() -> invoke_cmd(cmd, args...), :giac_evalf_kept, true)
+        end
+    end
+
     # Bessel and Airy functions at numbers have their values from SpecialFunctions (special_functions.jl),
     # and sums over the roots of a polynomial theirs from the roots (rootsum.jl)
     if cmd === :evalf && !isempty(args) && args[1] isa GiacExpr &&

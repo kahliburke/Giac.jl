@@ -50,3 +50,13 @@ function setting(name)
     v == -1 && throw(ArgumentError("$name is not a GIAC session setting"))
     return Int(v)
 end
+
+# f(), with GIAC's epsilon (the tolerance of its numeric algorithms) as it was before
+function _keeping_epsilon(f)
+    old = string(giac_eval("epsilon"))
+    try
+        return f()
+    finally
+        string(giac_eval("epsilon")) == old || giac_eval("epsilon:=$old")
+    end
+end

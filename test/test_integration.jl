@@ -117,6 +117,16 @@ end
     end
 end
 
+@testset "evalf to some digits leaves epsilon as it was" begin
+    r = giac_eval("rootof([[-3,0,-15,0,-12],[1,0,6,0,9,0,31]])")
+    eps = string(giac_eval("epsilon"))
+    Giac.Commands.evalf(r, 30)                       # GIAC itself leaves epsilon at 1e-30
+    @test string(giac_eval("epsilon")) == eps
+    @giac_var x
+    @test Giac.Commands.integrate(Giac.Commands.erfc(x)^2, x, 0, convert(GiacExpr, Inf)) ==
+          (2 - sqrt(convert(GiacExpr, 2))) / sqrt(convert(GiacExpr, π))
+end
+
 # Reciprocal substitutions u = x ± 1/x, Chebyshev's third case on both sides of 0, and parts
 @testset "Reciprocal substitutions and integration by parts" begin
     @giac_var x
