@@ -27,6 +27,8 @@ function _sum_cmd(f, n, a, b)
     v = _chu_vandermonde(convert(GiacExpr, f), n, a, b)
     v === nothing || return v
     if _is_infinity(b)
+        v = _series_sum(convert(GiacExpr, f), n, a)
+        v === nothing || return v
         v = _alternating_sum(convert(GiacExpr, f), n, a)
         v === nothing || return v
         v = _limit_of_partial(:sum, f, n, a)
@@ -227,4 +229,86 @@ function _linear_factors(p::GiacExpr, k::Node)
         push!(coef, _pow(d, e))
     end
     return params, _mul(coef...)
+end
+
+# ---------------------------------------------------------------------------------------------
+# Series in closed form
+# ---------------------------------------------------------------------------------------------
+
+# a term c zⁿ n⁻ᵖ K(n), c and z free of n and p whole, with K(n) one of 1, the harmonic number
+# Hₙ (as GIAC writes Σₖ₌₁ⁿ 1/k, ψ(n+1) + γ) and 1/C(2n, n) (n!²/(2n)!): (c, z, p, K), or nothing
+function _series_term(f::GiacExpr, n::GiacExpr)
+    node, name = _node(f), string(n)
+    factors = node isa MulNode ? node.factors : Pair{Node, Node}[node => _ONE]
+    c, z, p = GiacExpr(NumNode(node isa MulNode ? node.coef : 1)), one(GiacExpr), 0
+    kind, squares, inverses = :plain, 0, 0
+    harmonic = _node(invoke_cmd(:Psi, n + 1) + giac_eval("euler_gamma"))
+    for (b, e) in factors
+        factor = _pow(b, e)
+        if !(name in _symbol_names(factor))
+            c *= GiacExpr(factor)
+        elseif b isa SymNode && b.name == name && e isa NumNode && e.v isa Integer
+            p -= e.v
+        elseif !(name in _symbol_names(b)) && _linear_in(e, name) && _is_zero_node(_node(substitute(GiacExpr(e), n => 0)))
+            z *= GiacExpr(b)^GiacExpr(_derivative(e, name))
+        elseif b isa CallNode && b.f == "exp" && _linear_in(_mul(only(b.args), e), name) &&
+               _is_zero_node(_node(substitute(GiacExpr(_mul(only(b.args), e)), n => 0)))
+            z *= exp(GiacExpr(_derivative(_mul(only(b.args), e), name)))
+        elseif b isa CallNode && b.f == "factorial" && isequal(only(b.args), _node(n)) && e isa NumNode && e.v == 2
+            squares += 1
+        elseif b isa CallNode && b.f == "factorial" && isequal(only(b.args), _node(2n)) && e isa NumNode && e.v == -1
+            inverses += 1
+        elseif b isa CallNode && b.f in ("comb", "binomial") && length(b.args) == 2 && isequal(b.args[1], _node(2n)) &&
+               isequal(b.args[2], _node(n)) && e isa NumNode && e.v == -1
+            squares += 1
+            inverses += 1
+        elseif isequal(b, harmonic) && e isa NumNode && isone(e.v) && kind === :plain
+            kind = :harmonic
+        else
+            return nothing
+        end
+    end
+    if squares == 1 && inverses == 1 && kind === :plain
+        kind = :central
+    elseif squares != 0 || inverses != 0
+        return nothing
+    end
+    return c, z, p, kind
+end
+
+# Σₙ₌ₐ^∞ of such a term in closed form, from the series at n = 1 less the terms before a:
+#   Σ zⁿ/nᵖ = Li_p(z);
+#   Σ Hₙ/n^q = (1 + q/2) ζ(q+1) - ½ Σₖ₌₁^(q-2) ζ(k+1) ζ(q-k) (Euler), Σ Hₙ zⁿ = -ln(1-z)/(1-z),
+#   Σ Hₙ zⁿ/n = Li₂(z) + ln²(1-z)/2;
+#   Σ zⁿ/(n² C(2n,n)) = 2 asin²(t), Σ zⁿ/(n C(2n,n)) = 4t asin(t)/√(4-z),
+#   Σ zⁿ/C(2n,n) = z/(4-z) + 8t asin(t)/(4-z)^(3/2), t = √z/2;
+# nothing for other terms
+function _series_sum(f::GiacExpr, n::GiacExpr, a)
+    A = _node(convert(GiacExpr, a))
+    (A isa NumNode && A.v isa Integer && A.v >= 1) || return nothing
+    term = _series_term(f, n)
+    term === nothing && return nothing
+    c, z, p, kind = term
+    one_z = _is_zero_node(_node(z - 1))
+    t = sqrt(z) / 2
+    S = if kind === :plain
+        p >= 1 && !(one_z && p == 1) || return nothing
+        polylog(convert(GiacExpr, p), z)
+    elseif kind === :harmonic
+        if one_z && p >= 2
+            ζ(k) = invoke_cmd(:Zeta, convert(GiacExpr, k))
+            (1 + p // 2) * ζ(p + 1) - sum((ζ(k + 1) * ζ(p - k) for k in 1:(p - 2)); init = zero(GiacExpr)) / 2
+        elseif !one_z && p == 0
+            -log(1 - z) / (1 - z)
+        elseif !one_z && p == 1
+            polylog(convert(GiacExpr, 2), z) + log(1 - z)^2 / 2
+        else
+            return nothing
+        end
+    else
+        p == 2 ? 2asin(t)^2 : p == 1 ? 4t * asin(t) / sqrt(4 - z) :
+        p == 0 ? z / (4 - z) + 8t * asin(t) / (4 - z)^(3 // 2) : return nothing
+    end
+    before = sum((substitute(f, n => k) for k in 1:(Int(A.v) - 1)); init = zero(GiacExpr))
+    return invoke_cmd(:simplify, c * S - before)
 end

@@ -56,3 +56,20 @@ end
     @test string(Giac.in_radicals(giac_eval("cos(pi/8)"))) == "sqrt(2+sqrt(2))/2"
     @test string(Giac.in_radicals(giac_eval("cos(pi/7)"))) == "cos(pi/7)"       # the heptagon is not constructible
 end
+
+@testset "Series in closed form" begin
+    @giac_var n k z x
+    ∞ = convert(GiacExpr, Inf)
+    π_ = convert(GiacExpr, π)
+    ζ(s) = Giac.invoke_cmd(:Zeta, s)
+    Σ(f, a = 1) = Giac.invoke_cmd(:sum, f, n, a, ∞)
+    H = Giac.invoke_cmd(:sum, 1 / k, k, 1, n)
+    @test Σ(H / n^2) == 2ζ(3)                                                    # Euler's sums
+    @test Σ(H / n^3) == π_^4 / 72
+    @test Σ(1 / (n^2 * Giac.Commands.binomial(2n, n))) == π_^2 / 18              # the central binomial
+    @test Σ(1 / (n * Giac.Commands.binomial(2n, n))) == π_ * sqrt(convert(GiacExpr, 3)) / 9
+    @test Σ(x^n / n^2) == Giac.polylog(2, x)
+    @test Σ(x^n / n^2, 3) == Giac.polylog(2, x) - x - x^2 / 4
+    l = log(convert(GiacExpr, 2))
+    @test Σ(1 / (n^3 * 2^n)) == 7ζ(3) / 8 - π_^2 * l / 12 + l^3 / 6
+end
