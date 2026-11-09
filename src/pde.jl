@@ -248,7 +248,8 @@ function _separated_solution(κ, wave, x, t, ends, starts, ∂)
     explicit = isempty(terms) ? convert(GiacExpr, 0) : sum(terms)
     all(c -> _is_zero_expr(_simplified(c)), generic) && return explicit
     F = factors(n)
-    term = _at_whole(_simplified(sum(generic[i] * F[i] for i in eachindex(givens)) * X), n)
+    # each coefficient factored on its own, times its time factor and the eigenfunction
+    term = sum(_at_whole(invoke_cmd(:factor, _simplified(generic[i])), n) * F[i] for i in eachindex(givens)) * X
     return explicit + _hold(:sum, (term, n, last_explicit + 1, giac_eval("inf")))
 end
 
