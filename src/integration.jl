@@ -115,7 +115,8 @@ function _integrate(f::GiacExpr, x::GiacExpr, a, b)
     v === nothing || return v
     r = invoke_cmd(:integrate, f, x, a, b)
     _integral_left(r) || return r
-    for method in (_parametric_integral, _exponential_integral, _reflected_integral)
+    for method in (_parametric_integral, _exponential_integral, _reflected_integral, _parts_integral,
+                   _antiderivative_integral)
         v = method(f, x, a, b)
         v === nothing || return v
     end
@@ -244,4 +245,124 @@ function _derivative_in(f::GiacExpr, x::GiacExpr)
         k = Int(to_julia(a[3]))
     end
     return (a[1], k)
+end
+
+# ---------------------------------------------------------------------------------------------
+# Integration by parts
+# ---------------------------------------------------------------------------------------------
+
+# functions whose derivatives are elementary, taken as u in ∫ u w = uV - ∫ u'V
+const _PARTS_HEADS = ("erf", "erfc", "ln", "atan", "asin", "acos", "asinh", "acosh", "atanh", "Ei", "Si", "Ci")
+const _PARTS_DEPTH = 3
+
+# f as u w: u a whole power of one of the functions in x, w the rest; or nothing
+function _parts_split(f::GiacExpr, x::GiacExpr)
+    n, name = _node(f), string(x)
+    factors = n isa MulNode ? n.factors : Pair{Node, Node}[n => _ONE]
+    for (i, (b, k)) in enumerate(factors)
+        (b isa CallNode && b.f in _PARTS_HEADS && name in _symbol_names(b) &&
+         k isa NumNode && k.v isa Integer && k.v > 0) || continue
+        rest = n isa MulNode ? _mul(NumNode(n.coef), (_pow(c, e) for (j, (c, e)) in enumerate(factors) if j != i)...) : _ONE
+        return GiacExpr(_pow(b, k)), GiacExpr(rest)
+    end
+    return nothing
+end
+
+# u, V = ∫ w and u'V for f = u w, within the depth of nested integrations by parts; or nothing
+function _parts(f::GiacExpr, x::GiacExpr)
+    depth = get(task_local_storage(), :giac_parts_depth, 0)
+    depth >= _PARTS_DEPTH && return nothing
+    split = _parts_split(f, x)
+    split === nothing && return nothing
+    u, w = split
+    V = _is_zero_node(_node(w - 1)) ? x : _integrate_or_nothing(w, x)
+    V === nothing && return nothing
+    return u, V, invoke_cmd(:simplify, invoke_cmd(:diff, u, x) * V), depth
+end
+
+# ∫ f dx = uV - ∫ u'V, the antiderivative checked by its derivative; a sum term by term, as a
+# term such as erf(x)² may need the parts its neighbours do not
+function _parts_antiderivative(f::GiacExpr, x::GiacExpr)
+    n = _node(f)
+    n isa AddNode || _parts_split(f, x) !== nothing || (n = _expand(n))       # (1 - erf(x))²
+    if n isa AddNode
+        parts = GiacExpr[]
+        for m in _terms(n)
+            F = _integral_or_parts(GiacExpr(m), x)
+            F === nothing && return nothing
+            push!(parts, F)
+        end
+        F = sum(parts)
+        return _is_antiderivative(F, f, x) ? F : nothing
+    end
+    p = _parts(f, x)
+    p === nothing && return nothing
+    u, V, g, depth = p
+    R = task_local_storage(() -> _integral_or_parts(g, x), :giac_parts_depth, depth + 1)
+    R === nothing && return nothing
+    F = _erfi_form(u * V - R)
+    return _is_antiderivative(F, f, x) ? F : nothing
+end
+
+# ∫ f dx by the whole integration, else by parts directly, which needs no search (the search runs
+# only with GIAC on a thread of its own)
+function _integral_or_parts(f::GiacExpr, x::GiacExpr)
+    F = _integrate_or_nothing(f, x)
+    F === nothing || return F
+    depth = get(task_local_storage(), :giac_parts_depth, 0)
+    depth >= _PARTS_DEPTH && return nothing
+    return task_local_storage(() -> _parts_antiderivative(f, x), :giac_parts_depth, depth + 1)
+end
+
+# ∫ₐᵇ f dx = [uV]ₐᵇ - ∫ₐᵇ u'V, the ends by limits
+function _parts_integral(f::GiacExpr, x::GiacExpr, a, b)
+    p = _parts(f, x)
+    p === nothing && return nothing
+    u, V, g, depth = p
+    UV = u * V
+    ends = GiacExpr[]
+    for (point, side) in ((b, -1), (a, 1))
+        v = try
+            _is_infinity(point) || _is_infinity(-convert(GiacExpr, point)) ? invoke_cmd(:limit, UV, x, point) :
+                                                                              invoke_cmd(:limit, UV, x, point, side)
+        catch e
+            _stopped(e) && rethrow()
+            return nothing
+        end
+        (_is_finite_value(v) && !_unevaluated(v, "limit")) || return nothing
+        push!(ends, v)
+    end
+    R = task_local_storage(() -> Commands.integrate(g, x, a, b), :giac_parts_depth, depth + 1)
+    _integral_left(R) && return nothing
+    return invoke_cmd(:simplify, ends[1] - ends[2] - R)
+end
+
+# ∫ₐᵇ f dx as F(b⁻) - F(a⁺) for the antiderivative F the search finds, kept only where it agrees
+# with the integral computed numerically: F may jump inside the interval, and an integrand such as
+# erfc(x)², which GIAC writes erf(x)² - 2erf(x) + 1, has terms that diverge apart
+function _antiderivative_integral(f::GiacExpr, x::GiacExpr, a, b)
+    F = _integral_or_parts(f, x)
+    F === nothing && return nothing
+    ends = GiacExpr[]
+    for (point, side) in ((b, -1), (a, 1))
+        v = try
+            _is_infinity(point) || _is_infinity(-convert(GiacExpr, point)) ? invoke_cmd(:limit, F, x, point) :
+                                                                              invoke_cmd(:limit, F, x, point, side)
+        catch e
+            _stopped(e) && rethrow()
+            return nothing
+        end
+        (_is_finite_value(v) && !_unevaluated(v, "limit")) || return nothing
+        push!(ends, v)
+    end
+    value = invoke_cmd(:simplify, ends[1] - ends[2])
+    numeric = try
+        _approx_value(invoke_cmd(:evalf, _hold(:integrate, (f, x, convert(GiacExpr, a), convert(GiacExpr, b)))))
+    catch e
+        _stopped(e) && rethrow()
+        nothing
+    end
+    exact = _approx_value(value)
+    (numeric isa Number && exact isa Number && abs(numeric - exact) <= 1e-8 * max(1, abs(exact))) || return nothing
+    return value
 end

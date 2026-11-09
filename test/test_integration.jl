@@ -117,6 +117,29 @@ end
     end
 end
 
+# Reciprocal substitutions u = x ± 1/x, Chebyshev's third case on both sides of 0, and parts
+@testset "Reciprocal substitutions and integration by parts" begin
+    @giac_var x
+    C = Giac.Commands
+    ∞ = convert(GiacExpr, Inf)
+    # d/dx F - f at points on both sides of 0
+    off(F, f) = maximum(abs(to_julia(C.evalf(substitute(C.diff(F, x) - f, x => v)))) for v in (-1.61, -0.37, 0.83, 1.61))
+    for f in ((x^2 - 1) / ((x^2 + 1) * sqrt(x^4 + 1)), (x^2 + 1) / ((x^2 - 1) * sqrt(x^4 + 1)))
+        F = Giac._reciprocal_substitution(f, x)
+        @test F !== nothing && off(F, f) < 1e-9
+    end
+    @test Giac._reciprocal_substitution(1 / sqrt(x^4 + 1), x) === nothing        # elliptic
+    f = 1 / (1 + x^4)^(1 // 4)
+    F = Giac._binomial_substitution(f, x)
+    @test F !== nothing && off(F, f) < 1e-9
+    f = x * exp(-x^2) * C.erfc(x)                                                # parts, once
+    F = Giac._parts_antiderivative(f, x)
+    @test F !== nothing && off(F, f) < 1e-9
+    F = Giac._parts_antiderivative(C.erf(x)^2, x)                                # parts, twice
+    @test F !== nothing && off(F, C.erf(x)^2) < 1e-9
+    @test C.integrate(C.erfc(x)^2, x, 0, ∞) == (2 - sqrt(convert(GiacExpr, 2))) / sqrt(convert(GiacExpr, π))
+end
+
 @testset "Factoring over the rationals" begin
     @giac_var x
     C = Giac.Commands
