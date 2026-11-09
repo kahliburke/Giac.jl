@@ -268,7 +268,7 @@ end
 # Forcing terms and conditions
 # ---------------------------------------------------------------------------------------------
 
-const _DESOLVE_METHODS = (:_euler_cauchy, :_bessel_equation, :_kovacic, :_riccati)
+const _DESOLVE_METHODS = (:_euler_cauchy, :_bessel_equation, :_kovacic, :_riccati, :_autonomous)
 
 # the solution of `eqs`, an equation or a vector of one and conditions on y and its derivatives at
 # points, by the methods after GIAC's: the equation's general solution, with a forcing term by
@@ -276,6 +276,11 @@ const _DESOLVE_METHODS = (:_euler_cauchy, :_bessel_equation, :_kovacic, :_riccat
 function _desolve_methods(eqs, x::GiacExpr, y::GiacExpr)
     eq, conditions = eqs isa GiacExpr ? (eqs, Any[]) : (first(eqs), collect(Any, eqs[2:end]))
     eq isa GiacExpr || return nothing
+    # an autonomous equation's initial values fixed in its solution directly (autonomous.jl)
+    if !isempty(conditions)
+        v = _autonomous_initial(eq, conditions, x, y)
+        v === nothing || return v
+    end
     S = _general_solution(eq, x, y)
     S === nothing && return nothing
     return isempty(conditions) ? S : _fit_conditions(S, conditions, x, y)

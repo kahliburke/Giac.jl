@@ -81,21 +81,28 @@ _gave_up(r::GiacExpr) = giac_type(r) == GenTypes.STRNG ||
     (giac_type(r) == GenTypes.VECT && all(i -> giac_type(r[i]) == GenTypes.STRNG, 1:length(r)))
 
 # whether `sol`, GIAC's solution of the linear differential equation `eq` in the function `y` of
-# `x`, fails it: the equation's residual at two points, with values for the constants, against the
-# sizes of its terms. Values that do not evaluate to numbers decide nothing.
+# `x`, fails it (_residual): values that do not evaluate to numbers decide nothing
 function _fails_equation(eq::GiacExpr, sol::GiacExpr, x::GiacExpr, y::GiacExpr)
     (giac_type(sol) == GenTypes.VECT || _gave_up(sol)) && return false
     _linear_coefficients(eq, x, y) === nothing && return false
+    return _residual(eq, sol, x, y) === false
+end
+
+# whether `sol` satisfies the differential equation `eq` in the function `y` of `x`: its residual
+# at two points, with values for the constants and any `values` given, against the sizes of the
+# equation's terms; nothing where the values are not numbers
+function _residual(eq::GiacExpr, sol::GiacExpr, x::GiacExpr, y::GiacExpr; values = Dict{GiacExpr, Any}(), points = (0.73, 1.37))
     S = _derivative_symbols(eq, x, y)
+    S === nothing && return nothing
     E = _node(S.E)
     terms = E isa AddNode ? [(GiacExpr(t), c) for (t, c) in E.terms] : [(GiacExpr(E), 1)]
     derivatives = [sol]
     for _ in 2:length(S.d)
         push!(derivatives, invoke_cmd(:diff, last(derivatives), x))
     end
-    constants = Dict(GiacExpr(SymNode("c_$(k - 1)")) => v for (k, v) in enumerate((0.7, -1.3, 0.4, 1.9)))
-    for v in (0.73, 1.37)
-        at = merge(constants, Dict(x => v))
+    constants = Dict{GiacExpr, Any}(GiacExpr(SymNode("c_$(k - 1)")) => v for (k, v) in enumerate((0.7, -1.3, 0.4, 1.9)))
+    for v in points
+        at = merge(constants, values, Dict(x => v))
         number(e) = try
             z = to_julia(invoke_cmd(:evalf, substitute(e, at)))
             z isa Number && isfinite(z) ? z : nothing
@@ -104,12 +111,11 @@ function _fails_equation(eq::GiacExpr, sol::GiacExpr, x::GiacExpr, y::GiacExpr)
             nothing
         end
         dk = [number(f) for f in derivatives]
-        any(isnothing, dk) && return false
-        values = merge(Dict(x => v), Dict(zip(S.d, dk)))
-        parts = [number(substitute(t, values)) for (t, _) in terms]
-        any(isnothing, parts) && return false
+        any(isnothing, dk) && return nothing
+        parts = [number(substitute(t, Dict(zip(S.d, dk)))) for (t, _) in terms]
+        any(isnothing, parts) && return nothing
         residual = abs(sum(c * p for ((_, c), p) in zip(terms, parts)))
-        residual > 1e-8 * (1 + sum(abs(c * p) for ((_, c), p) in zip(terms, parts))) && return true
+        residual > 1e-8 * (1 + sum(abs(c * p) for ((_, c), p) in zip(terms, parts))) && return false
     end
-    return false
+    return true
 end

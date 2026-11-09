@@ -7,11 +7,11 @@
 # ellipk(m), ellipe(m), ellipe(φ, m), ellipf(φ, m), ellippi(n, m), ellippi(n, φ, m). Their values
 # come from Carlson's symmetric integrals, at any precision and complex arguments.
 
-const _ELLIPTIC = ("ellipk", "ellipe", "ellipf", "ellippi")
+const _ELLIPTIC = ("ellipk", "ellipe", "ellipf", "ellippi", "jacobiam", "jacobisn", "jacobicn", "jacobidn")   # Jacobi's in jacobi.jl
 
 # the numbers of arguments each takes
 _elliptic_arity(f::AbstractString, k::Integer) =
-    f == "ellipk" ? k == 1 : f == "ellipe" ? k in (1, 2) : f == "ellipf" ? k == 2 : f == "ellippi" && k in (2, 3)
+    f == "ellipk" ? k == 1 : f == "ellipe" ? k in (1, 2) : f in ("ellipf", _JACOBI...) ? k == 2 : f == "ellippi" && k in (2, 3)
 
 """
     ellipk(m)
@@ -65,6 +65,7 @@ SpecialFunctions.ellipe(m::GiacExpr) = ellipe(m)
 # parameter, F(φ|m) = K(1/m)/√m and E(φ|m) = √m (E(1/m) - (1 - 1/m) K(1/m))), Π at n = 0, and the
 # value at floats
 function _elliptic(f::String, args::Node...)
+    f in _JACOBI && return _jacobi(f, args...)
     if all(a -> a isa NumNode, args) && any(_inexact, args)
         v = _elliptic_number(f, (a.v for a in args)...)
         v === nothing || return NumNode(v)
@@ -135,6 +136,7 @@ function _elliptic_derivative(f::String, n::CallNode, x::String)
 end
 
 function _elliptic_partial(f::String, G::Vector{GiacExpr}, i::Integer)
+    f in _JACOBI && return _jacobi_partial(f, G, i)
     call(g, a...) = GiacExpr(_elliptic(g, map(_node, a)...))
     if f == "ellipk"
         m = G[1]
@@ -175,6 +177,7 @@ end
 # (DLMF 19.25.5, 19.25.7, 19.25.14), a real φ reduced to [-π/2, π/2] by F(φ + kπ) = F(φ) + 2kK;
 # nothing where the arguments are not numbers
 function _elliptic_number(f::String, args::Number...)
+    f in _JACOBI && return _jacobi_number(f, args...)
     all(a -> a isa Number && isfinite(a), args) || return nothing
     T = float(real(promote_type(map(typeof, args)...)))
     T <: AbstractFloat || (T = Float64)

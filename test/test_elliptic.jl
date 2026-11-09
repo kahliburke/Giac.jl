@@ -1,5 +1,5 @@
-# Elliptic integrals: values against Mathematica's, derivatives against differences, rules and
-# integrals
+# Elliptic integrals and Jacobi's functions: values against Mathematica's, derivatives against
+# differences, rules, integrals, and the autonomous equations solved with them
 
 import SpecialFunctions as SF
 
@@ -73,5 +73,55 @@ import SpecialFunctions as SF
         T = C.integrate(1 / sqrt(cos(x) - cos(a)), x, 0, a)
         @test string(T) == "sqrt(2)*ellipk(sin(a/2)^2)"
         @test abs(to_julia(C.evalf(substitute(T, a => 1.1))) - sqrt(2) * G.ellipk(sin(0.55)^2)) < 1e-12
+    end
+
+    @testset "Jacobi's functions" begin
+        # Mathematica's values, m > 1 and a complex u among them
+        for (v, w) in ((G.jacobiam(0.7, 0.4), 0.6793975853463283), (G.jacobisn(0.7, 0.4), 0.6283244887511652),
+                       (G.jacobicn(3.1, 0.8), -0.4008800843489769), (G.jacobidn(5.3, 0.6), 0.6880395546674922),
+                       (G.jacobisn(0.9, 2.5), 0.6083703815327519), (G.jacobicn(0.9, 2.5), 0.7936532485120276),
+                       (G.jacobidn(0.9, 2.5), 0.27333806391396553), (G.jacobisn(1.2, -2.0), 0.998775699224254),
+                       (G.jacobiam(10.0, 0.9), 5.9752822590846275),
+                       (G.jacobisn(0.3 + 0.4im, 0.5), 0.32892700418250387 + 0.38683569436766424im))
+            @test abs(v - w) < 1e-14
+        end
+        @giac_var u
+        at = Dict(u => 0.71, m => 0.37)
+        num(e, d) = to_julia(C.evalf(substitute(e, d)))
+        for e in (G.jacobiam(u, m), G.jacobisn(u, m), G.jacobicn(u, m), G.jacobidn(u, m)), v in (u, m)
+            h = 1e-6
+            fd = (num(e, merge(at, Dict(v => at[v] + h))) - num(e, merge(at, Dict(v => at[v] - h)))) / 2h
+            @test abs(num(C.diff(e, v), at) - fd) < 1e-7
+        end
+        @test C.diff(G.jacobisn(u, m), u) == G.jacobicn(u, m) * G.jacobidn(u, m)
+        @test G.jacobisn(u, 0) == sin(u) && G.jacobicn(-u, m) == G.jacobicn(u, m) && G.jacobidn(u, 1) == 1 / cosh(u)
+        @test G.jacobiam(G.ellipf(φ, m), m) == φ && G.jacobisn(G.ellipk(m), m) == 1
+        @test Giac.giac_latex(G.jacobisn(u, m)) == "\\operatorname{sn}\\left(u \\middle| m\\right)"
+    end
+
+    @testset "autonomous equations" begin
+        @giac_var t y(t) k::positive
+        y′ = Giac.invoke_cmd(:diff, y, t)
+        D2(Y) = C.diff(Y, t, 2)
+        C0, C1 = giac_eval("c_0"), giac_eval("c_1")
+        pendulum, duffing = Y -> D2(Y) + sin(Y), Y -> D2(Y) + Y + Y^3
+        # general solutions, checked where the constants give real parameters below 1
+        for (L, values) in ((pendulum, Dict{GiacExpr, Any}(C0 => 1.9, C1 => 0.3)),
+                            (Y -> D2(Y) + k * sin(Y), Dict{GiacExpr, Any}(C0 => 1.9, C1 => 0.3, k => 1.7)),
+                            (duffing, Dict{GiacExpr, Any}(C0 => 0.7, C1 => 0.3)))
+            S = C.desolve(L(y) ~ 0, y)
+            @test Giac._residual(L(y) ~ 0, S, t, y; values = values) === true
+        end
+        @test string(C.desolve(pendulum(y) ~ 0, y)) == "2*jacobiam(sqrt(c_0+1)*(t+c_1)/sqrt(2),2/(c_0+1))"
+        # from rest, swinging, turning over, and Duffing's from rest
+        @test string(C.desolve([pendulum(y) ~ 0, y(0) ~ a, y′(0) ~ 0], y)) ==
+              "2*asin(sin(a/2)*jacobicn(t,sin(a/2)^2)/jacobidn(t,sin(a/2)^2))"
+        @test string(C.desolve([pendulum(y) ~ 0, y(0) ~ 0, y′(0) ~ 1], y)) == "2*asin(jacobisn(t,1/4)/2)"
+        @test string(C.desolve([pendulum(y) ~ 0, y(0) ~ 0, y′(0) ~ 3], y)) == "2*jacobiam(3*t/2,4/9)"
+        @test string(C.desolve([duffing(y) ~ 0, y(0) ~ a, y′(0) ~ 0], y)) == "a*jacobicn(sqrt(a^2+1)*t,a^2/(2*a^2+2))"
+        s = C.desolve([pendulum(y) ~ 0, y(0) ~ 1, y′(0) ~ -1 // 2], y)
+        at(e, v) = to_julia(C.evalf(substitute(e, t => v)))
+        @test abs(at(s, 0) - 1) < 1e-12 && abs(at(C.diff(s, t), 0) + 0.5) < 1e-12
+        @test Giac._residual(pendulum(y) ~ 0, s, t, y) === true
     end
 end
