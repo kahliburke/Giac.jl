@@ -704,6 +704,16 @@ and `x Ai` integrate to `Ai` and `Ai′`.
 An erf of an imaginary argument in an antiderivative is written with erfi: `∫ e^(x²) dx` is
 `√π erfi(x)/2`.
 
+Elliptic integrands, `(a + b sin²u)^(±1/2)` with sines and cosines of u or 2u and square roots of
+even quadratics, are written with the elliptic integrals `ellipf`, `ellipe` and `ellippi`, and
+their definite integrals with the complete ones:
+
+```julia
+@giac_var x a
+integrate(1 / sqrt(1 - x^4), x)                       # ellipf(asin(x),-1)
+integrate(1 / sqrt(cos(x) - cos(a)), x, 0, a)         # sqrt(2)*ellipk(sin(a/2)^2)
+```
+
 A definite integral on [0, 1] or [0, ∞) that GIAC leaves unevaluated is tried term by term as a
 derivative of a Beta or Gamma integral in its parameters, for terms such as
 `xᵅ (1-x)ᵝ (ln x)ᵐ (ln(1-x))ⁿ`, `xᵅ e⁻ᵏˣ (ln x)ᵐ` and `xᵅ (1+x)⁻ᵞ (ln x)ᵐ (ln(1+x))ⁿ`. A term
@@ -739,6 +749,16 @@ desolve([diff(y, t, 2) + 3diff(y, t) + 2y ~ 0, y(0) ~ 1, Differential(t)(y)(0) ~
 `y` may be the function as declared, `y(t)`: GIAC needs its name, `y`, to apply initial
 conditions, and gets it. Declared that way, `y` also tells `desolve(eqs, y)` the variable `t`
 (GIAC's own default is `x`).
+
+The pendulum's equation `y'' + k sin y = 0` and Duffing's `y'' + αy + βy³ = 0` are solved through
+their energy with Jacobi's elliptic functions, and with `y(x₀)` and `y'(x₀)` given, the
+pendulum's swing or turning over is found:
+
+```julia
+@giac_var t a y(t)
+desolve([diff(y, t, 2) + sin(y) ~ 0, y(0) ~ a, Differential(t)(y)(0) ~ 0], y)
+# 2*asin(sin(a/2)*jacobicn(t,sin(a/2)^2)/jacobidn(t,sin(a/2)^2))
+```
 
 A function of two variables, `u(x, t)`, is solved for in a first-order linear equation, by
 characteristics, with an arbitrary function `F_0` or a condition on a line; and in the heat and
