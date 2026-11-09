@@ -1,11 +1,17 @@
-# Bessel, Hankel and Airy functions. GIAC's BesselJ and its kin take only an integer order and a
+# Bessel, Hankel, Airy and Struve functions. GIAC's BesselJ and its kin take only an integer order and a
 # real argument, and have no derivatives, so these are kept as calls GIAC does not interpret,
 # named as SpecialFunctions names them: besselj(ν, x), …, airyaiprime(x). Their derivatives are
 # taken on the tree, their values come from SpecialFunctions, and an order that is half an odd
 # integer is written with elementary functions, as are negative whole orders with positive ones.
+# SpecialFunctions has no Struve functions: `Giac.struveh` and `Giac.struvel` are defined here, with
+# their values by quadrature.
 
 const _BESSEL = ("besselj", "bessely", "besseli", "besselk", "hankelh1", "hankelh2")
 const _AIRY = ("airyai", "airybi", "airyaiprime", "airybiprime")
+const _STRUVE = ("struveh", "struvel")
+
+# the Julia function of the name, from SpecialFunctions or, for the Struve functions, Giac
+_special_module(f::AbstractString) = f in _STRUVE ? (@__MODULE__) : SpecialFunctions
 
 _special(f::String, args::Node...) = CallNode("of", Node[SymNode(f), args...])
 
@@ -16,6 +22,7 @@ function _special_name(n::CallNode)
     f = n.args[1].name
     f in _BESSEL && length(n.args) == 3 && return f
     f in _AIRY && length(n.args) == 2 && return f
+    f in _STRUVE && length(n.args) == 3 && return f
     return nothing
 end
 
@@ -44,6 +51,72 @@ for f in Symbol.(_BESSEL)
 end
 for f in Symbol.(_AIRY)
     @eval SpecialFunctions.$f(x::GiacExpr) = GiacExpr(_airy($(string(f)), _node(x)))
+end
+
+"""
+    struveh(ν, x)
+    struvel(ν, x)
+
+The Struve function H_ν(x) and the modified Struve function L_ν(x). At real numbers they are
+numbers, from the integral
+`H_ν(x) = 2(x/2)^ν/(√π Γ(ν+1/2)) ∫₀¹ (1-t²)^(ν-1/2) sin(xt) dt` (`sinh` for L_ν). With a Giac
+expression they are symbolic, as Bessel functions are: half-integer orders are written with
+elementary functions, `struveh(1//2, x)` as `√(2/(πx)) (1 - cos x)`.
+"""
+function struveh end
+@doc (@doc struveh) function struvel end
+
+for f in Symbol.(_STRUVE)
+    @eval $f(ν::Real, x::Real) = _struve_number($(string(f)), ν, x)
+    @eval $f(ν::GiacExpr, x::GiacExpr) = GiacExpr(_struve($(string(f)), _node(ν), _node(x)))
+    @eval $f(ν::Number, x::GiacExpr) = $f(convert(GiacExpr, ν), x)
+    @eval $f(ν::GiacExpr, x::Number) = $f(ν, convert(GiacExpr, x))
+end
+
+# H_ν(x) or L_ν(x): half-integer and negative whole orders from the recurrences below, 0 at 0
+# for a whole order, and the value at a float
+function _struve(f::String, ν::Node, x::Node)
+    if _exact_number(ν) && (denominator(ν.v) == 2 || ν.v isa Integer && ν.v < 0)
+        return _node(_struve_order(f, Rational{Int}(ν.v), GiacExpr(x)))
+    elseif _exact_number(ν) && ν.v isa Integer && _is_zero_node(x)
+        return _ZERO
+    elseif ν isa NumNode && x isa NumNode && (_inexact(ν) || _inexact(x))
+        v = _special_value(f, ν.v, x.v)
+        v === nothing || return NumNode(v)
+    end
+    return _special(f, ν, x)
+end
+
+# orders ±1/2 in closed form, and the others from orders 0 and 1 or -1/2 and 1/2 by
+#     H_(m+1) = (2m/x) H_m - H_(m-1) + c_m,   L_(m+1) = L_(m-1) - (2m/x) L_m - c_m,
+# c_m = (x/2)^m/(√π Γ(m+3/2)), run upward or downward
+function _struve_order(f::String, ν::Rational, x::GiacExpr)
+    π_ = convert(GiacExpr, π)
+    H = f == "struveh"
+    c(m) = (x / 2)^m / (sqrt(π_) * invoke_cmd(:Gamma, m + 3 // 2))
+    if denominator(ν) == 2
+        r = sqrt(2 / (π_ * x))
+        lo, hi = H ? (r * sin(x), r * (1 - cos(x))) : (r * sinh(x), r * (cosh(x) - 1))
+        base = -1 // 2
+    else
+        lo, hi = GiacExpr(_special(f, _ZERO, _node(x))), GiacExpr(_special(f, _ONE, _node(x)))
+        base = 0 // 1
+    end
+    ν == base && return lo
+    ν == base + 1 && return hi
+    if ν > base + 1
+        a, b, m = lo, hi, base + 1                 # orders m - 1 and m
+        while m < ν
+            a, b, m = b, H ? 2m / x * b - a + c(m) : a - 2m / x * b - c(m), m + 1
+        end
+        return _expand_cmd(b)
+    else
+        a, b, m = lo, hi, base                     # orders m and m + 1
+        while m > ν
+            a, b, m = H ? 2m / x * a - b + c(m) : b + 2m / x * a + c(m), a, m - 1
+        end
+        return _expand_cmd(a)
+    end
 end
 
 _inexact(n::Node) = n isa NumNode && (n.v isa AbstractFloat || n.v isa Complex{<:AbstractFloat})
@@ -90,6 +163,10 @@ end
 
 # the value from SpecialFunctions, real where the function is real at a real argument
 function _special_value(f::String, args::Number...)
+    if f in _STRUVE
+        all(a -> a isa Real, args) || return nothing
+        return _struve_number(f, args...)
+    end
     fn = getfield(SpecialFunctions, Symbol(f))
     v = try
         fn(map(a -> a isa Rational || a isa Integer ? float(a) : a, args)...)
@@ -150,6 +227,14 @@ function _special_derivative(n::CallNode, x::String)
     x in _symbol_names(ν) && return nothing
     du = _derivative(u, x)
     (du === nothing || _is_zero_node(du)) && return du
+    if f in _STRUVE
+        # H_ν' = (ν/u) H_ν - H_(ν+1) + c_ν and L_ν' = (ν/u) L_ν + L_(ν+1) + c_ν, from (u^(-ν) H_ν)'
+        V, U = GiacExpr(ν), GiacExpr(u)
+        c = (U / 2)^V / (sqrt(convert(GiacExpr, π)) * invoke_cmd(:Gamma, V + 3 // 2))
+        next = GiacExpr(_struve(f, _add(ν, _ONE), u))
+        d = V / U * GiacExpr(n) + (f == "struveh" ? -next : next) + c
+        return _mul(du, _node(d))
+    end
     below, above = _bessel(f, _add(ν, _MINUS_ONE), u), _bessel(f, _add(ν, _ONE), u)
     d = _is_zero_node(ν) ? (f == "besseli" ? _bessel(f, _ONE, u) : _neg(_bessel(f, _ONE, u))) :
         f == "besseli" ? _mul(NumNode(1 // 2), _add(below, above)) :
@@ -247,7 +332,7 @@ function _special_terms_integral(f::GiacExpr, x::GiacExpr)
     return sum(parts)
 end
 
-# ∫ c xᵖ Z_ν(kx) dx, from
+# ∫ c xᵖ Z_ν(kx) dx, with p - ν even ending in Struve functions (_struve_antiderivative), from
 #     (x^μ Z_μ(kx))' = k x^μ Z_(μ-1)(kx),   (x^(-μ) Z_μ(kx))' = -k x^(-μ) Z_(μ+1)(kx)
 # for Z = J, Y, H⁽¹⁾, H⁽²⁾ (I takes + in the second, K - in the first), by parts down to one of
 # them: where p - ν is odd and positive, ∫ xᵖ Z_ν = xᵖ Z_(ν+1)/k - (p-ν-1)/k ∫ xᵖ⁻¹ Z_(ν+1),
@@ -297,7 +382,8 @@ function _bessel_antiderivative(f::String, ν::GiacExpr, u::Node, k::GiacExpr, p
     Z(m) = GiacExpr(_bessel(f, _node(m), u))
     up = _whole_difference(_node(p - ν), _ZERO)          # p - ν
     down = _whole_difference(_node(p + ν), _ZERO)        # p + ν
-    if up !== nothing && up > 0 && isodd(up)
+    if up !== nothing && up >= 0 && (isodd(up) || f != "besselk")
+        up == 0 && return _struve_antiderivative(f, ν, u, k, x)
         sign = f == "besselk" ? -1 : 1                   # (x^μ Z_μ)' = sign k x^μ Z_(μ-1)
         rest = up == 1 ? zero(GiacExpr) : _bessel_antiderivative(f, ν + 1, u, k, p - 1, x)
         rest === nothing && return nothing
@@ -309,6 +395,17 @@ function _bessel_antiderivative(f::String, ν::GiacExpr, u::Node, k::GiacExpr, p
         return sign * (x^p * Z(ν - 1) - (down - 1) * rest) / k
     end
     return nothing
+end
+
+# ∫ x^ν Z_ν(kx) dx = √π 2^(ν-1) Γ(ν+1/2) x (Z_ν H_(ν-1) - Z_(ν-1) H_ν)(kx) / k^ν, for Z = J, Y
+# and the Hankel functions with the Struve function H, and for I with L (DLMF 10.22.2, 10.43.2)
+function _struve_antiderivative(f::String, ν::GiacExpr, u::Node, k::GiacExpr, x::GiacExpr)
+    f == "besselk" && return nothing
+    S = f == "besseli" ? "struvel" : "struveh"
+    Z(m) = GiacExpr(_bessel(f, _node(m), u))
+    W(m) = GiacExpr(_struve(S, _node(m), u))
+    C = sqrt(convert(GiacExpr, π)) * 2^(ν - 1) * invoke_cmd(:Gamma, ν + 1 // 2)
+    return C * x * (Z(ν) * W(ν - 1) - Z(ν - 1) * W(ν)) / k^ν
 end
 
 # ---------------------------------------------------------------------------------------------
@@ -419,7 +516,7 @@ _rebuilt_specials(n::Node) = _replace_nodes(n) do m
     f = _special_name(m)
     f === nothing && return nothing
     args = Node[_rebuilt_specials(a) for a in m.args[2:end]]
-    return f in _AIRY ? _airy(f, args[1]) : _bessel(f, args[1], args[2])
+    return f in _AIRY ? _airy(f, args[1]) : f in _STRUVE ? _struve(f, args[1], args[2]) : _bessel(f, args[1], args[2])
 end
 
 # `series(f, x, a, n)` of an expression with the functions in it, as GIAC writes a series: the
@@ -489,4 +586,32 @@ function _bessel_integral_converges(f::GiacExpr, x::GiacExpr)
           Z == "besselk" ? (α > -k || α == -k && p < -1 // 2) :
           (α > 0 || α == 0 && p < 1 // 2)
     return at0 && at∞
+end
+
+# H_ν(x) and L_ν(x) at real numbers, for ν ≥ 1/2 from
+#     H_ν(x) = 2(x/2)^ν/(√π Γ(ν+1/2)) ∫₀¹ (1-t²)^(ν-1/2) sin(xt) dt
+# (sinh for L_ν) by tanh-sinh quadrature, where the integrand is bounded, with steps fine enough
+# for the oscillation, and lower
+# orders from the recurrences
+#     H_(ν-1) = (2ν/x) H_ν - H_(ν+1) + (x/2)^ν/(√π Γ(ν+3/2)),
+#     L_(ν-1) = L_(ν+1) + (2ν/x) L_ν + (x/2)^ν/(√π Γ(ν+3/2))
+function _struve_number(f::String, ν::Real, x::Real)
+    ν, x = float(ν), float(x)
+    if ν < 1 / 2
+        a, b = _struve_number(f, ν + 1, x), _struve_number(f, ν + 2, x)
+        m = ν + 1
+        term = (x / 2)^m / (sqrt(π) * SpecialFunctions.gamma(m + 3 / 2))
+        return f == "struveh" ? 2m / x * a - b + term : b + 2m / x * a + term
+    end
+    iszero(x) && return 0.0
+    h = 1 / (32 * max(1, ceil(Int, abs(x) / 30)))
+    total = 0.0
+    for u in -4.5:h:4.5
+        w = π / 2 * sinh(u)
+        t, s = 1 / (1 + exp(-2w)), 1 / (1 + exp(2w))      # t and 1 - t
+        dt = π / 4 * cosh(u) / cosh(w)^2
+        g = (s * (1 + t))^(ν - 1 / 2) * (f == "struveh" ? sin(x * t) : sinh(x * t))
+        isfinite(g) && (total += g * dt)
+    end
+    return 2 * (x / 2)^ν / (sqrt(π) * SpecialFunctions.gamma(ν + 1 / 2)) * h * total
 end

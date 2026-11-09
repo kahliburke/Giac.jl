@@ -56,7 +56,31 @@ import SpecialFunctions as SF
         for f in (x^3 * SF.besseli(0, 2x), x^2 * SF.bessely(1, x), SF.hankelh1(1, x))
             @test iszero(Giac.invoke_cmd(:simplify, D(∫(f)) - f))
         end
-        @test occursin("integrate", string(∫(x^2 * SF.besselj(0, x))))        # a Struve function
+    end
+
+    @testset "Struve functions" begin
+        H, L = Giac.struveh, Giac.struvel
+        val(e, v) = to_julia(Giac.invoke_cmd(:evalf, substitute(e, x => v)))
+        series(ν, v; modified = false) = sum((modified ? 1 : (-1)^k) * (v / 2)^(2k + ν + 1) /
+                                             (SF.gamma(k + 3 / 2) * SF.gamma(k + ν + 3 / 2)) for k in 0:30)
+        @test H(0, 1.0) ≈ series(0, 1.0) rtol = 1e-14
+        @test L(0, 2.0) ≈ series(0, 2.0; modified = true) rtol = 1e-14
+        @test H(2.3, 5.0) ≈ series(2.3, 5.0) rtol = 1e-13
+        @test H(-0.4, 2.0) ≈ series(-0.4, 2.0) rtol = 1e-13
+        @test H(1 // 2, 300.0) ≈ sqrt(2 / (300π)) * (1 - cos(300.0)) rtol = 1e-11
+        @test H(0, 100.0) - SF.bessely(0, 100.0) ≈ 2 / (100π) * (1 - 1e-4 + 9e-8) rtol = 1e-8
+        @test H(1 // 2, x) == sqrt(2 / (π_ * x)) * (1 - cos(x))
+        @test H(-1, x) == 2 / π_ - H(1, x)
+        @test val(L(3 // 2, x), 2.3) ≈ L(1.5, 2.3)
+        @test D(H(0, x)) == 2 / π_ - H(1, x)
+        @test to_julia(H(0, convert(GiacExpr, 1))) ≈ H(0, 1.0)
+        @test Giac.giac_latex(H(n, x)) == "\\mathbf{H}_{n}\\left(x\\right)"
+        # Bessel functions times even powers integrate to Struve functions
+        ∫(f) = Giac.Commands.integrate(f, x)
+        @test ∫(SF.besselj(0, x)) == x * SF.besselj(0, x) + π_ * x * (SF.besselj(1, x) * H(0, x) - SF.besselj(0, x) * H(1, x)) / 2
+        for f in (x^2 * SF.besselj(0, x), SF.bessely(0, 2x), SF.besseli(0, x), x^4 * SF.besseli(0, x), SF.hankelh1(0, x))
+            @test abs(val(D(∫(f)) - f, 1.7)) < 1e-11
+        end
     end
 
     @testset "definite integrals" begin

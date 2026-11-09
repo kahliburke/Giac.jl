@@ -185,12 +185,13 @@ const _CALL_TEX = Dict(
     "re" => "\\operatorname{Re}", "im" => "\\operatorname{Im}", "arg" => "\\arg",
     "trace" => "\\operatorname{tr}", "det" => "\\det")
 const _TRIG = ("sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth")
-# Bessel, Hankel and Airy functions (special_functions.jl): the letter, written with the order as
-# a subscript for the first six
+# Bessel, Hankel, Airy and Struve functions (special_functions.jl): the letter, written with the
+# order as a subscript where there is one
 const _SPECIAL_TEX = Dict(
     "besselj" => "J", "bessely" => "Y", "besseli" => "I", "besselk" => "K",
     "hankelh1" => "H^{(1)}", "hankelh2" => "H^{(2)}", "airyai" => "\\operatorname{Ai}",
-    "airybi" => "\\operatorname{Bi}", "airyaiprime" => "\\operatorname{Ai}'", "airybiprime" => "\\operatorname{Bi}'")
+    "airybi" => "\\operatorname{Bi}", "airyaiprime" => "\\operatorname{Ai}'", "airybiprime" => "\\operatorname{Bi}'",
+    "struveh" => "\\mathbf{H}", "struvel" => "\\mathbf{L}")
 
 function _pnode(e::GiacExpr)
     # numbers, names, sums and products are read off the tree directly

@@ -677,8 +677,9 @@ expression with derivatives of unknown functions (`∫(η′p + ηp′) dt`), th
 taking off one derivative term at a time: `∫ V u′ uᵖ dt = V uᵖ⁺¹/(p+1) - ∫ V′ uᵖ⁺¹/(p+1) dt`.
 
 Bessel functions times whole powers, `xᵖ Z_ν(kx)` with `p ± ν` odd and positive, are integrated
-by parts from `(x^ν Z_ν)′ = k x^ν Z_(ν-1)` and `(x^(-ν) Z_ν)′ = -k x^(-ν) Z_(ν+1)`, and `Ai′` and
-`x Ai` to `Ai` and `Ai′`.
+by parts from `(x^ν Z_ν)′ = k x^ν Z_(ν-1)` and `(x^(-ν) Z_ν)′ = -k x^(-ν) Z_(ν+1)`; where `p - ν`
+is even and not negative they end in Struve functions (`∫ J₀ = x J₀ + πx(J₁H₀ - J₀H₁)/2`). `Ai′`
+and `x Ai` integrate to `Ai` and `Ai′`.
 
 A definite integral on [0, 1] or [0, ∞) that GIAC leaves unevaluated is tried term by term as a
 derivative of a Beta or Gamma integral in its parameters, for terms such as
