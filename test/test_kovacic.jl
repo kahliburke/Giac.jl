@@ -23,8 +23,11 @@ import SpecialFunctions as SF
             @test occursin(part, string(sol))
             @test residual(L, sol) < 1e-10
         end
-        @test string(solve(Y -> d(Y, 2) + x * d(Y) + Y)) == "c_0*exp(-x^2/2)+c_1*sqrt(pi)*erfi(x/sqrt(2))*exp(-x^2/2)/sqrt(2)"
+        r2 = sqrt(convert(GiacExpr, 2))
+        @test solve(Y -> d(Y, 2) + x * d(Y) + Y) ==
+              C0 * exp(-x^2 / 2) + C1 * sqrt(convert(GiacExpr, π)) * SF.erfi(x / r2) * exp(-x^2 / 2) / r2
         @test Giac._kovacic_case1(convert(GiacExpr, 2) * x, x) === nothing          # Airy's: no such solution
+        @test !occursin("rootof", string(solve(Y -> d(Y, 2) - (x^4 + 2x) * Y)))
     end
 
     @testset "Riccati equations" begin

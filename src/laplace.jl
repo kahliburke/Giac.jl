@@ -127,7 +127,9 @@ function _laplace_by_terms(f::GiacExpr, t::GiacExpr, s::GiacExpr, depth::Int = 0
     return _tidied(parts)
 end
 
-# r or its simplified form, whichever is smaller: the theorems build answers up a step at a time
+# r or its simplified form, whichever is smaller, and not one with a rootof that r has not (GIAC's
+# simplify writes some radicals as roots of polynomials): the theorems build answers up a step at
+# a time
 function _smaller_form(r::GiacExpr)
     q = try
         invoke_cmd(:simplify, r)
@@ -135,6 +137,8 @@ function _smaller_form(r::GiacExpr)
         _stopped(e) && rethrow()
         return r
     end
+    has_rootof(e) = _any_node(m -> m isa CallNode && m.f == "rootof", _node(e))
+    has_rootof(q) && !has_rootof(r) && return r
     return Rules.expression_size(q) < Rules.expression_size(r) ? q : r
 end
 

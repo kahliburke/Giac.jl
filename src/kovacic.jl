@@ -22,7 +22,7 @@ function _kovacic(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
     w = _integrate_or_nothing(invoke_cmd(:simplify, exp(-2half) / y1^2), x)
     second = w === nothing ? Commands.integrate(invoke_cmd(:simplify, exp(-2half) / y1^2), x) : w
     C0, C1 = GiacExpr(SymNode("c_0")), GiacExpr(SymNode("c_1"))
-    return C0 * y1 + C1 * invoke_cmd(:simplify, _erfi_form(y1 * second))
+    return C0 * y1 + C1 * _smaller_form(_erfi_form(y1 * second))
 end
 
 # a solution P e^(∫ω) of z'' = r z, r rational in x, or nothing where there is none of that form
