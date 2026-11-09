@@ -489,7 +489,7 @@ function _special_taylor(f::GiacExpr, x::GiacExpr, a, n::Integer)
     g = _node(f)
     for k in 0:n
         v = GiacExpr(_node(substitute(GiacExpr(g), x => a)))
-        _singular_special(_node(v)) && return nothing
+        (_singular_special(_node(v)) || !_is_finite_value(v)) && return nothing
         push!(terms, v * (x - a)^k / factorial(big(k)))
         k == n && break
         g = _derivative(g, name)
@@ -523,10 +523,47 @@ end
 # Taylor polynomial and (x - a)ⁿ⁺¹ order_size(x - a); nothing for GIAC to answer
 function _special_series(f, x, a, n)
     (f isa GiacExpr && x isa GiacExpr && _node(x) isa SymNode && n isa Integer && n >= 0) || return nothing
+    calls = _special_calls(_node(f))
+    any(m -> _vanishes_at(m, x, a), calls) && return _series_by_expansion(f, calls, x, a, n)
     p = _special_taylor(f, x, a, n)
     p === nothing && return nothing
     h = x - a
     return p + h^(n + 1) * invoke_cmd(:order_size, h)
+end
+
+_special_calls(n::Node) = (calls = CallNode[]; _any_node(m -> (_special_name(m) === nothing || m in calls || push!(calls, m); false), n); calls)
+
+# whether the argument of a Bessel or Struve function call is 0 at x = a
+function _vanishes_at(m::CallNode, x::GiacExpr, a)
+    _special_name(m) in _AIRY && return false
+    return _is_zero_node(_node(substitute(GiacExpr(m.args[3]), x => a)))
+end
+
+# GIAC's series of f with each of the functions in it written out: at a zero of its argument as
+# its expansion there (_expansion_at_zero), elsewhere as its Taylor polynomial, both to a degree
+# past n by enough for the negative powers of Y and K; nothing where one cannot be
+function _series_by_expansion(f::GiacExpr, calls, x::GiacExpr, a, n::Integer)
+    orders = [_approx_value(GiacExpr(m.args[2])) for m in calls if !(_special_name(m) in _AIRY)]
+    N = n + 2 + 2 * min(10, maximum((abs(v) for v in orders if v isa Real); init = 0) |> ceil |> Int)
+    replacements = Dict{Node, Node}()
+    for m in calls
+        any(_has_special, m.args[2:end]) && return nothing
+        E = if _vanishes_at(m, x, a)
+            _expansion_at_zero(_special_name(m), GiacExpr(m.args[2]), GiacExpr(m.args[3]), N)
+        else
+            _special_taylor(GiacExpr(m), x, a, N)
+        end
+        E === nothing && return nothing
+        replacements[m] = _node(E)
+    end
+    g = GiacExpr(_replace_nodes(m -> get(replacements, m, nothing), _node(f)))
+    r = try
+        _invoke_cmd_direct(:series, (g, x, convert(GiacExpr, a), convert(GiacExpr, n)))
+    catch e
+        _stopped(e) && rethrow()
+        return nothing
+    end
+    return _unevaluated(r, "series") ? nothing : r
 end
 
 # ---------------------------------------------------------------------------------------------
@@ -614,4 +651,61 @@ function _struve_number(f::String, ν::Real, x::Real)
         isfinite(g) && (total += g * dt)
     end
     return 2 * (x / 2)^ν / (sqrt(π) * SpecialFunctions.gamma(ν + 1 / 2)) * h * total
+end
+
+# ---------------------------------------------------------------------------------------------
+# Expansions at a zero of the argument
+# ---------------------------------------------------------------------------------------------
+
+# f(ν, u) as the sum of its expansion at u = 0 to the power uᴺ, in the closed forms that hold
+# for all u (DLMF 10.2.2, 10.8.1, 10.25.2, 10.31.1, 11.2.1, 11.2.2): power series for J, I and the
+# Struve functions, and for Y and K of a whole order n the log terms
+#     Y_n = -(u/2)⁻ⁿ/π Σₖ₌₀ⁿ⁻¹ (n-k-1)!/k! (u²/4)ᵏ + (2/π) ln(u/2) J_n
+#           - (u/2)ⁿ/π Σₖ (ψ(k+1) + ψ(n+k+1)) (-u²/4)ᵏ/(k!(n+k)!),
+#     K_n = (u/2)⁻ⁿ/2 Σₖ₌₀ⁿ⁻¹ (n-k-1)!/k! (-u²/4)ᵏ + (-1)ⁿ⁺¹ ln(u/2) I_n
+#           + (-1)ⁿ (u/2)ⁿ/2 Σₖ (ψ(k+1) + ψ(n+k+1)) (u²/4)ᵏ/(k!(n+k)!);
+# Y and K of other orders from J_(±ν) and I_(±ν), and the Hankel functions as J ± iY
+function _expansion_at_zero(f::String, ν::GiacExpr, u::GiacExpr, N::Integer)
+    π_ = convert(GiacExpr, π)
+    Γ(z) = invoke_cmd(:Gamma, z)
+    v = _approx_value(ν)
+    K = v isa Real ? max(0, ceil(Int, (N - v) / 2)) + 1 : cld(N, 2) + 1
+    whole = _node(ν) isa NumNode && _node(ν).v isa Integer && _node(ν).v >= 0
+    if f in ("besselj", "besseli")
+        sgn(k) = f == "besselj" && isodd(k) ? -1 : 1
+        return sum(sgn(k) * (u / 2)^(2k + ν) / (factorial(big(k)) * Γ(k + ν + 1)) for k in 0:K)
+    elseif f in _STRUVE
+        sgn2(k) = f == "struveh" && isodd(k) ? -1 : 1
+        return sum(sgn2(k) * (u / 2)^(2k + ν + 1) / (Γ(convert(GiacExpr, k) + 3 // 2) * Γ(k + ν + 3 // 2)) for k in 0:K)
+    elseif f in ("hankelh1", "hankelh2")
+        J, Y = _expansion_at_zero("besselj", ν, u, N), _expansion_at_zero("bessely", ν, u, N)
+        Y === nothing && return nothing
+        i = convert(GiacExpr, im)
+        return f == "hankelh1" ? J + i * Y : J - i * Y
+    elseif whole
+        n = Int(_node(ν).v)
+        γ = giac_eval("euler_gamma")
+        ψ(m) = -γ + sum((1 // j for j in 1:(m - 1)); init = 0 // 1)          # ψ(m) for whole m ≥ 1
+        q = u^2 / 4
+        if f == "bessely"
+            head = n == 0 ? zero(GiacExpr) :
+                   -(u / 2)^(-n) / π_ * sum(factorial(big(n - k - 1)) // factorial(big(k)) * q^k for k in 0:(n - 1))
+            tail = -(u / 2)^n / π_ * sum((ψ(k + 1) + ψ(n + k + 1)) * (-q)^k / (factorial(big(k)) * factorial(big(n + k))) for k in 0:K)
+            return head + 2 / π_ * log(u / 2) * _expansion_at_zero("besselj", ν, u, N) + tail
+        else
+            head = n == 0 ? zero(GiacExpr) :
+                   (u / 2)^(-n) / 2 * sum(factorial(big(n - k - 1)) // factorial(big(k)) * (-q)^k for k in 0:(n - 1))
+            tail = (-1)^n * (u / 2)^n / 2 * sum((ψ(k + 1) + ψ(n + k + 1)) * q^k / (factorial(big(k)) * factorial(big(n + k))) for k in 0:K)
+            return head + (-1)^(n + 1) * log(u / 2) * _expansion_at_zero("besseli", ν, u, N) + tail
+        end
+    elseif v isa Real && isinteger(v)
+        return nothing                     # a negative whole order is rewritten with its positive
+    else
+        s = sin(ν * π_)
+        if f == "bessely"
+            return (_expansion_at_zero("besselj", ν, u, N) * cos(ν * π_) - _expansion_at_zero("besselj", -ν, u, N)) / s
+        else
+            return π_ * (_expansion_at_zero("besseli", -ν, u, N) - _expansion_at_zero("besseli", ν, u, N)) / (2s)
+        end
+    end
 end

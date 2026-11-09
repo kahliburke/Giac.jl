@@ -125,12 +125,21 @@ import SpecialFunctions as SF
         @test to_julia(SF.airybiprime(z)) ≈ SF.airybiprime(0.0)
         S(f, a, k) = Giac.Commands.series(f, x, a, k)
         order(h, k) = h^(k + 1) * Giac.invoke_cmd(:order_size, h)
-        @test S(SF.besselj(0, x), 0, 4) == 1 - x^2 / 4 + x^4 / 64 + order(x, 4)
-        @test S(SF.besseli(1, 2x), 0, 3) == x + x^3 / 2 + order(x, 3)
+        @test S(SF.besselj(0, x), 0, 4) == 1 - x^2 / 4 + x^4 / 64 + order(x, 5)
+        @test S(SF.besseli(1, 2x), 0, 3) == x + x^3 / 2 + order(x, 4)
         @test S(SF.airyai(x), 0, 2) == SF.airyai(z) + SF.airyaiprime(z) * x + order(x, 2)
         o = convert(GiacExpr, 1)
         @test S(SF.besselj(1, x), 1, 1) == SF.besselj(1, o) + (SF.besselj(0, o) - SF.besselj(2, o)) / 2 * (x - 1) + order(x - 1, 1)
-        @test occursin("series", string(S(SF.besselk(0, x), 0, 2)))           # log x at 0: GIAC's
+        # at a zero of the argument: logs for Y and K, fractional powers, Struve functions
+        val(e, v) = to_julia(Giac.invoke_cmd(:evalf, substitute(e, x => v)))
+        polynomial(r) = GiacExpr(Giac._replace_nodes(m -> m isa Giac.CallNode && m.f == "order_size" ? Giac._ZERO : nothing, Giac._node(r)))
+        near(f, k, v) = abs(val(polynomial(S(f, 0, k)) - f, v))
+        for (f, k) in ((SF.besselk(0, x), 2), (SF.bessely(1, x), 2), (SF.besselj(1 // 3, x), 2), (Giac.struveh(1, x), 4),
+                       (SF.besselk(2, x), 2), (SF.bessely(0, x) / SF.besselj(0, x), 2), (SF.besselk(3 // 4, x), 1))
+            v = 0.001        # the remainder: a power past k, by a log factor at most
+            @test near(f, k, v) < 10v^(k + 1 / 4) * (1 + abs(log(v))) + 1e-12 * abs(val(f, v))
+        end
+        @test occursin("ln(x)", string(S(SF.besselk(0, x), 0, 2)))
     end
 
     @testset "LaTeX" begin
