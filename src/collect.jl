@@ -118,7 +118,8 @@ _is_polynomial(n::MulNode) =
 # `factor(e)` over the field of e's coefficients, as other systems factor: GIAC's `withsqrt` mode,
 # on by default, splits quadratic factors with square roots (x⁴ + 1 over ℚ(√2), Φ₅ over ℚ(√5)).
 # A factorization over an extension is asked for with it: `factor(x^4 + 1, sqrt(2))`.
-_factor_cmd(e::GiacExpr) = with_settings(() -> _invoke_cmd_direct(:factor, (e,)), :withsqrt => false)
+_factor_cmd(e::GiacExpr) = _wrapper_overrides() ? with_settings(() -> _invoke_cmd_direct(:factor, (e,)), :withsqrt => false) :
+                                                    _invoke_cmd_direct(:factor, (e,))
 # Primality of Mersenne and Fermat numbers. GIAC proves primality through PARI, whose APRCL test errs
 # on some large primes (2^521 - 1); for these two forms there are complete tests that are also
 # much faster: Lucas–Lehmer for 2^p - 1 (s₀ = 4, sₖ₊₁ = sₖ² - 2: prime exactly when s_(p-2) ≡ 0)
