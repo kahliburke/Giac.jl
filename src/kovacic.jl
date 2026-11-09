@@ -10,9 +10,7 @@ function _kovacic(eq::GiacExpr, x::GiacExpr, y::GiacExpr)
     (c === nothing || length(c.q) != 3 || !_is_zero_expr(c.f)) && return nothing
     a = invoke_cmd(:normal, c.q[2] / c.q[3])
     b = invoke_cmd(:normal, c.q[1] / c.q[3])
-    for coefficient in (a, b)
-        (_free_names(coefficient) ⊆ Set([string(x)]) && _is_rational_in(_node(coefficient), string(x))) || return nothing
-    end
+    all(q -> _is_rational_in(_node(q), string(x)), (a, b)) || return nothing
     r = invoke_cmd(:normal, a^2 / 4 + invoke_cmd(:diff, a, x) / 2 - b)
     z = _kovacic_case1(r, x)
     z === nothing && return nothing
@@ -123,9 +121,10 @@ function _taylor_coefficients(f::GiacExpr, h::GiacExpr, n::Integer)
     return out
 end
 
-# the coefficients σ of the square root of the series Σ ρⱼ hʲ, σ₀ = √ρ₀
+# the coefficients σ of the square root of the series Σ ρⱼ hʲ, σ₀ = √ρ₀ (a for a², not |a|: either
+# sign is one of the choices)
 function _series_root(ρ::Vector{GiacExpr})
-    σ = GiacExpr[sqrt(ρ[1])]
+    σ = GiacExpr[_square_root(ρ[1])]
     for j in 2:length(ρ)
         push!(σ, invoke_cmd(:simplify, (ρ[j] - sum((σ[k] * σ[j - k + 1] for k in 2:(j - 1)); init = zero(GiacExpr))) / (2σ[1])))
     end

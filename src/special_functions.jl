@@ -57,6 +57,12 @@ for f in Symbol.(_AIRY)
 end
 SpecialFunctions.erfi(x::GiacExpr) = GiacExpr(_erfi(_node(x)))
 
+# SpecialFunctions' functions GIAC has, by GIAC's names, for code written with SpecialFunctions
+for (f, g) in ((:erf, :erf), (:erfc, :erfc), (:gamma, :Gamma), (:sinint, :Si), (:cosint, :Ci),
+               (:expinti, :Ei), (:digamma, :Psi), (:zeta, :Zeta))
+    @eval SpecialFunctions.$f(x::GiacExpr) = invoke_cmd($(QuoteNode(g)), x)
+end
+
 # erfi(u), odd: -erfi(-u) for u with a negative coefficient, 0 at 0, and the value at a float
 function _erfi(u::Node)
     _is_zero_node(u) && return _ZERO
@@ -69,12 +75,13 @@ function _erfi(u::Node)
     return _special("erfi", u)
 end
 
-# e with each erf of an imaginary multiple of u, erf(ibu), written i erfi(bu)
+# e with each erf of an imaginary multiple of u, erf(ibu), written i erfi(bu), and erf(-u) as -erf(u)
 _erfi_form(e::GiacExpr) = _any_node(m -> m isa CallNode && m.f == "erf", _node(e)) ?
     GiacExpr(_replace_nodes(_node(e)) do m
         (m isa CallNode && m.f == "erf" && length(m.args) == 1) || return nothing
         u = m.args[1]
         c = u isa NumNode ? u.v : u isa MulNode ? u.coef : nothing
+        c isa Real && c < 0 && return _neg(CallNode("erf", Node[_neg(u)]))
         (c isa Complex && iszero(real(c)) && !iszero(imag(c))) || return nothing
         return _mul(NumNode(im), _erfi(_node(GiacExpr(u) / convert(GiacExpr, im))))
     end) : e

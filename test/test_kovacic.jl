@@ -28,6 +28,12 @@ import SpecialFunctions as SF
               C0 * exp(-x^2 / 2) + C1 * sqrt(convert(GiacExpr, π)) * SF.erfi(x / r2) * exp(-x^2 / 2) / r2
         @test Giac._kovacic_case1(convert(GiacExpr, 2) * x, x) === nothing          # Airy's: no such solution
         @test !occursin("rootof", string(solve(Y -> d(Y, 2) - (x^4 + 2x) * Y)))
+        # with parameters, for which the transformation's square roots keep their sign
+        @giac_var a k
+        @test solve(Y -> d(Y, 2) - (a^2 * x^2 + a) * Y) ==
+              C0 * exp(a * x^2 / 2) + C1 * exp(a * x^2 / 2) * sqrt(convert(GiacExpr, π)) * SF.erf(sqrt(a) * x) / (2sqrt(a))
+        @test occursin("exp(k*x^3/3)", string(solve(Y -> d(Y, 2) - (k^2 * x^4 + 2k * x) * Y)))
+        @test Giac._gave_up(solve(Y -> d(Y, 2) - (x^2 + a) * Y))                    # parabolic cylinder
     end
 
     @testset "Riccati equations" begin
