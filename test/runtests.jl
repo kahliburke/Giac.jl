@@ -52,7 +52,7 @@ using LinearAlgebra
     include("test_kovacic.jl")
     include("test_pde.jl")
     include("test_rootsum.jl")
-    include("test_quintic.jl")
+    include("test_radicals.jl")
     include("test_matrix_iteration.jl")
     include("test_memory.jl")
 

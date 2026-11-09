@@ -1,4 +1,4 @@
-# The roots of solvable quintics in radicals
+# The roots of solvable quintics in radicals, and cube roots denested
 
 @testset "Solvable quintics" begin
     @giac_var x
@@ -14,4 +14,19 @@
     end
     @test Giac._has_decimal(C.cSolve(x^5 - x + 1 ~ 0, x))                   # S₅: no radicals
     @test Giac._quintic_radicals(Rational{BigInt}[1, 0, 0, 0, -1, 1]) === nothing
+end
+
+@testset "Cube roots denested" begin
+    C = Giac.Commands
+    c(n) = convert(GiacExpr, n)^(1 // 3)
+    value(e) = to_julia(C.evalf(e, 30))
+    depth1(e) = !occursin(r"\([^()]*\^\(1/3\)[^()]*\)\^\(1/3\)", string(e))
+    for (e, form) in (((c(2) - 1)^(1 // 3), "(1-2^(1/3)+2^(2/3))/9^(1/3)"),        # Ramanujan's
+                      ((7c(20) - 19)^(1 // 3), "(5+20^(1/3)-20^(2/3))/45^(1/3)"))   # ∛(5/3) - ∛(2/3)
+        r = C.simplify(e)
+        @test string(r) == form
+        @test value(r) ≈ value(e) rtol = 1e-25
+    end
+    @test C.simplify((3c(3) - 4)^(1 // 3)) == (3c(3) - 4)^(1 // 3)               # does not denest
+    @test Giac._cubic_cube(Rational{BigInt}[1, -1, 1], 2) == [-9, 9, 0]         # (1 - ∛2 + ∛4)³ = 9(∛2 - 1)
 end

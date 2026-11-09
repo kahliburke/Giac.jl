@@ -321,6 +321,12 @@ end
 # two lowest where that is simpler (trig_simplify.jl for the rest)
 function _simplify_cmd(e::GiacExpr)
     e = _rootsums_summed(e)
+    # a cube root denested is kept as it is where GIAC's simplify of it is no shorter
+    d = _denested_cube_roots(e)
+    if d !== e
+        s = _trig_safe_simplify(d)
+        return Rules.expression_size(d) <= Rules.expression_size(s) ? d : s
+    end
     r = _trig_safe_simplify(e)
     c = _contiguous(e)
     c === nothing && return r
