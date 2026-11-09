@@ -4,7 +4,7 @@ try; import KaimonSlate; catch; error("This is a Kaimon Slate notebook — runni
 @md"""
 # Giac.jl against Mathematica
 
-A contest of capability: a hundred problems in twelve areas, from the textbook-hard to the famously hard, each posed to Giac.jl and to Mathematica the way its own user would pose it. Speed is not the point here; whether a system can answer at all is.
+A contest of capability: a hundred and three problems in twelve areas, from the textbook-hard to the famously hard, each posed to Giac.jl and to Mathematica the way its own user would pose it. Speed is not the point here; whether a system can answer at all is.
 
 Each system gets a minute per problem. Its answer is then checked in that system itself, numerically and with exact inputs, against what the problem asks:
 - a value is compared with the known one, to twelve digits;
@@ -639,7 +639,7 @@ integrals = contest("Indefinite integrals", [
 @md"""
 ## Definite integrals
 
-Famous values: an integral of Bose–Einstein type, Serret's integral, a symmetry trick, the log-sine integral, Ahmed's integral (a hard one), Laplace's integral, a dilogarithm value, Euler's constant from a Gamma-function derivative, a Gaussian with a cosine, Frullani's integral, an integral of the complementary error function, and two integrals of a Bessel function on the half-line.
+Famous values: an integral of Bose–Einstein type, Serret's integral, a symmetry trick, the log-sine integral, Ahmed's integral (a hard one), Laplace's integral, a dilogarithm value, Euler's constant from a Gamma-function derivative, a Gaussian with a cosine, Frullani's integral, an integral of the complementary error function, two integrals of a Bessel function on the half-line, and a pendulum's period, a complete elliptic integral.
 """
 
 #%% code id=definite
@@ -672,6 +672,9 @@ definite = contest("Definite integrals", [
             () -> C.integrate(SF.besselj(0, x), x, 0, ∞), "Integrate[BesselJ[0, x], {x, 0, Infinity}]", Value(1)),
     Problem("A damped Bessel function", raw"\int_0^\infty e^{-x} J_0(x)\,dx = \frac{1}{\sqrt2}",
             () -> C.integrate(exp(-x) * SF.besselj(0, x), x, 0, ∞), "Integrate[E^-x BesselJ[0, x], {x, 0, Infinity}]", Value(1 / sqrt(big(2)))),
+    Problem("A pendulum's period", raw"\int_0^a \frac{d\theta}{\sqrt{\cos\theta - \cos a}} = \sqrt2\,K\left(\sin^2\tfrac a2\right)",
+            () -> C.integrate(1 / sqrt(cos(x) - cos(a)), x, 0, a), "Integrate[1/Sqrt[Cos[x] - Cos[a]], {x, 0, a}, Assumptions -> 0 < a < Pi]",
+            Value(sqrt(big(2)) * Giac.ellipk(sin(big(1) / 2)^2); at = [["a" => "1"]])),
 ])
 
 #%% md id=sums_md
@@ -853,7 +856,7 @@ simplification = contest("Simplification and algebraic numbers", [
 @md"""
 ## Differential equations
 
-The Airy and Bessel equations, Riccati equations whose solutions are Bessel and Airy functions, a nonlinear autonomous equation, a forced Euler–Cauchy equation, a Bernoulli equation, an equation with an exponential solution that Kovacic's algorithm finds, a forced initial-value problem, a linear system with a Jordan block, and two partial differential equations: the transport equation's general solution and the heat equation on an interval with boundary and initial conditions.
+The Airy and Bessel equations, Riccati equations whose solutions are Bessel and Airy functions, a nonlinear autonomous equation, a forced Euler–Cauchy equation, a Bernoulli equation, an equation with an exponential solution that Kovacic's algorithm finds, a forced initial-value problem, a pendulum and Duffing's oscillator released from rest at an amplitude $a$, whose solutions are Jacobi's elliptic functions, a linear system with a Jordan block, and two partial differential equations: the transport equation's general solution and the heat equation on an interval with boundary and initial conditions.
 """
 
 #%% code id=odes
@@ -893,6 +896,18 @@ odes = contest("Differential equations", [
     Problem("A Riccati equation with Airy solutions", raw"y' = x + y^2",
             () -> C.desolve(C.diff(Y, x) ~ x + Y^2, Y), "DSolve[y'[x] == x + y[x]^2, y[x], x]",
             DE(Y -> [C.diff(Y, x) - x - Y^2], "Function[Y, D[Y, x] - x - Y^2]", ["x"], [["3/10"], ["7/10"], ["11/10"]], 1)),
+    Problem("A pendulum released from rest", raw"y'' + \sin y = 0,\ y(0) = a,\ y'(0) = 0",
+            () -> C.desolve([C.diff(Y, x, 2) + sin(Y) ~ 0, Y(0) ~ a, Giac.invoke_cmd(:diff, Y, x)(0) ~ 0], Y),
+            "DSolve[{y''[x] + Sin[y[x]] == 0, y[0] == a, y'[0] == 0}, y[x], x]",
+            DE(Y -> [C.diff(Y, x, 2) + sin(Y), C.subst(Y, x, 0) - a, C.subst(C.diff(Y, x), x, 0)],
+               "Function[Y, {D[Y, {x, 2}] + Sin[Y], (Y /. x -> 0) - a, D[Y, x] /. x -> 0}]",
+               ["x", "a"], [["3/10", "1/2"], ["7/10", "1"], ["11/10", "3/2"]], 0)),
+    Problem("Duffing's oscillator from rest", raw"y'' + y + y^3 = 0,\ y(0) = a,\ y'(0) = 0",
+            () -> C.desolve([C.diff(Y, x, 2) + Y + Y^3 ~ 0, Y(0) ~ a, Giac.invoke_cmd(:diff, Y, x)(0) ~ 0], Y),
+            "DSolve[{y''[x] + y[x] + y[x]^3 == 0, y[0] == a, y'[0] == 0}, y[x], x]",
+            DE(Y -> [C.diff(Y, x, 2) + Y + Y^3, C.subst(Y, x, 0) - a, C.subst(C.diff(Y, x), x, 0)],
+               "Function[Y, {D[Y, {x, 2}] + Y + Y^3, (Y /. x -> 0) - a, D[Y, x] /. x -> 0}]",
+               ["x", "a"], [["3/10", "1/2"], ["7/10", "1"], ["11/10", "3/2"]], 0)),
     Problem("A Jordan block", raw"X' = \begin{bmatrix}1&1&0\\0&1&1\\0&0&1\end{bmatrix} X,\ X(0) = (1, 1, 1)",
             () -> exp(t * GiacExpr[1 1 0; 0 1 1; 0 0 1]) * GiacExpr[1, 1, 1], "MatrixExp[t {{1, 1, 0}, {0, 1, 1}, {0, 0, 1}}].{1, 1, 1}",
             Value(let u = big(7 // 10); exp(u) .* [1 + u + u^2 / 2, 1 + u, 1] end; at = [["t" => "7/10"]])),
@@ -1199,18 +1214,18 @@ end
 @md raw"""
 ## What the contest shows
 
-Both systems answer nearly everything here, and neither gives a wrong answer. Neither finds Ahmed's integral. Mathematica also misses the damped Bessel integral $\int_0^\infty e^{-x} J_0(x)\,dx$, and the discrete logarithm takes it nearly all of its minute; of the problems asking for a form, it leaves Ramanujan's denesting, a square root it does not denest and an inverse cosine its `Simplify` leaves under the assumptions, all of which Giac.jl does. Where both solve a problem Giac.jl is usually the faster, by the widest margins on definite integrals, number theory and limits; Mathematica is a little faster on the transforms and special functions, and on most of the matrix and control problems.
+Both systems answer nearly everything here, and neither gives a wrong answer. Neither finds Ahmed's integral. Mathematica also misses the damped Bessel integral $\int_0^\infty e^{-x} J_0(x)\,dx$ and, with a symbolic amplitude, the pendulum and Duffing's oscillator released from rest, and the discrete logarithm takes it nearly all of its minute; of the problems asking for a form, it leaves Ramanujan's denesting, a square root it does not denest and an inverse cosine its `Simplify` leaves under the assumptions, all of which Giac.jl does. Where both solve a problem Giac.jl is usually the faster, by the widest margins on definite integrals, number theory and limits; Mathematica is a little faster on the transforms and special functions, and on most of the matrix and control problems.
 
 Many of Giac.jl's answers come from its own layers rather than from GIAC alone:
 
-- **Integration**: Chebyshev's substitutions for binomial differentials, the substitutions $u = x \pm 1/x$, integration by parts, pseudo-elliptic integrals as logarithms of units found from the continued fraction of $\sqrt{P}$ (Chebyshev's integral), and rational functions whose denominators have no roots in radicals as sums over the roots, Mathematica's `RootSum`; definite integrals as derivatives of Beta and Gamma integrals, with sines and cosines as exponentials, averaged over an involution of the interval, or from an antiderivative checked against the numeric value.
-- **Special functions**: Bessel, Hankel, Airy and Struve functions, erfi and the polylogarithm, with their derivatives, series, integrals and values; GIAC's own Bessel functions take only integer orders and have no derivatives.
+- **Integration**: Chebyshev's substitutions for binomial differentials, the substitutions $u = x \pm 1/x$, integration by parts, pseudo-elliptic integrals as logarithms of units found from the continued fraction of $\sqrt{P}$ (Chebyshev's integral), rational functions whose denominators have no roots in radicals as sums over the roots, Mathematica's `RootSum`, and elliptic integrands, $(a + b\sin^2 u)^{\pm 1/2}$ and square roots of even quadratics, as Legendre's elliptic integrals; definite integrals as derivatives of Beta and Gamma integrals, with sines and cosines as exponentials, averaged over an involution of the interval, from an antiderivative checked against the numeric value, or as complete elliptic integrals (the pendulum's period $\sqrt2\,K(\sin^2\frac a2)$, which Mathematica writes as an incomplete $F$ at a parameter above 1).
+- **Special functions**: Bessel, Hankel, Airy and Struve functions, erfi, the polylogarithm, the elliptic integrals $K$, $E$, $F$ and $\Pi$, and Jacobi's elliptic functions, with their derivatives, series, integrals and values; GIAC's own Bessel functions take only integer orders and have no derivatives, and it has no elliptic functions.
 - **Sums and products**: limits of GIAC's partial ones, alternating sums in pairs of terms, Chu–Vandermonde, polylogarithm values, Euler's harmonic sums and the central binomial series.
 - **Equations**: exact complex solutions where GIAC's `cSolve` gives decimals, and the roots of solvable quintics in radicals, from the Lagrange resolvents in the cyclic order of the roots that makes Cayley's resolvent rational.
-- **Differential equations**: Euler–Cauchy, Bessel and Airy equations, Kovacic's algorithm for exponential solutions, Riccati equations through their linear equations, variation of parameters and fitted initial conditions; first-order linear partial differential equations by characteristics, and the heat and wave equations on an interval by separation of variables.
+- **Differential equations**: Euler–Cauchy, Bessel and Airy equations, the first two cases of Kovacic's algorithm, Riccati equations through their linear equations, variation of parameters and fitted initial conditions; the pendulum and Duffing's oscillator through their energy, inverted with Jacobi's functions; first-order linear partial differential equations by characteristics, and the heat and wave equations on an interval by separation of variables.
 - **Simplification and number theory**: cube roots of numbers in $\mathbb{Q}(\sqrt[3]{m})$ denested (Ramanujan's), factoring over $\mathbb{Q}$, Nemo's exact algebraic numbers (the heptagon sum), Gauss's periods for constructible angles, a sum-of-squares certificate with a positive multiplier (Motzkin's polynomial), and Lucas–Lehmer and Pépin's tests for Mersenne and Fermat numbers.
 
-Two defects in GIAC's libraries, found by the contest, are worked around in Giac.jl. PARI, which GIAC uses for primality proofs, errs in its APRCL test on $2^{521} - 1$ though it proves other primes of the same size (Giac.jl proves Mersenne numbers by Lucas–Lehmer instead); a PARI error leaves PARI locked for the rest of the session, and `pari_unlock` locks a PARI that is free, which the harness handles. And GIAC's `evalf` of a `rootof` to $n$ digits leaves its numeric tolerance at $10^{-n}$ for the session, after which numeric integrals return two estimates instead of a value; Giac.jl puts the tolerance back.
+Three defects in GIAC and its libraries are worked around in Giac.jl. PARI, which GIAC uses for primality proofs, errs in its APRCL test on $2^{521} - 1$ though it proves other primes of the same size (Giac.jl proves Mersenne numbers by Lucas–Lehmer instead); a PARI error leaves PARI locked for the rest of the session, and `pari_unlock` locks a PARI that is free, which the harness handles. GIAC's `evalf` of a `rootof` to $n$ digits leaves its numeric tolerance at $10^{-n}$ for the session, after which numeric integrals return two estimates instead of a value; Giac.jl puts the tolerance back. And GIAC's `desolve` gives some linear equations a solution that fails them ($e^{4\sqrt{x^2+1}}$ for $y'' - y'/(x(x^2+1)) - x^2 y/(x^2+1) = 0$); Giac.jl checks its solutions of linear equations and solves those itself.
 """
 
 # ╔═╡ Slate.env · notebook packages (auto-maintained — manage via the package panel)
