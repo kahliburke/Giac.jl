@@ -73,3 +73,11 @@ end
     l = log(convert(GiacExpr, 2))
     @test Σ(1 / (n^3 * 2^n)) == 7ζ(3) / 8 - π_^2 * l / 12 + l^3 / 6
 end
+
+@testset "Primes of special forms" begin
+    C = Giac.Commands
+    @test string(C.isprime(big(2)^521 - 1)) == "true"                            # PARI errs on it
+    @test string(C.isprime(big(2)^523 - 1)) == "false"
+    @test string(C.isprime(big(2)^128 + 1)) == "false"                           # F₇
+    @test string(C.isprime(17)) == "true"
+end

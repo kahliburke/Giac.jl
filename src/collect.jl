@@ -119,3 +119,43 @@ _is_polynomial(n::MulNode) =
 # on by default, splits quadratic factors with square roots (x⁴ + 1 over ℚ(√2), Φ₅ over ℚ(√5)).
 # A factorization over an extension is asked for with it: `factor(x^4 + 1, sqrt(2))`.
 _factor_cmd(e::GiacExpr) = with_settings(() -> _invoke_cmd_direct(:factor, (e,)), :withsqrt => false)
+# Primality of Mersenne and Fermat numbers. GIAC proves primality through PARI, whose APRCL test errs
+# on some large primes (2^521 - 1); for these two forms there are complete tests that are also
+# much faster: Lucas–Lehmer for 2^p - 1 (s₀ = 4, sₖ₊₁ = sₖ² - 2: prime exactly when s_(p-2) ≡ 0)
+# and Pépin's for 2^(2^k) + 1 (prime exactly when 3^((F-1)/2) ≡ -1).
+
+# `isprime(n)`: by these tests for the two forms, else GIAC's
+function _isprime_cmd(n)
+    m = _integer_value(n)
+    m === nothing && return _invoke_cmd_direct(:isprime, (convert(GiacExpr, n),))
+    r = _special_form_prime(m)
+    r === nothing && return _invoke_cmd_direct(:isprime, (convert(GiacExpr, n),))
+    return giac_eval(r ? "true" : "false")
+end
+
+_integer_value(n::Integer) = big(n)
+function _integer_value(n::GiacExpr)
+    v = _node(n)
+    return v isa NumNode && v.v isa Integer ? big(v.v) : nothing
+end
+_integer_value(n) = nothing
+
+# whether m is prime, for m a Mersenne number 2^p - 1 or a Fermat number 2^(2^k) + 1 past the
+# sizes GIAC settles at once; nothing for other numbers
+function _special_form_prime(m::BigInt)
+    m < big(2)^64 && return nothing
+    if ispow2(m + 1)
+        p = trailing_zeros(m + 1)
+        _small_prime(p) || return false                 # 2^ab - 1 has the factor 2^a - 1
+        s = big(4)
+        for _ in 1:(p - 2)
+            s = mod(s * s - 2, m)
+        end
+        return iszero(s)
+    elseif ispow2(m - 1) && ispow2(trailing_zeros(m - 1))
+        return powermod(big(3), (m - 1) ÷ 2, m) == m - 1
+    end
+    return nothing
+end
+
+_small_prime(p::Integer) = p >= 2 && all(d -> p % d != 0, 2:isqrt(p))
