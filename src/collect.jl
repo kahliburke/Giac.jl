@@ -114,3 +114,8 @@ _is_polynomial(n::AddNode) = all(((m, c),) -> c isa Union{Integer, Rational} && 
 _is_polynomial(n::MulNode) =
     n.coef isa Union{Integer, Rational} &&
     all(((b, k),) -> k isa NumNode && k.v isa Integer && k.v >= 0 && _is_polynomial(b), n.factors)
+
+# `factor(e)` over the field of e's coefficients, as other systems factor: GIAC's `withsqrt` mode,
+# on by default, splits quadratic factors with square roots (x⁴ + 1 over ℚ(√2), Φ₅ over ℚ(√5)).
+# A factorization over an extension is asked for with it: `factor(x^4 + 1, sqrt(2))`.
+_factor_cmd(e::GiacExpr) = with_settings(() -> _invoke_cmd_direct(:factor, (e,)), :withsqrt => false)

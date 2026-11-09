@@ -187,6 +187,11 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._evalf_special(args...)
     end
 
+    # a factorization over the coefficients' field, without square roots joined to it (collect.jl)
+    if cmd === :factor && length(args) == 1 && args[1] isa GiacExpr && !_fastpath_disabled[]
+        return parentmodule(@__MODULE__)._factor_cmd(args[1])
+    end
+
     # a polynomial is expanded as a polynomial (collect.jl)
     if cmd === :expand && length(args) == 1 && args[1] isa GiacExpr && !_fastpath_disabled[]
         return parentmodule(@__MODULE__)._expand_cmd(args[1])

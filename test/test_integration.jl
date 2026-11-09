@@ -116,3 +116,12 @@ end
         @test acotd(cotd(giac_eval("2"))) == 2
     end
 end
+
+@testset "Factoring over the rationals" begin
+    @giac_var x
+    C = Giac.Commands
+    F = C.factor(x^105 - 1)
+    @test length(Giac._node(F).factors) == 8 && !occursin("sqrt", string(F))     # Φ_d for d | 105
+    @test string(C.factor(x^4 + 1)) == "x^4+1"
+    @test occursin("sqrt(2)", string(C.factor(x^4 + 1, sqrt(convert(GiacExpr, 2)))))
+end

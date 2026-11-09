@@ -540,7 +540,7 @@ end
         logs2 = _capture_debug_logs() do
             _with_fast_path() do
                 invoke_cmd(:simplify, g)
-                invoke_cmd(:factor, g - 1)
+                invoke_cmd(:normal, g - 1)          # factor runs under a setting, on GIAC's thread
                 invoke_cmd(:evalf, g, 20)
             end
         end
