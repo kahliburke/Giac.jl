@@ -138,7 +138,8 @@ end
         F = Giac._reciprocal_substitution(f, x)
         @test F !== nothing && off(F, f) < 1e-9
     end
-    @test Giac._reciprocal_substitution(1 / sqrt(x^4 + 1), x) === nothing        # elliptic
+    F = Giac._reciprocal_substitution(1 / sqrt(x^4 + 1), x)                     # elliptic, in u = x - 1/x
+    @test F !== nothing && occursin("ellipf", string(F)) && off(F, 1 / sqrt(x^4 + 1)) < 1e-9
     f = 1 / (1 + x^4)^(1 // 4)
     F = Giac._binomial_substitution(f, x)
     @test F !== nothing && off(F, f) < 1e-9

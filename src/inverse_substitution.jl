@@ -150,6 +150,8 @@ function _square_roots_in_t(g::GiacExpr, Q::GiacExpr, S::GiacExpr, t::GiacExpr)
     return GiacExpr(rewrite(_node(g)))
 end
 
+const _CHECK_SECONDS = 2.0
+
 # whether d/dx F is f: the difference simplifies to 0, or vanishes at two of a few exact points,
 # the parameters given values of their own (a difference of branches of a root or a logarithm can
 # leave it non-zero on part of the line)
@@ -157,7 +159,7 @@ function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
     d = invoke_cmd(:diff, F, x) - f
     names = setdiff(string.(to_julia(invoke_cmd(:lname, f + F))), [string(x)])
     params = Dict(giac_identifier(n) => 1 // 2 + k // 7 for (k, n) in enumerate(names))
-    matched = 0
+    matched, missed = 0, 0
     for p in (37 // 100, 83 // 100, 161 // 100)
         v = merge(params, Dict(x => p))
         fv, dv = try
@@ -165,10 +167,20 @@ function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
         catch
             continue
         end
-        isfinite(fv) && abs(fv) > 1e-12 && abs(dv) <= 1e-8 * max(abs(fv), 1.0) && (matched += 1)
+        (isfinite(fv) && isfinite(dv) && abs(fv) > 1e-12) || continue
+        abs(dv) <= 1e-8 * max(abs(fv), 1.0) ? (matched += 1) : (missed += 1)
     end
     matched >= 2 && return true
-    return try string(invoke_cmd(:simplify, d)) == "0" catch; false end
+    # differing at two points it is no antiderivative; otherwise the difference simplified, which
+    # can take GIAC long, within a few seconds where GIAC can be stopped
+    missed >= 2 && return false
+    return try
+        _giac_threaded() && _wrapper_interrupts() ? string(_simplified_within(d, _CHECK_SECONDS)) == "0" :
+                                                    string(invoke_cmd(:simplify, d)) == "0"
+    catch e
+        _stopped(e) && rethrow()
+        false
+    end
 end
 
 # ∫ f dx with acosh and asinh as they are: GIAC rewrites them as logarithms when it evaluates an
