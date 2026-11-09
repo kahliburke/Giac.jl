@@ -1,16 +1,18 @@
 # Julia code from Giac expressions, and native numeric functions compiled from it.
 
-# Giac heads whose Julia function has a different name, or that Julia spells as an operator
-const _JULIA_HEADS = Dict{String, Union{Symbol, GlobalRef}}(
+# Giac heads whose Julia function has a different name, or that Julia spells as an operator; one
+# from another module as (module, name), made a GlobalRef in the code (a GlobalRef kept in a
+# global would hold the binding's state in the package image)
+const _JULIA_HEADS = Dict{String, Union{Symbol, Tuple{Module, Symbol}}}(
     "+" => :+, "*" => :*, "^" => :^, "-" => :-, "inv" => :inv, "ln" => :log, "log10" => :log10,
     "sqrt" => :sqrt, "abs" => :abs, "sign" => :sign, "exp" => :exp, "floor" => :floor, "ceil" => :ceil,
     "max" => :max, "min" => :min, "atan" => :atan, "asin" => :asin, "acos" => :acos,
     "sin" => :sin, "cos" => :cos, "tan" => :tan, "sinh" => :sinh, "cosh" => :cosh, "tanh" => :tanh,
     "asinh" => :asinh, "acosh" => :acosh, "atanh" => :atanh, "re" => :real, "im" => :imag,
-    "conj" => :conj, "erf" => GlobalRef(SpecialFunctions, :erf), "erfc" => GlobalRef(SpecialFunctions, :erfc),
-    "Gamma" => GlobalRef(SpecialFunctions, :gamma), "Si" => GlobalRef(SpecialFunctions, :sinint),
-    "Ci" => GlobalRef(SpecialFunctions, :cosint), "Ei" => GlobalRef(SpecialFunctions, :expinti),
-    "Heaviside" => GlobalRef(@__MODULE__, :_heaviside))
+    "conj" => :conj, "erf" => (SpecialFunctions, :erf), "erfc" => (SpecialFunctions, :erfc),
+    "Gamma" => (SpecialFunctions, :gamma), "Si" => (SpecialFunctions, :sinint),
+    "Ci" => (SpecialFunctions, :cosint), "Ei" => (SpecialFunctions, :expinti),
+    "Heaviside" => (@__MODULE__, :_heaviside))
 
 # GIAC's Heaviside(0) is 1; at a complex number, that of its real part
 _heaviside(x::Real) = x < 0 ? zero(x) : one(x)
@@ -42,7 +44,8 @@ function to_expr(e::GiacExpr)
             return Expr(:call, f, args[2:end]...)
         end
         haskey(_JULIA_HEADS, head) || throw(ArgumentError("no Julia function for Giac's `$head` in $e"))
-        return Expr(:call, _JULIA_HEADS[head], args...)
+        h = _JULIA_HEADS[head]
+        return Expr(:call, h isa Symbol ? h : GlobalRef(h...), args...)
     end
     name = string(e)
     haskey(_JULIA_CONSTANTS, name) && return _JULIA_CONSTANTS[name]
