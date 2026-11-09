@@ -281,7 +281,8 @@ function _pnode(e::GiacExpr)
         return _PInfix(string(a[1]), _PNode[_pnode(x) for x in a[2:end]])
     end
     haskey(_INFIX_TEX, h) && length(a) == 2 && return _PInfix(h, _PNode[_pnode(x) for x in a])
-    _special_name(_node(e)) === nothing || return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], false)
+    (_special_name(_node(e)) === nothing && _rootsum_parts(_node(e)) === nothing) ||
+        return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], false)
     h == "of" && return _PCall(string(a[1]), _PNode[_pnode(x) for x in a[2:end]], true)
     h == "integrate" && length(a) in (2, 4) && return _PIntegral(_pnode(a[1]), _pnode(a[2]), _PNode[_pnode(x) for x in a[3:end]])
     if h == "subst" && length(a) == 2 && (eqs = _equations(a[2])) !== nothing
@@ -731,6 +732,11 @@ function _tex(n::_PCall, c::_Ctx)
     end
     if n.f == "exp" && c.style.exp === :e
         return "e^{" * _tex(only(n.args), _in_exponent(c)) * "}"
+    end
+    if n.f == _ROOTSUM && length(n.args) == 3           # Σ over p(z) = 0
+        body = _tex(n.args[3], c)
+        n.args[3] isa _PSum && (body = "\\left(" * body * "\\right)")
+        return "\\sum_{" * _tex(n.args[1], c) * " = 0} " * body
     end
     if haskey(_SPECIAL_TEX, n.f)                       # J_ν(x), Ai(x)
         order = length(n.args) == 2 ? "_{" * _tex(n.args[1], c) * "}" : ""

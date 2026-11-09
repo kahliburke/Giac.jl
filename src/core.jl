@@ -1042,9 +1042,14 @@ _symbol_names!(out, n::NumNode) = out
 _symbol_names!(out, n::SymNode) = (n.name in _GIAC_NAMED_VALUES || push!(out, n.name); out)
 _symbol_names!(out, n::AddNode) = (foreach(t -> _symbol_names!(out, first(t)), n.terms); out)
 _symbol_names!(out, n::MulNode) = (foreach(((b, e),) -> (_symbol_names!(out, b); _symbol_names!(out, e)), n.factors); out)
-# a Bessel or Airy function's name is not a symbol (special_functions.jl)
-_symbol_names!(out, n::CallNode) =
-    (foreach(a -> _symbol_names!(out, a), _special_name(n) === nothing ? n.args : @view(n.args[2:end])); out)
+# a Bessel or Airy function's name is not a symbol (special_functions.jl), nor is a root sum's
+# bound variable (rootsum.jl)
+function _symbol_names!(out, n::CallNode)
+    parts = _rootsum_parts(n)
+    parts === nothing || return _rootsum_names!(out, parts...)
+    foreach(a -> _symbol_names!(out, a), _special_name(n) === nothing ? n.args : @view(n.args[2:end]))
+    return out
+end
 _symbol_names!(out, n::GenNode) = (foreach(s -> push!(out, string(s)), free_symbols(n.expr)); out)
 
 # the names of an expression's free variables, read from its tree

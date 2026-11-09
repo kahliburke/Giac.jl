@@ -56,11 +56,20 @@ end
 function _derivative(n::CallNode, x::String)
     n.f == "of" && return _special_derivative(n, x)
     rule = length(n.args) == 1 ? get(_TREE_DERIVATIVES, n.f, nothing) : nothing
-    rule === nothing && return x in _symbol_names(n) ? nothing : _ZERO
+    rule === nothing && return x in _symbol_names(n) ? _giac_derivative(n, x) : _ZERO
     u = only(n.args)
     du = _derivative(u, x)
     (du === nothing || _is_zero_node(du)) && return du
     return _mul(du, rule(n, u))          # u′ f′(u), in GIAC's order
+end
+
+# GIAC's derivative of a call the tree has no rule for, where the expression around it has calls
+# GIAC cannot differentiate (special functions, root sums), so that it is differentiated here
+# whole; nothing otherwise, for GIAC to differentiate all of it
+function _giac_derivative(n::CallNode, x::String)
+    get(task_local_storage(), :giac_diff_calls, false) || return nothing
+    (_has_special(n) || _has_rootsum(n)) && return nothing
+    return _node(_invoke_cmd_direct(:diff, (GiacExpr(n), GiacExpr(SymNode(x)))))
 end
 
 # `diff(f, x)` or `diff(f, x, k)` on the tree, for a variable `x`; `nothing` for GIAC to answer
@@ -70,8 +79,9 @@ function _tree_diff(f, x, k = 1)
     (xn isa SymNode && !(xn.name in _GIAC_NAMED_VALUES)) || return nothing
     n = _node(f)
     n isa GenNode && return nothing
+    assist = _has_special(n) || _has_rootsum(n)
     for _ in 1:k
-        n = _derivative(n, xn.name)
+        n = assist ? task_local_storage(() -> _derivative(n, xn.name), :giac_diff_calls, true) : _derivative(n, xn.name)
         n === nothing && return nothing
     end
     return GiacExpr(n)

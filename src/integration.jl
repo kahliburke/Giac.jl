@@ -47,6 +47,8 @@ function _integrate(f::GiacExpr, x::GiacExpr)
         return g === nothing ? r : g
     end
     _integral_left(r) || return _without_compositions(r)
+    g = _rootsum_integral(f, x)                        # a rational function (rootsum.jl)
+    g === nothing || return g
     g = _search_integral(f, x)
     return g === nothing ? r : g
 end

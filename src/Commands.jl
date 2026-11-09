@@ -182,8 +182,10 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return r === nothing ? parentmodule(@__MODULE__)._hold(:series, map(a -> convert(GiacExpr, a), args)) : r
     end
 
-    # Bessel and Airy functions at numbers have their values from SpecialFunctions (special_functions.jl)
-    if cmd === :evalf && !isempty(args) && args[1] isa GiacExpr && parentmodule(@__MODULE__)._has_special(args[1])
+    # Bessel and Airy functions at numbers have their values from SpecialFunctions (special_functions.jl),
+    # and sums over the roots of a polynomial theirs from the roots (rootsum.jl)
+    if cmd === :evalf && !isempty(args) && args[1] isa GiacExpr &&
+       (parentmodule(@__MODULE__)._has_special(args[1]) || parentmodule(@__MODULE__)._has_rootsum(args[1]))
         return parentmodule(@__MODULE__)._evalf_special(args...)
     end
 

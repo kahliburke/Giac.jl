@@ -253,6 +253,8 @@ end
 
 # d/dx of f(x) for the function as called: (J_(ν-1) - J_(ν+1))/2, and Ai' for Ai, x Ai for Ai'
 function _special_derivative(n::CallNode, x::String)
+    parts = _rootsum_parts(n)
+    parts === nothing || return _rootsum_derivative(parts..., x)
     f = _special_name(n)
     f === nothing && return x in _symbol_names(n) ? nothing : _ZERO
     if f == "erfi"                                      # 2 e^(u²)/√π
@@ -292,10 +294,21 @@ function _special_derivative(n::CallNode, x::String)
     return _mul(du, d)
 end
 
-# `evalf` of an expression with the functions in it: each at numbers replaced by its value first
-_evalf_special(e::GiacExpr, rest...) = _invoke_cmd_direct(:evalf, (GiacExpr(_special_values(_node(e))), rest...))
+# `evalf` of an expression with the functions in it: each at numbers replaced by its value first.
+# A value that is the whole expression is returned as it is: GIAC's evalf of a double moves it by
+# more than its rounding.
+function _evalf_special(e::GiacExpr, rest...)
+    v = _special_values(_node(e))
+    _inexact(v) && return GiacExpr(v)
+    return _invoke_cmd_direct(:evalf, (GiacExpr(v), rest...))
+end
 
 _special_values(n::Node) = _replace_nodes(n) do m
+    parts = _rootsum_parts(m)
+    if parts !== nothing
+        v = _rootsum_value(parts...)
+        return v === nothing ? nothing : NumNode(v)
+    end
     f = _special_name(m)
     f === nothing && return nothing
     args = Node[_node(_invoke_cmd_direct(:evalf, (GiacExpr(_special_values(a)),))) for a in m.args[2:end]]
@@ -307,6 +320,7 @@ end
 # `simplify`, also with the Bessel functions of three or more orders in a family written in the
 # two lowest where that is simpler (trig_simplify.jl for the rest)
 function _simplify_cmd(e::GiacExpr)
+    e = _rootsums_summed(e)
     r = _trig_safe_simplify(e)
     c = _contiguous(e)
     c === nothing && return r
