@@ -10,7 +10,8 @@ const _PLAIN_CSOLVE = :giac_plain_csolve
 # `invoke_cmd(:cSolve, args...)`
 function _csolve_cmd(args...)
     r = task_local_storage(() -> invoke_cmd(:cSolve, args...), _PLAIN_CSOLVE, true)
-    (_has_decimal(r) && !isempty(methods(algebraic_roots))) || return r
+    # Nemo's algebraic numbers, or a quintic in radicals (quintic.jl), which needs no Nemo
+    (_has_decimal(r) && (!isempty(methods(algebraic_roots)) || _one_quintic(args...))) || return r
     v = try
         _exact_csolve(args...)
     catch err
@@ -20,6 +21,32 @@ function _csolve_cmd(args...)
     return v === nothing ? r : v
 end
 _plain_csolve() = get(task_local_storage(), _PLAIN_CSOLVE, false)
+
+# whether the arguments of cSolve are one polynomial equation of degree 5 in one variable
+function _one_quintic(eqs, x)
+    (eqs isa GiacExpr && x isa GiacExpr) || return false
+    p = _as_polynomial(eqs)
+    return _polynomial_degree(p, x) == 5
+end
+_one_quintic(args...) = false
+
+function _polynomial_degree(p::GiacExpr, x::GiacExpr)
+    d = try
+        invoke_cmd(:degree, p, x)
+    catch err
+        err isa GiacError || rethrow()
+        return nothing
+    end
+    v = _node(d)
+    return v isa NumNode && v.v isa Integer ? Int(v.v) : nothing
+end
+
+# whether p is irreducible over the rationals, of degree one or more in x
+function _irreducible(p::GiacExpr, x::GiacExpr)
+    fs = collect(invoke_cmd(:factors, p))
+    nonconstant = [i for i in 1:2:length(fs) if string(x) in _free_names(fs[i])]
+    return length(nonconstant) == 1 && _is_one_node(_node(fs[nonconstant[1] + 1]))
+end
 
 # whether a value, or an entry of a (nested) list, holds a decimal
 _has_decimal(e::GiacExpr) =
@@ -70,6 +97,11 @@ function _exact_polynomial_roots(p::GiacExpr, x::GiacExpr)
     # GIAC's own answer where it is exact (its rootof forms of a cubic's roots are compact)
     plain = task_local_storage(() -> invoke_cmd(:cSolve, p, x), _PLAIN_CSOLVE, true)
     _has_decimal(plain) || return [plain[i] for i in 1:length(plain)]
+    if length(c) == 6 && _irreducible(p, x)
+        v = _quintic_radicals(reverse(Rational{BigInt}.(c)))
+        v === nothing || return v
+    end
+    isempty(methods(algebraic_roots)) && return nothing
     return unique(algebraic_roots(p, x))
 end
 
