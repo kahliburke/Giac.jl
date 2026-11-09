@@ -729,11 +729,28 @@ desolve([diff(y, t, 2) + 3diff(y, t) + 2y ~ 0, y(0) ~ 1, Differential(t)(y)(0) ~
 `y` may be the function as declared, `y(t)`: GIAC needs its name, `y`, to apply initial
 conditions, and gets it. Declared that way, `y` also tells `desolve(eqs, y)` the variable `t`
 (GIAC's own default is `x`).
+
+A function of two variables, `u(x, t)`, is solved for in a first-order linear equation, by
+characteristics, with an arbitrary function `F_0` or a condition on a line; and in the heat and
+wave equations on an interval with `u` or its derivative zero at each end, as a sum of the
+eigenfunctions (held when infinite):
+
+```julia
+@giac_var x t u(x, t)
+desolve(diff(u, x) + 2diff(u, t) ~ 0, u)                                          # F_0(t-2*x)
+desolve([diff(u, t) ~ diff(u, x, 2), u(0, t) ~ 0, u(pi, t) ~ 0, u(x, 0) ~ sin(x)], u)   # exp(-t)*sin(x)
+```
 """
 desolve(args...) = invoke_cmd(:desolve, first(args), map(_unknown_by_name, Base.tail(args))...)
 
 function desolve(eqs, y::GiacExpr)
     parsed = _function_call(y)
+    # a function of two variables: first-order linear equations and the heat and wave equations
+    # (pde.jl), which GIAC does not solve
+    if parsed !== nothing && length(parsed[2]) == 2
+        v = parentmodule(@__MODULE__)._pdesolve(eqs, y)
+        v === nothing || return v
+    end
     (parsed === nothing || length(parsed[2]) != 1) && return invoke_cmd(:desolve, eqs, y)
     name, (t,) = parsed
     r = try
