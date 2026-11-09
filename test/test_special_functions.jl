@@ -142,6 +142,23 @@ import SpecialFunctions as SF
         @test occursin("ln(x)", string(S(SF.besselk(0, x), 0, 2)))
     end
 
+    @testset "polylogarithm" begin
+        Li = Giac.polylog
+        series(s, z) = ComplexF64(sum(Complex{BigFloat}(z)^k / big(k)^s for k in 1:4000))
+        for (s, z) in ((2, 0.3), (2, 0.7 + 0.4im), (3, -0.95), (5, 0.98), (2, -0.6))
+            @test Li(s, z) ≈ series(s, z) rtol = 1e-13
+        end
+        @test Li(2, -10.0) ≈ -π^2 / 6 - log(10)^2 / 2 - Li(2, -0.1) rtol = 1e-13     # inversion
+        @test Li(3, -50.0) ≈ Li(3, -1 / 50) - π^2 / 6 * log(50) - log(50)^3 / 6 rtol = 1e-12
+        @test Li(2, 2.0) ≈ π^2 / 4 - π * log(2) * im rtol = 1e-13                    # below the cut
+        @test Li(4, 1.0) ≈ π^4 / 90
+        @test Li(2, convert(GiacExpr, 1 // 2)) == π_^2 / 12 - log(two)^2 / 2
+        @test Li(1, x) == -log(1 - x) && Li(3, convert(GiacExpr, 1)) == Giac.invoke_cmd(:Zeta, 3)
+        @test D(Li(3, x^2)) == 2Li(2, x^2) / x
+        @test to_julia(Li(2, convert(GiacExpr, 1 // 3))) ≈ series(2, 1 / 3)
+        @test Giac.giac_latex(Li(2, x)) == "\\operatorname{Li}_{2}\\left(x\\right)"
+    end
+
     @testset "LaTeX" begin
         L = Giac.giac_latex
         @test L(SF.besselj(n, x)) == "J_{n}\\left(x\\right)"

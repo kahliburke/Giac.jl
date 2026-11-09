@@ -13,8 +13,9 @@ const _STRUVE = ("struveh", "struvel")
 # erf of an imaginary argument: erf(iu) = i erfi(u)
 const _ENTIRE = (_AIRY..., "erfi")
 
-# the Julia function of the name, from SpecialFunctions or, for the Struve functions, Giac
-_special_module(f::AbstractString) = f in _STRUVE ? (@__MODULE__) : SpecialFunctions
+# the Julia function of the name, from SpecialFunctions or, for the Struve functions and the
+# polylogarithm, Giac
+_special_module(f::AbstractString) = f in _STRUVE || f == "polylog" ? (@__MODULE__) : SpecialFunctions
 
 _special(f::String, args::Node...) = CallNode("of", Node[SymNode(f), args...])
 
@@ -26,6 +27,7 @@ function _special_name(n::CallNode)
     f in _BESSEL && length(n.args) == 3 && return f
     f in _ENTIRE && length(n.args) == 2 && return f
     f in _STRUVE && length(n.args) == 3 && return f
+    f == "polylog" && length(n.args) == 3 && return f
     return nothing
 end
 
@@ -200,6 +202,11 @@ function _special_value(f::String, args::Number...)
         all(a -> a isa Real, args) || return nothing
         return _struve_number(f, args...)
     end
+    if f == "polylog"
+        s, z = args
+        (s isa Integer || s isa Real && isinteger(s)) || return nothing
+        return _polylog_number(Int(s), z)
+    end
     fn = getfield(SpecialFunctions, Symbol(f))
     v = try
         fn(map(a -> a isa Rational || a isa Integer ? float(a) : a, args)...)
@@ -266,6 +273,9 @@ function _special_derivative(n::CallNode, x::String)
     x in _symbol_names(ν) && return nothing
     du = _derivative(u, x)
     (du === nothing || _is_zero_node(du)) && return du
+    if f == "polylog"                                   # Li_s'(u) = Li_(s-1)(u)/u
+        return _mul(du, _node(GiacExpr(_polylog(_add(ν, _MINUS_ONE), u)) / GiacExpr(u)))
+    end
     if f in _STRUVE
         # H_ν' = (ν/u) H_ν - H_(ν+1) + c_ν and L_ν' = (ν/u) L_ν + L_(ν+1) + c_ν, from (u^(-ν) H_ν)'
         V, U = GiacExpr(ν), GiacExpr(u)
@@ -556,7 +566,8 @@ _rebuilt_specials(n::Node) = _replace_nodes(n) do m
     f = _special_name(m)
     f === nothing && return nothing
     args = Node[_rebuilt_specials(a) for a in m.args[2:end]]
-    return f == "erfi" ? _erfi(args[1]) : f in _AIRY ? _airy(f, args[1]) : f in _STRUVE ? _struve(f, args[1], args[2]) : _bessel(f, args[1], args[2])
+    return f == "erfi" ? _erfi(args[1]) : f in _AIRY ? _airy(f, args[1]) : f in _STRUVE ? _struve(f, args[1], args[2]) :
+           f == "polylog" ? _polylog(args[1], args[2]) : _bessel(f, args[1], args[2])
 end
 
 # `series(f, x, a, n)` of an expression with the functions in it, as GIAC writes a series: the
@@ -711,6 +722,9 @@ function _expansion_at_zero(f::String, ν::GiacExpr, u::GiacExpr, N::Integer)
     v = _approx_value(ν)
     K = v isa Real ? max(0, ceil(Int, (N - v) / 2)) + 1 : cld(N, 2) + 1
     whole = _node(ν) isa NumNode && _node(ν).v isa Integer && _node(ν).v >= 0
+    if f == "polylog"                                    # Σₖ uᵏ/kˢ
+        return sum(u^k / convert(GiacExpr, k)^ν for k in 1:max(N, 1))
+    end
     if f in ("besselj", "besseli")
         sgn(k) = f == "besselj" && isodd(k) ? -1 : 1
         return sum(sgn(k) * (u / 2)^(2k + ν) / (factorial(big(k)) * Γ(k + ν + 1)) for k in 0:K)
@@ -748,4 +762,105 @@ function _expansion_at_zero(f::String, ν::GiacExpr, u::GiacExpr, N::Integer)
             return π_ * (_expansion_at_zero("besseli", -ν, u, N) - _expansion_at_zero("besseli", ν, u, N)) / (2s)
         end
     end
+end
+
+# ---------------------------------------------------------------------------------------------
+# The polylogarithm
+# ---------------------------------------------------------------------------------------------
+
+"""
+    polylog(s, x)
+
+The polylogarithm Li_s(x) = Σₙ₌₁^∞ xⁿ/nˢ, for a whole order s. At numbers it is a number; with a
+Giac expression it is symbolic, written with logarithms for s ≤ 1, and with its values at 0, 1, -1
+and ½ (Li₂(½) = π²/12 - ln²2/2) where they are known. A sum `Σ xⁿ/nˢ` is written with it.
+"""
+polylog(s::Integer, x::Number) = _polylog_number(s, x)
+polylog(s::GiacExpr, x::GiacExpr) = GiacExpr(_polylog(_node(s), _node(x)))
+polylog(s::Number, x::GiacExpr) = polylog(convert(GiacExpr, s), x)
+polylog(s::GiacExpr, x::Number) = polylog(s, convert(GiacExpr, x))
+
+function _polylog(s::Node, x::Node)
+    if s isa NumNode && s.v isa Integer
+        S, X = Int(s.v), GiacExpr(x)
+        if S <= 0                                       # (x d/dx)⁻ˢ x/(1 - x)
+            e = X / (1 - X)
+            for _ in 1:(-S)
+                e = invoke_cmd(:normal, X * invoke_cmd(:diff, e, X))
+            end
+            return _node(e)
+        end
+        S == 1 && return _node(-log(1 - X))
+        _is_zero_node(x) && return _ZERO
+        ζ = invoke_cmd(:Zeta, convert(GiacExpr, S))
+        x isa NumNode && isone(x.v) && return _node(ζ)
+        x isa NumNode && x.v == -1 && return _node(-(1 - convert(GiacExpr, 2)^(1 - S)) * ζ)
+        if x isa NumNode && x.v == 1 // 2 && S in (2, 3)
+            π_, l = convert(GiacExpr, π), log(convert(GiacExpr, 2))
+            return _node(S == 2 ? π_^2 / 12 - l^2 / 2 : 7ζ / 8 - π_^2 * l / 12 + l^3 / 6)
+        end
+        if _inexact(x)
+            v = _polylog_number(S, x.v)
+            v === nothing || return NumNode(v)
+        end
+    end
+    return _special("polylog", s, x)
+end
+
+# Li_s(z) at a number: the series for |z| ≤ 1/2; for |ln z| < 5 (< 2π) the expansion in μ = ln z,
+#     Li_s(e^μ) = μ^(s-1)/(s-1)! (H_(s-1) - ln(-μ)) + Σ_(k ≠ s-1) ζ(s-k) μᵏ/k!;
+# beyond it the inversion Li_s(z) = -(-1)ˢ Li_s(1/z) - (2πi)ˢ/s! B_s(1/2 + ln(-z)/(2πi)). Real for
+# real z ≤ 1.
+function _polylog_number(s::Integer, x::Number)
+    z = complex(float(x))
+    v = if s <= 1
+        s == 1 ? -log(1 - z) : _polylog_negative(s, z)
+    elseif z == 1
+        complex(SpecialFunctions.zeta(s))
+    elseif abs(z) <= 0.5
+        total, term, k = zero(z), z, 1
+        while abs(term) > 1e-18 * max(abs(total), 1e-300) && k < 200
+            total += term / k^s
+            k += 1
+            term *= z
+        end
+        total
+    elseif abs(log(z)) < 5
+        μ = log(z)
+        # -μ + 0i: for real z > 1, -μ is -0.0i below the cut; Im Li_s(z) = -π lnˢ⁻¹z/(s-1)! there
+        total = μ^(s - 1) / factorial(s - 1) * (sum(1 / j for j in 1:(s - 1); init = 0.0) - log(-μ + 0.0im))
+        small = 0                     # ζ vanishes at the negative even numbers: two small terms end it
+        for k in 0:300
+            k == s - 1 && continue
+            t = SpecialFunctions.zeta(s - k) * μ^k / factorial(big(k))
+            total += ComplexF64(t)
+            small = abs(t) < 1e-18 * max(abs(total), 1) ? small + 1 : 0
+            k > s && small >= 2 && break
+        end
+        total
+    else
+        w = log(-z) / (2π * im)
+        ComplexF64(-(-1)^s * _polylog_number(s, 1 / z) - (2π * im)^s / factorial(s) * _bernoulli_polynomial(s, 1 / 2 + w))
+    end
+    return x isa Real && x <= 1 ? real(v) : v
+end
+
+_polylog_negative(s::Integer, z) = s == 0 ? z / (1 - z) :
+    sum(_eulerian(-s, k) * z^(k + 1) for k in 0:(-s - 1)) / (1 - z)^(1 - s)
+
+# the Eulerian number ⟨n k⟩, for Li₋ₙ(z) = Σₖ ⟨n k⟩ z^(k+1) / (1 - z)^(n+1)
+_eulerian(n::Integer, k::Integer) = sum((-1)^j * binomial(n + 1, j) * (k + 1 - j)^n for j in 0:k)
+
+function _bernoulli_polynomial(n::Integer, t)
+    B = _bernoulli_numbers(n)
+    return sum(binomial(n, k) * B[k + 1] * t^(n - k) for k in 0:n)
+end
+
+# B₀, …, Bₙ, with B₁ = -1/2
+function _bernoulli_numbers(n::Integer)
+    B = Rational{BigInt}[1]
+    for m in 1:n
+        push!(B, -sum(binomial(big(m + 1), k) * B[k + 1] for k in 0:(m - 1)) / (m + 1))
+    end
+    return B
 end

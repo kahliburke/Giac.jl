@@ -191,7 +191,8 @@ const _SPECIAL_TEX = Dict(
     "besselj" => "J", "bessely" => "Y", "besseli" => "I", "besselk" => "K",
     "hankelh1" => "H^{(1)}", "hankelh2" => "H^{(2)}", "airyai" => "\\operatorname{Ai}",
     "airybi" => "\\operatorname{Bi}", "airyaiprime" => "\\operatorname{Ai}'", "airybiprime" => "\\operatorname{Bi}'",
-    "struveh" => "\\mathbf{H}", "struvel" => "\\mathbf{L}", "erfi" => "\\operatorname{erfi}")
+    "struveh" => "\\mathbf{H}", "struvel" => "\\mathbf{L}", "erfi" => "\\operatorname{erfi}",
+    "polylog" => "\\operatorname{Li}")
 
 function _pnode(e::GiacExpr)
     # numbers, names, sums and products are read off the tree directly
