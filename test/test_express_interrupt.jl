@@ -25,6 +25,9 @@
                                   C.invoke_cmd(:gbasis, GiacExpr[v - n for (n, v) in zip([L, p, r], vals)], order, giac_eval("plex")), order)
             @test_throws Giac.GiacTimeout Giac.with_timeout(slow, 1)
             @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"            # GIAC works again after
+            # an assumption made in the stopped computation goes with it
+            @test_throws Giac.GiacTimeout Giac.with_timeout(() -> (giac_eval("assume(qq > 0)"); slow()), 1)
+            @test string(giac_eval("about(qq)")) == "qq"
             # interrupting the waiting task, as Ctrl-C does, stops the computation too
             if Giac._giac_threaded()
                 job = Threads.@spawn try

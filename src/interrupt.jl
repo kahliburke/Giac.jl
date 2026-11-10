@@ -74,12 +74,23 @@ function with_timeout(f, seconds::Real)
     # which may not be run while every other thread is idle. Inside another `with_timeout`, the
     # earlier of the two deadlines holds.
     deadline = min(time() + seconds, get(task_local_storage(), :giac_cancel, Inf))
+    before, mode = _assigned_names(), string(giac_eval("complex_mode()"))
     try
         return task_local_storage(f, :giac_cancel, deadline)
     catch e
+        # GIAC's own temporary assumptions and complex mode, such as simplify's on the variables it
+        # works on, are left in place when it is stopped or fails
+        foreach(n -> giac_eval("purge($n)"), setdiff(_assigned_names(), before))
+        string(giac_eval("complex_mode()")) == mode || giac_eval("complex_mode($mode)")
         time() >= deadline && e isa InterruptException && throw(GiacTimeout(Float64(seconds)))
         rethrow()
     end
+end
+
+# the names GIAC has values or assumptions for
+function _assigned_names()
+    s = string(giac_eval("VARS()"))
+    return Set(filter(!isempty, split(strip(s, ['[', ']']), ',')))
 end
 
 # ---------------------------------------------------------------------------------------------
