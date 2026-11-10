@@ -245,33 +245,37 @@ series(exp(x), x, 1, 3)
 
 ## Advanced Topics
 
-### Gradient and Hessian
+### Gradient, Jacobian and Hessian
 
-For multivariable calculus:
+`∇`, `jacobian` and `hessian` take Julia vectors and return Julia arrays of `GiacExpr`:
 
 ```julia
-using Giac.Commands: gradient, hessian
-
 @giac_var x y
 
 f = x^2 + x*y + y^2
 
-# Gradient: [∂f/∂x, ∂f/∂y]
-gradient(f, [x, y])  # ToFix
-# Output: [2*x+y, x+2*y]
+∇(f, [x, y])                           # [2*x+y, x+2*y]
+hessian(f, [x, y])                     # [2 1; 1 2]
+jacobian([x^2*y, sin(x) + y], [x, y])  # [2*x*y x^2; cos(x) 1]
+```
 
-# Hessian matrix
-hessian(f, [x, y])
-# Output: [[2, 1], [1, 2]]
+GIAC's own commands are `grad` and `hessian`, which return GIAC lists:
+
+```julia
+using Giac.Commands: grad
+
+grad(f, [x, y])     # [2*x+y,x+2*y]
 ```
 
 ### Implicit Differentiation
+
+`implicitdiff(equation, y, x)` is dy/dx along the curve; the equation is written with `~`:
 
 ```julia
 using Giac.Commands: implicitdiff
 
 # For x² + y² = 1, find dy/dx
-implicitdiff(x^2 + y^2 - 1, x, y)  # ToFix
+implicitdiff(x^2 + y^2 ~ 1, y, x)
 # Output: -x/y
 ```
 
