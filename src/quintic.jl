@@ -155,4 +155,4 @@ end
 _root_of_unity(k) = k == 0 ? convert(GiacExpr, 1) :
     in_radicals(giac_eval("cos(2*pi*$k/5)")) + convert(GiacExpr, im) * in_radicals(giac_eval("sin(2*pi*$k/5)"))
 
-_giac_complex(e::GiacExpr) = Complex{Float64}(to_julia(invoke_cmd(:evalf, e, 30)))
+_giac_complex(e::GiacExpr) = Complex{Float64}(to_julia(_keeping_epsilon(() -> invoke_cmd(:evalf, e, 30))))

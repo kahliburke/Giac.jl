@@ -203,7 +203,7 @@ function _reciprocal_substitution(f::GiacExpr, x::GiacExpr)
         (g2 === nothing || _depends_on(g2, x)) && continue
         g = _root_of_factored(invoke_cmd(:factor, g2))
         gx = substitute(g, u => x + σ / x)
-        s₊, s₋ = _side_sign(h, gx, x, 1), _side_sign(h, gx, x, -1)
+        s₊, s₋ = _keeping_epsilon(() -> (_side_sign(h, gx, x, 1), _side_sign(h, gx, x, -1)))
         (s₊ === nothing || s₋ === nothing) && continue
         G = _integrate_or_nothing(g, u)
         G === nothing && continue

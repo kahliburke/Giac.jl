@@ -212,14 +212,14 @@ end
 function _assumed_intervals(v::GiacExpr)
     value(e) = (s = string(e); s in ("+infinity", "infinity") ? Inf : s == "-infinity" ? -Inf :
                                Float64(real(ComplexF64(to_julia(invoke_cmd(:evalf, e, 20))))))
-    out = [(value(lo), value(hi)) for (lo, hi) in _assumed_bounds(v)]
+    out = _keeping_epsilon(() -> [(value(lo), value(hi)) for (lo, hi) in _assumed_bounds(v)])
     out = filter(((lo, hi),) -> lo < hi, out)
     return isempty(out) ? [(-Inf, Inf)] : out
 end
 
 # the k-th generic point for variables with the given intervals: points of both signs and all
 # scales where nothing is assumed, exact numbers, the same on each run
-_generic_point(k::Int, ranges::Vector{Vector{Tuple{Float64, Float64}}}) =
+_generic_point(k::Int, ranges::AbstractVector) =
     [rationalize(_on_intervals(u, r); tol = 1e-6) for (u, r) in zip(_sequence_point(k, length(ranges)), ranges)]
 _generic_point(k::Int, d::Int) = _generic_point(k, [[(-Inf, Inf)] for _ in 1:d])
 
@@ -256,8 +256,11 @@ end
 # points, and an F that holds on part of the domain only, as one with the wrong branch of a root,
 # differs at points of the rest. Where f is real at fewer than two of them, every point where it has
 # a value counts; where it has a value at fewer than two (an unknown function in it), F' - f is
-# simplified
-function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
+# simplified. GIAC's evalf to some digits leaves its epsilon at their size, which changes later
+# numeric integrals: it is put back
+_is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr) = _keeping_epsilon(() -> _checked_on_domain(F, f, x))
+
+function _checked_on_domain(F::GiacExpr, f::GiacExpr, x::GiacExpr)
     d = invoke_cmd(:diff, F, x) - f
     names = [giac_identifier(n) for n in sort!(setdiff(string.(to_julia(invoke_cmd(:lname, f + F))), [string(x)]))]
     ranges = [_assumed_intervals(v) for v in [x; names]]

@@ -90,7 +90,7 @@ function _elliptic(f::String, args::Node...)
         if f == "ellipe" && whole(m, 1) && _is_constant_real_between(φ, -π_ / 2, π_ / 2)
             return _node(sin(φ))
         end
-        if _within_quarter_turn(φ, π_) && zero_(invoke_cmd(:simplify, m * sin(φ)^2 - 1))
+        if zero_(invoke_cmd(:simplify, m * sin(φ)^2 - 1)) && _within_quarter_turn(φ, π_)
             # 1/m = sin²φ, and for |φ| ≤ π/2 the amplitude in the reciprocal parameter is ±π/2,
             # with the sign of sin φ
             s2 = sin(φ)^2
@@ -128,6 +128,7 @@ _not_negative(e::GiacExpr) = (z = invoke_cmd(:simplify, e); _is_zero_expr(z) || 
 # the range of e = c₀ + Σ cᵢvᵢ, the cᵢ numbers, over the intervals assumed of the vᵢ (the hull of
 # each one's intervals), its ends exact; nothing for e not affine in its names
 function _affine_range(e::GiacExpr)
+    _any_node(m -> m isa CallNode, _node(e)) && return nothing
     vars = [giac_identifier(n) for n in _free_names(e)]
     lo = hi = substitute(e, Dict(v => 0 for v in vars))
     isempty(_free_names(lo)) || return nothing
