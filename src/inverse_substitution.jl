@@ -162,16 +162,66 @@ const _CHECK_DRAWS = 8 * _CHECK_POINTS          # points drawn at most, for a do
 const _CHECK_DIGITS = 30
 const _CHECK_TOLERANCE = 1e-6
 
-# the k-th point of Roberts' R_d sequence, a low-discrepancy sequence in [0, 1)ᵈ, mapped onto the
-# real line by u ↦ tan(π(u - 1/2)): generic points of both signs and all scales, the same on each run
-function _generic_point(k::Int, d::Int)
+# the k-th point of Roberts' R_d sequence, a low-discrepancy sequence in [0, 1)ᵈ
+function _sequence_point(k::Int, d::Int)
     g = 2.0                                     # the positive root of g^(d+1) = g + 1
     for _ in 1:100                              # by its contraction, to the last bit
-
         g = (1 + g)^(1 / (d + 1))
     end
-    return [rationalize(tan(π * (mod(0.5 + k / g^j, 1.0) - 0.5)); tol = 1e-6) for j in 1:d]
+    return [mod(0.5 + k / g^j, 1.0) for j in 1:d]
 end
+
+# u in [0, 1) as a point of the intervals: the one u falls in when there are several, and on it
+# tan(π(u - 1/2)) for the whole line, tan(πu/2) from the finite end of a half-line, linear on a
+# bounded one
+function _on_intervals(u::Float64, intervals::Vector{Tuple{Float64, Float64}})
+    n = length(intervals)
+    i = min(n, floor(Int, u * n) + 1)
+    u = u * n - (i - 1)
+    lo, hi = intervals[i]
+    isinf(lo) && isinf(hi) && return tan(π * (u - 0.5))
+    isinf(hi) && return lo + tan(π * u / 2)
+    isinf(lo) && return hi - tan(π * u / 2)
+    return lo + (hi - lo) * u
+end
+
+# the open intervals v is assumed to lie in (by `assuming`, or a declaration), as GIAC's `about`
+# gives them, their ends exact (±infinity for none); the whole line where nothing is assumed
+function _assumed_bounds(v::GiacExpr)
+    line = [(giac_eval("-infinity"), giac_eval("+infinity"))]
+    a = try
+        to_julia(invoke_cmd(:about, v))
+    catch err
+        _stopped(err) && rethrow()
+        return line
+    end
+    (a isa AbstractVector && length(a) >= 2) || return line
+    items(e) = e isa GiacExpr ? to_julia(e) : e         # numbers come back as Julia's
+    out = Tuple{GiacExpr, GiacExpr}[]
+    intervals = items(a[2])
+    intervals isa AbstractVector || return line
+    for iv in intervals
+        ends = items(iv)
+        (ends isa AbstractVector && length(ends) == 2) &&
+            push!(out, (convert(GiacExpr, ends[1]), convert(GiacExpr, ends[2])))
+    end
+    return isempty(out) ? line : out
+end
+
+# the assumed intervals of v in doubles
+function _assumed_intervals(v::GiacExpr)
+    value(e) = (s = string(e); s in ("+infinity", "infinity") ? Inf : s == "-infinity" ? -Inf :
+                               Float64(real(ComplexF64(to_julia(invoke_cmd(:evalf, e, 20))))))
+    out = [(value(lo), value(hi)) for (lo, hi) in _assumed_bounds(v)]
+    out = filter(((lo, hi),) -> lo < hi, out)
+    return isempty(out) ? [(-Inf, Inf)] : out
+end
+
+# the k-th generic point for variables with the given intervals: points of both signs and all
+# scales where nothing is assumed, exact numbers, the same on each run
+_generic_point(k::Int, ranges::Vector{Vector{Tuple{Float64, Float64}}}) =
+    [rationalize(_on_intervals(u, r); tol = 1e-6) for (u, r) in zip(_sequence_point(k, length(ranges)), ranges)]
+_generic_point(k::Int, d::Int) = _generic_point(k, [[(-Inf, Inf)] for _ in 1:d])
 
 # e's value at the point, or nothing where it has none there
 function _value_at(e::GiacExpr, point::Dict)
@@ -200,22 +250,23 @@ function _root_bases(e::GiacExpr)
 end
 
 # whether d/dx F is f on f's real domain: F' - f, with F' by differentiation, vanishes at each of a
-# set of generic points, in x and the parameters, where f is a real function (real, with the base of
-# each fractional power in it non-negative), drawn until there are enough of them, and there are two
-# such points at least. A nonzero F' - f
-# vanishes at few generic points, and an F that holds on part of the domain only, as one with the
-# wrong branch of a root, differs at points of the rest. Where f is real at fewer than two of them,
-# every point where it has a value counts; where it has a value at fewer than two (an unknown
-# function in it), F' - f is simplified
+# set of generic points, in x and the parameters within what is assumed of them, where f is a real
+# function (real, with the base of each fractional power in it non-negative), drawn until there are
+# enough of them, and there are two such points at least. A nonzero F' - f vanishes at few generic
+# points, and an F that holds on part of the domain only, as one with the wrong branch of a root,
+# differs at points of the rest. Where f is real at fewer than two of them, every point where it has
+# a value counts; where it has a value at fewer than two (an unknown function in it), F' - f is
+# simplified
 function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
     d = invoke_cmd(:diff, F, x) - f
     names = [giac_identifier(n) for n in sort!(setdiff(string.(to_julia(invoke_cmd(:lname, f + F))), [string(x)]))]
+    ranges = [_assumed_intervals(v) for v in [x; names]]
     bases = _root_bases(f)
     on_line, off_line = 0, 0
     differs = false
     for k in 1:_CHECK_DRAWS
         on_line >= _CHECK_POINTS && break
-        values = _generic_point(k, length(names) + 1)
+        values = _generic_point(k, ranges)
         point = Dict{GiacExpr, Rational{Int}}(x => values[1], (n => v for (n, v) in zip(names, values[2:end]))...)
         fv = _value_at(f, point)
         fv === nothing && continue

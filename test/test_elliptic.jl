@@ -38,6 +38,9 @@ import SpecialFunctions as SF
             @test G.ellipf(φ0, 1 / sin(φ0)^2) == G.ellipk(sin(φ0)^2) * sin(φ0)
         end
         @test string(G.ellipf(a / 2, 1 / sin(a / 2)^2)) == "ellipf(a/2,1/sin(a/2)^2)"
+        # |φ| ≤ π/2 known from the assumed interval of a, and not for a wider one
+        @test string(assuming(() -> G.ellipf(a / 2, 1 / sin(a / 2)^2), a > 0, a < π_)) == "ellipk(sin(a/2)^2)*sin(a/2)"
+        @test string(assuming(() -> G.ellipf(a / 2, 1 / sin(a / 2)^2), a > 0, a < 2π_)) == "ellipf(a/2,1/sin(a/2)^2)"
         @test SF.ellipk(m) == G.ellipk(m)
         # each partial derivative against a central difference
         at = Dict(m => 0.37, φ => 0.81, n => 0.23)
@@ -80,6 +83,8 @@ import SpecialFunctions as SF
         @test C.integrate(1 / sqrt(1 - m * sin(x)^2), x, 0, π_ / 2) == G.ellipk(m)
         @test C.integrate(sqrt(1 - x^2 / 2) / sqrt(1 - x^2), x, 0, 1) == G.ellipe(convert(GiacExpr, 1 // 2))
         @test C.integrate(1 / sqrt(cos(x) - cos(π_ / 3)), x, 0, π_ / 3) == sqrt(convert(GiacExpr, 2)) * G.ellipk(convert(GiacExpr, 1 // 4))
+        # the period for amplitudes 0 < a < π, where the answer holds
+        @test string(assuming(() -> C.integrate(1 / sqrt(cos(x) - cos(a)), x, 0, a), a > 0, a < π_)) == "sqrt(2)*ellipk(sin(a/2)^2)"
         T = C.integrate(1 / sqrt(cos(x) - cos(a)), x, 0, a)
         for a0 in (11 // 10, -11 // 10)         # the integral from 0 to a < 0 is negative
             @test abs(to_julia(C.evalf(substitute(T, a => a0))) - sign(a0) * sqrt(2) * G.ellipk(sin(Float64(a0) / 2)^2)) < 1e-12

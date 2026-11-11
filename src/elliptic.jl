@@ -112,11 +112,36 @@ function _elliptic(f::String, args::Node...)
     return _special(f, args...)
 end
 
-# whether φ is real with |φ| ≤ π/2: a number by its value, else by the signs of π/2 ∓ φ
+# whether φ is real with |φ| ≤ π/2: a number by its value, φ affine in its names by their assumed
+# intervals, else by the signs of π/2 ∓ φ
 function _within_quarter_turn(φ::GiacExpr, π_::GiacExpr)
     isempty(_free_names(φ)) && return _is_constant_real_between(φ, -π_ / 2, π_ / 2)
+    r = _affine_range(φ)
+    r === nothing || return _not_negative(r[1] + π_ / 2) && _not_negative(π_ / 2 - r[2])
     holds(s) = s in (:positive, :nonnegative, :zero)
     return holds(sign_of(π_ / 2 - φ; sos = false)) && holds(sign_of(π_ / 2 + φ; sos = false))
+end
+
+# whether the constant e is 0 or a positive number
+_not_negative(e::GiacExpr) = (z = invoke_cmd(:simplify, e); _is_zero_expr(z) || (v = _approx_value(z); v isa Real && v > 0))
+
+# the range of e = c₀ + Σ cᵢvᵢ, the cᵢ numbers, over the intervals assumed of the vᵢ (the hull of
+# each one's intervals), its ends exact; nothing for e not affine in its names
+function _affine_range(e::GiacExpr)
+    vars = [giac_identifier(n) for n in _free_names(e)]
+    lo = hi = substitute(e, Dict(v => 0 for v in vars))
+    isempty(_free_names(lo)) || return nothing
+    for v in vars
+        c = invoke_cmd(:diff, e, v)
+        isempty(_free_names(c)) || return nothing
+        cv = _approx_value(c)
+        cv isa Real || return nothing
+        iszero(cv) && continue
+        bounds = _assumed_bounds(v)
+        a, b = bounds[1][1], bounds[end][2]          # GIAC lists them in order
+        lo, hi = cv > 0 ? (lo + c * a, hi + c * b) : (lo + c * b, hi + c * a)
+    end
+    return (lo, hi)
 end
 
 # whether e is a real number between lo and hi, decided by its value

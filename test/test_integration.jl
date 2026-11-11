@@ -71,6 +71,10 @@ end
     @test chk(log(x + sqrt(x^2 - 1)), 1 / sqrt(x^2 - 1))
     @test chk(2x^(3 // 2) / 3, sqrt(x))                                   # real for x > 0 only
     @test !chk(x^3, x^2)
+    # an answer right for a > 0 only holds where that is assumed
+    @test !chk(log(x + a), 1 / (x + a) * sqrt(a^2) / a)
+    @test assuming(() -> chk(log(x + a), 1 / (x + a) * sqrt(a^2) / a), a > 0)
+    @test assuming(() -> Giac._assumed_intervals(a), a > 1, a < 2) == [(1.0, 2.0)]
     # the points: both signs and all scales, the same on each run
     @test Giac._generic_point(3, 2) == Giac._generic_point(3, 2)
     @test any(p -> p[1] < 0, Giac._generic_point.(1:Giac._CHECK_POINTS, 1))
