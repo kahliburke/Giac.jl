@@ -158,6 +158,7 @@ const _CHECK_SECONDS = 2.0
 # the tolerance is far above that, and far below the difference a wrong branch or a wrong answer makes,
 # which is of the integrand's size
 const _CHECK_POINTS = 12
+const _CHECK_DRAWS = 8 * _CHECK_POINTS          # points drawn at most, for a domain that is a small part of the space
 const _CHECK_DIGITS = 30
 const _CHECK_TOLERANCE = 1e-6
 
@@ -200,7 +201,8 @@ end
 
 # whether d/dx F is f on f's real domain: F' - f, with F' by differentiation, vanishes at each of a
 # set of generic points, in x and the parameters, where f is a real function (real, with the base of
-# each fractional power in it non-negative), and there are two such points at least. A nonzero F' - f
+# each fractional power in it non-negative), drawn until there are enough of them, and there are two
+# such points at least. A nonzero F' - f
 # vanishes at few generic points, and an F that holds on part of the domain only, as one with the
 # wrong branch of a root, differs at points of the rest. Where f is real at fewer than two of them,
 # every point where it has a value counts; where it has a value at fewer than two (an unknown
@@ -211,15 +213,18 @@ function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
     bases = _root_bases(f)
     on_line, off_line = 0, 0
     differs = false
-    for k in 1:_CHECK_POINTS
+    for k in 1:_CHECK_DRAWS
+        on_line >= _CHECK_POINTS && break
         values = _generic_point(k, length(names) + 1)
         point = Dict{GiacExpr, Rational{Int}}(x => values[1], (n => v for (n, v) in zip(names, values[2:end]))...)
         fv = _value_at(f, point)
         fv === nothing && continue
+        on = _is_real(fv) && all(b -> (v = _value_at(b, point); v !== nothing && _is_real(v) && real(v) >= 0), bases)
+        on || off_line < _CHECK_POINTS || continue
         dv = _value_at(d, point)
         dv === nothing && continue
         zero_ = abs(dv) <= _CHECK_TOLERANCE * max(abs(fv), 1.0)
-        if _is_real(fv) && all(b -> (v = _value_at(b, point); v !== nothing && _is_real(v) && real(v) >= 0), bases)
+        if on
             zero_ || return false
             on_line += 1
         else
