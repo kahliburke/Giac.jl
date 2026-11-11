@@ -425,20 +425,35 @@ _same_angle(u::GiacExpr, v::GiacExpr) = _is_zero_expr(invoke_cmd(:normal, u - v)
 
 # ((a + bx²)(c + dx²))^(-1/2) = F(asin(kx), bc/(ad))/(√a √c k) and
 # (a + bx²)^(1/2)/(c + dx²)^(1/2) = √a E(asin(kx), bc/(ad))/(√c k), k = √(-d/c) (Byrd and Friedman
-# 214.00, 219.00); the quadratic c + dx² taken as the one with a real zero where there is one
+# 214.00, 219.00); the quadratic c + dx² taken as the one with a real zero where there is one. The
+# formulas' derivatives hold the roots √a √((a + bx²)/a) of the quadratics where f has its own roots
+# √B of their products; each ratio is ±1, constant between the zeros, and the answer is multiplied by
+# it where it is not 1 throughout (a single quadratic with a > 0)
 function _algebraic_elliptic_integral(f::GiacExpr, x::GiacExpr)
     c, factors = _power_factors(f)
     quadratics = Tuple{GiacExpr, GiacExpr, GiacExpr}[]          # (a, b, exponent)
+    roots = Tuple{GiacExpr, Vector{Tuple{Int, Int}}}[]           # (B, (its quadratic, power in B))
     for (B, k) in factors
         string(x) in _free_names(B) || (c *= B^k; continue)
         _half_odd(k) || return nothing
-        q = _even_quadratics(B, x)
+        q = _quadratic_factors(B, x)
         q === nothing && return nothing
-        for (a, b) in q
-            push!(quadratics, (a, b, k))
+        r = Tuple{Int, Int}[]
+        for (a, b, e) in q
+            push!(quadratics, (a, b, GiacExpr(NumNode(_node(k).v * e))))
+            push!(r, (length(quadratics), e))
         end
+        push!(roots, (B, r))
     end
     length(quadratics) == 2 || return nothing
+    positive(e) = sign_of(e; sos = false) == :positive
+    implied(i) = ((a, b, _) = quadratics[i]; positive(a) ? sqrt(a + b * x^2) : sqrt(a) * sqrt(invoke_cmd(:normal, (a + b * x^2) / a)))
+    # √B against the product of the quadratics' roots, 1 throughout for one quadratic to the first
+    # power with a > 0, or for quadratics positive on the whole line
+    one_throughout(r) = (length(r) == 1 && r[1][2] == 1 && positive(quadratics[r[1][1]][1])) ||
+                        all(((i, _),) -> positive(quadratics[i][1]) && positive(quadratics[i][1] + quadratics[i][2] * x^2), r)
+    ρ = prod((prod(implied(i)^e for (i, e) in r) / sqrt(B) for (B, r) in roots if !one_throughout(r)); init = one(GiacExpr))
+    c *= ρ
     ks = [_node(q[3]).v for q in quadratics]
     if ks == [-1 // 2, -1 // 2]
         for (i, j) in ((1, 2), (2, 1))
@@ -471,6 +486,24 @@ end
 function _real_zero(c::GiacExpr, d::GiacExpr)
     v = _approx_value(invoke_cmd(:normal, -c / d))
     return v isa Real && v > 0
+end
+
+# B as a product of powers ±1 of even quadratics a + bx², (a, b, power): a product of such factors
+# taken a factor at a time, its coefficient in the first; nothing for anything else
+function _quadratic_factors(B::GiacExpr, x::GiacExpr)
+    n = _node(B)
+    n isa MulNode || return (q = _even_quadratics(B, x); q === nothing ? nothing : [(a, b, 1) for (a, b) in q])
+    out = Tuple{GiacExpr, GiacExpr, Int}[]
+    for (b, k) in n.factors
+        (k isa NumNode && k.v in (1, -1)) || return nothing
+        q = _even_quadratics(GiacExpr(b), x)
+        q === nothing && return nothing
+        append!(out, ((a, b_, Int(k.v)) for (a, b_) in q))
+    end
+    isempty(out) && return nothing
+    κ = GiacExpr(NumNode(n.coef))^out[1][3]
+    out[1] = (κ * out[1][1], κ * out[1][2], out[1][3])
+    return out
 end
 
 # B as a product of even quadratics a + bx²: one, [(a, b)], or a quartic in x² as two with real

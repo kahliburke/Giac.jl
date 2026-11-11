@@ -153,11 +153,13 @@ end
 const _CHECK_SECONDS = 2.0
 
 # The check of an antiderivative evaluates at this many points, to this many digits, and takes a
-# value as zero below this tolerance relative to the integrand's: above the rounding of functions GIAC
-# evaluates in doubles
+# value as zero below this tolerance relative to the integrand's. GIAC evaluates some functions in
+# doubles whatever the digits asked, and cancellation among the terms of F' can lose several more:
+# the tolerance is far above that, and far below the difference a wrong branch or a wrong answer makes,
+# which is of the integrand's size
 const _CHECK_POINTS = 12
 const _CHECK_DIGITS = 30
-const _CHECK_TOLERANCE = 1e-10
+const _CHECK_TOLERANCE = 1e-6
 
 # the k-th point of Roberts' R_d sequence, a low-discrepancy sequence in [0, 1)ᵈ, mapped onto the
 # real line by u ↦ tan(π(u - 1/2)): generic points of both signs and all scales, the same on each run
@@ -181,15 +183,32 @@ function _value_at(e::GiacExpr, point::Dict)
     return isfinite(v) ? v : nothing
 end
 
-# whether d/dx F is f on the real line: F' - f, with F' by differentiation, vanishes at each of a
-# set of generic points, in x and the parameters, where f is real, and there are two such points at
-# least. A nonzero F' - f vanishes at few generic points, and an F that holds on part of the line
-# only, as one with the wrong branch of a root, differs at points of the rest. Where f is real at
-# fewer than two of them, every point where it has a value counts; where it has a value at fewer than
-# two (an unknown function in it), F' - f is simplified
+_is_real(v::Complex) = abs(imag(v)) <= _CHECK_TOLERANCE * max(abs(v), 1.0)
+
+# the bases of the fractional powers in e
+function _root_bases(e::GiacExpr)
+    bases = GiacExpr[]
+    _any_node(_node(e)) do m
+        m isa MulNode && for (b, k) in m.factors
+            k isa NumNode && k.v isa Rational && !isinteger(k.v) && (B = GiacExpr(b); any(isequal(B), bases) || push!(bases, B))
+        end
+        m isa CallNode && m.f == "sqrt" && length(m.args) == 1 && push!(bases, GiacExpr(m.args[1]))
+        false
+    end
+    return bases
+end
+
+# whether d/dx F is f on f's real domain: F' - f, with F' by differentiation, vanishes at each of a
+# set of generic points, in x and the parameters, where f is a real function (real, with the base of
+# each fractional power in it non-negative), and there are two such points at least. A nonzero F' - f
+# vanishes at few generic points, and an F that holds on part of the domain only, as one with the
+# wrong branch of a root, differs at points of the rest. Where f is real at fewer than two of them,
+# every point where it has a value counts; where it has a value at fewer than two (an unknown
+# function in it), F' - f is simplified
 function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
     d = invoke_cmd(:diff, F, x) - f
     names = [giac_identifier(n) for n in sort!(setdiff(string.(to_julia(invoke_cmd(:lname, f + F))), [string(x)]))]
+    bases = _root_bases(f)
     on_line, off_line = 0, 0
     differs = false
     for k in 1:_CHECK_POINTS
@@ -200,7 +219,7 @@ function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
         dv = _value_at(d, point)
         dv === nothing && continue
         zero_ = abs(dv) <= _CHECK_TOLERANCE * max(abs(fv), 1.0)
-        if abs(imag(fv)) <= _CHECK_TOLERANCE * max(abs(fv), 1.0)
+        if _is_real(fv) && all(b -> (v = _value_at(b, point); v !== nothing && _is_real(v) && real(v) >= 0), bases)
             zero_ || return false
             on_line += 1
         else

@@ -62,11 +62,17 @@ import SpecialFunctions as SF
                        (sin(x)^2 / sqrt(1 - m * sin(x)^2), G.ellipf(x, m) / m - G.ellipe(x, m) / m),
                        (1 / ((1 - n * sin(x)^2) * sqrt(1 - m * sin(x)^2)), G.ellippi(n, x, m)),
                        (1 / sqrt(1 - x^4), G.ellipf(asin(x), -1)),
-                       (1 / sqrt((1 - x^2) * (1 - m * x^2)), G.ellipf(asin(x), m)),
+                       (1 / (sqrt(1 - x^2) * sqrt(1 - m * x^2)), G.ellipf(asin(x), m)),
                        (sqrt(1 - m * x^2) / sqrt(1 - x^2), G.ellipe(asin(x), m)),
                        (sqrt(1 + cos(x)^2), sqrt(convert(GiacExpr, 2)) * G.ellipe(x, 1 // 2)))
             @test C.integrate(f, x) == F
         end
+        # one root of the product: F(asin x|m) holds for |x| < 1 only, and times √(1-x²)√(1-mx²) over
+        # that root, ±1, on the whole domain
+        f = 1 / sqrt((1 - x^2) * (1 - m * x^2))
+        F = C.integrate(f, x)
+        @test string(F) == "sqrt(1-x^2)*sqrt(1-m*x^2)*ellipf(asin(x),m)/sqrt((1-x^2)*(1-m*x^2))"
+        @test Giac._is_antiderivative(F, f, x)
         f = 1 / sqrt(1 + 3x^2 + 2x^4)                                    # an imaginary amplitude
         @test Giac._is_antiderivative(C.integrate(f, x), f, x)
         @test Giac._elliptic_integral(1 / sqrt(1 + x^3), x) === nothing
@@ -75,8 +81,8 @@ import SpecialFunctions as SF
         @test C.integrate(sqrt(1 - x^2 / 2) / sqrt(1 - x^2), x, 0, 1) == G.ellipe(convert(GiacExpr, 1 // 2))
         @test C.integrate(1 / sqrt(cos(x) - cos(π_ / 3)), x, 0, π_ / 3) == sqrt(convert(GiacExpr, 2)) * G.ellipk(convert(GiacExpr, 1 // 4))
         T = C.integrate(1 / sqrt(cos(x) - cos(a)), x, 0, a)
-        for a0 in (1.1, -1.1)                   # the integral from 0 to a < 0 is negative
-            @test abs(to_julia(C.evalf(substitute(T, a => a0))) - sign(a0) * sqrt(2) * G.ellipk(sin(a0 / 2)^2)) < 1e-12
+        for a0 in (11 // 10, -11 // 10)         # the integral from 0 to a < 0 is negative
+            @test abs(to_julia(C.evalf(substitute(T, a => a0))) - sign(a0) * sqrt(2) * G.ellipk(sin(Float64(a0) / 2)^2)) < 1e-12
         end
     end
 

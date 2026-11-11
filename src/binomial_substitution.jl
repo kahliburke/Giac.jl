@@ -183,49 +183,50 @@ function _simplified_within(e::GiacExpr, seconds::Real)
     end
 end
 
-# ∫ f dx by u = x + σ/x (σ = ±1), where f = (1 - σ/x²) h with h unchanged by x → σ/x, so that h is
-# a function g of u: ∫ (x²-1)/((x²+1)√(x⁴+1)) dx = ∫ du/(u√(u²-2)). h² is rational in x, and is
-# written in u by eliminating x from w = h² and x² - ux + σ = 0 with a resultant; g is its square
-# root with h's sign at a point. The answer is kept only if its derivative is f.
+# ∫ f dx by u = x + σ/x (σ = ±1), where f = (1 - σ/x²) h with h² unchanged by x → σ/x, so that h is
+# ±g(u): ∫ (x²-1)/((x²+1)√(x⁴+1)) dx = ∫ du/(u√(u²-2)). h² is rational in x, and is written in u by
+# eliminating x from w = h² and x² - ux + σ = 0 with a resultant; g is its square root. h/g(u) is ±1,
+# constant on each side of 0 where h has no zero or pole: with s₊ and s₋ its values there, F is
+# s₊ G(u) where they agree and s₊ sign(x) G(u) where they do not. The answer is kept only if its
+# derivative is f.
 function _reciprocal_substitution(f::GiacExpr, x::GiacExpr)
     xn = _node(x)
     (xn isa SymNode && _algebraic_in(_node(f), xn)) || return nothing
-    x0 = 137 // 100
-    value(e, v) = _approx_value(substitute(e, x => v))
     for σ in (1, -1)
         u, w = _fresh_symbol(_node(f), "u"), _fresh_symbol(_node(f), "w")
         h = invoke_cmd(:normal, f / (1 - σ / x^2))
-        a, b = value(h, x0), value(h, σ // x0)
-        (a isa Number && b isa Number && abs(a - b) <= 1e-10 * max(abs(a), 1)) || continue
         H = invoke_cmd(:normal, h^2)
         _is_rational_in(_node(H), xn.name) || continue
+        _is_zero_expr(invoke_cmd(:normal, H - substitute(H, x => σ / x))) || continue
         R = invoke_cmd(:factor, invoke_cmd(:resultant, w * invoke_cmd(:denom, H) - invoke_cmd(:numer, H), x^2 - u * x + σ, x))
         g2 = _linear_root(R, w)
         (g2 === nothing || _depends_on(g2, x)) && continue
         g = _root_of_factored(invoke_cmd(:factor, g2))
-        gv = value(substitute(g, u => x + σ / x), x0)
-        (gv isa Number && abs(abs(gv) - abs(a)) <= 1e-10 * max(abs(a), 1)) || continue
-        real(gv) * real(a) < 0 && (g = -g)
+        gx = substitute(g, u => x + σ / x)
+        s₊, s₋ = _side_sign(h, gx, x, 1), _side_sign(h, gx, x, -1)
+        (s₊ === nothing || s₋ === nothing) && continue
         G = _integrate_or_nothing(g, u)
         G === nothing && continue
-        F = substitute(G, u => x + σ / x)
-        _is_antiderivative(F, f, x) || continue
-        # g was taken with h's sign for x > 0; with |x| written x the answer often holds for x < 0
-        # as well, checked there through -A(-x), whose derivative is A'(-x)
-        S = _simplified_within(F, 2.0)
-        for A in (_x_for_abs(S, x), S, F)
-            _is_antiderivative(A, f, x) && _is_antiderivative(-substitute(A, x => -x), substitute(f, x => -x), x) && return A
+        F = s₊ * substitute(G, u => x + σ / x) * (s₊ == s₋ ? one(GiacExpr) : invoke_cmd(:sign, x))
+        for A in (_simplified_within(F, 2.0), F)
+            _is_antiderivative(A, f, x) && return A
         end
-        return F
     end
     return nothing
 end
 
-# e with |x| as x and sign(x) as 1, as they are for x > 0
-_x_for_abs(e::GiacExpr, x::GiacExpr) = GiacExpr(_replace_nodes(_node(e)) do m
-    (m isa CallNode && m.f in ("abs", "sign") && length(m.args) == 1 && isequal(only(m.args), _node(x))) || return nothing
-    return m.f == "abs" ? _node(x) : _ONE
-end)
+# h/g, ±1, on the side of 0 of the sign `side`: its value at a generic point there where both have
+# values, or nothing where it is not ±1 there
+function _side_sign(h::GiacExpr, g::GiacExpr, x::GiacExpr, side::Int)
+    for k in 1:_CHECK_POINTS
+        point = Dict{GiacExpr, Rational{Int}}(x => side * abs(_generic_point(k, 1)[1]))
+        hv, gv = _value_at(h, point), _value_at(g, point)
+        (hv === nothing || gv === nothing || iszero(gv)) && continue
+        r = hv / gv
+        return abs(r - 1) <= _CHECK_TOLERANCE ? 1 : abs(r + 1) <= _CHECK_TOLERANCE ? -1 : nothing
+    end
+    return nothing
+end
 
 # the root in w of the factor of R linear in w, or nothing
 function _linear_root(R::GiacExpr, w::GiacExpr)
