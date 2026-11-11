@@ -62,6 +62,20 @@ end
     @test same(log(x) / (1 + x^2), 0, ∞, "0")
 end
 
+@testset "Checking an antiderivative on the whole line" begin
+    @giac_var x a
+    chk(F, f) = Giac._is_antiderivative(F, f, x)
+    @test chk(atan(x / sqrt(a)) / sqrt(a), 1 / (x^2 + a))                 # for either sign of a
+    @test chk(x * abs(x) / 2, sqrt(x^2))
+    @test !chk(x^2 / 2, sqrt(x^2))                                        # right for x > 0 only
+    @test chk(log(x + sqrt(x^2 - 1)), 1 / sqrt(x^2 - 1))
+    @test chk(2x^(3 // 2) / 3, sqrt(x))                                   # real for x > 0 only
+    @test !chk(x^3, x^2)
+    # the points: both signs and all scales, the same on each run
+    @test Giac._generic_point(3, 2) == Giac._generic_point(3, 2)
+    @test any(p -> p[1] < 0, Giac._generic_point.(1:Giac._CHECK_POINTS, 1))
+end
+
 # The search for antiderivatives after GIAC's needs GIAC on a thread of its own
 @testset "Substituting for an inverse function" begin
     if Giac._giac_threaded() && Giac._wrapper_interrupts()

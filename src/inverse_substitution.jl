@@ -152,28 +152,64 @@ end
 
 const _CHECK_SECONDS = 2.0
 
-# whether d/dx F is f: the difference simplifies to 0, or vanishes at two of a few exact points,
-# the parameters given values of their own (a difference of branches of a root or a logarithm can
-# leave it non-zero on part of the line)
+# The check of an antiderivative evaluates at this many points, to this many digits, and takes a
+# value as zero below this tolerance relative to the integrand's: above the rounding of functions GIAC
+# evaluates in doubles
+const _CHECK_POINTS = 12
+const _CHECK_DIGITS = 30
+const _CHECK_TOLERANCE = 1e-10
+
+# the k-th point of Roberts' R_d sequence, a low-discrepancy sequence in [0, 1)ᵈ, mapped onto the
+# real line by u ↦ tan(π(u - 1/2)): generic points of both signs and all scales, the same on each run
+function _generic_point(k::Int, d::Int)
+    g = 2.0                                     # the positive root of g^(d+1) = g + 1
+    for _ in 1:100                              # by its contraction, to the last bit
+
+        g = (1 + g)^(1 / (d + 1))
+    end
+    return [rationalize(tan(π * (mod(0.5 + k / g^j, 1.0) - 0.5)); tol = 1e-6) for j in 1:d]
+end
+
+# e's value at the point, or nothing where it has none there
+function _value_at(e::GiacExpr, point::Dict)
+    v = try
+        ComplexF64(to_julia(invoke_cmd(:evalf, substitute(e, point), _CHECK_DIGITS)))
+    catch err
+        _stopped(err) && rethrow()
+        return nothing
+    end
+    return isfinite(v) ? v : nothing
+end
+
+# whether d/dx F is f on the real line: F' - f, with F' by differentiation, vanishes at each of a
+# set of generic points, in x and the parameters, where f is real, and there are two such points at
+# least. A nonzero F' - f vanishes at few generic points, and an F that holds on part of the line
+# only, as one with the wrong branch of a root, differs at points of the rest. Where f is real at
+# fewer than two of them, every point where it has a value counts; where it has a value at fewer than
+# two (an unknown function in it), F' - f is simplified
 function _is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr)
     d = invoke_cmd(:diff, F, x) - f
-    names = setdiff(string.(to_julia(invoke_cmd(:lname, f + F))), [string(x)])
-    params = Dict(giac_identifier(n) => 1 // 2 + k // 7 for (k, n) in enumerate(names))
-    matched, missed = 0, 0
-    for p in (37 // 100, 83 // 100, 161 // 100)
-        v = merge(params, Dict(x => p))
-        fv, dv = try
-            ComplexF64(to_julia(invoke_cmd(:evalf, substitute(f, v), 30))), ComplexF64(to_julia(invoke_cmd(:evalf, substitute(d, v), 30)))
-        catch
-            continue
+    names = [giac_identifier(n) for n in sort!(setdiff(string.(to_julia(invoke_cmd(:lname, f + F))), [string(x)]))]
+    on_line, off_line = 0, 0
+    differs = false
+    for k in 1:_CHECK_POINTS
+        values = _generic_point(k, length(names) + 1)
+        point = Dict{GiacExpr, Rational{Int}}(x => values[1], (n => v for (n, v) in zip(names, values[2:end]))...)
+        fv = _value_at(f, point)
+        fv === nothing && continue
+        dv = _value_at(d, point)
+        dv === nothing && continue
+        zero_ = abs(dv) <= _CHECK_TOLERANCE * max(abs(fv), 1.0)
+        if abs(imag(fv)) <= _CHECK_TOLERANCE * max(abs(fv), 1.0)
+            zero_ || return false
+            on_line += 1
+        else
+            off_line += 1
+            differs |= !zero_
         end
-        (isfinite(fv) && isfinite(dv) && abs(fv) > 1e-12) || continue
-        abs(dv) <= 1e-8 * max(abs(fv), 1.0) ? (matched += 1) : (missed += 1)
     end
-    matched >= 2 && return true
-    # differing at two points it is no antiderivative; otherwise the difference simplified, which
-    # can take GIAC long, within a few seconds where GIAC can be stopped
-    missed >= 2 && return false
+    on_line >= 2 && return true
+    on_line + off_line >= 2 && return !differs
     return try
         _giac_threaded() && _wrapper_interrupts() ? string(_simplified_within(d, _CHECK_SECONDS)) == "0" :
                                                     string(invoke_cmd(:simplify, d)) == "0"
