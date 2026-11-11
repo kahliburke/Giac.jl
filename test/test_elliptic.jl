@@ -33,7 +33,11 @@ import SpecialFunctions as SF
         @test G.ellipe(convert(GiacExpr, 1)) == 1
         @test G.ellipf(π_ / 2, m) == G.ellipk(m) && G.ellipe(π_, m) == 2G.ellipe(m)
         @test G.ellipf(φ, 0) == φ && G.ellippi(0, φ, m) == G.ellipf(φ, m)
-        @test string(G.ellipf(a / 2, 1 / sin(a / 2)^2)) == "ellipk(sin(a/2)^2)*abs(sin(a/2))"   # m sin²φ = 1
+        # m sin²φ = 1: F = K(sin²φ) sin φ for |φ| ≤ π/2, odd in φ; left as it is where |φ| ≤ π/2 is not known
+        for φ0 in (giac_eval("1/2"), giac_eval("-1/2"))
+            @test G.ellipf(φ0, 1 / sin(φ0)^2) == G.ellipk(sin(φ0)^2) * sin(φ0)
+        end
+        @test string(G.ellipf(a / 2, 1 / sin(a / 2)^2)) == "ellipf(a/2,1/sin(a/2)^2)"
         @test SF.ellipk(m) == G.ellipk(m)
         # each partial derivative against a central difference
         at = Dict(m => 0.37, φ => 0.81, n => 0.23)
@@ -71,8 +75,9 @@ import SpecialFunctions as SF
         @test C.integrate(sqrt(1 - x^2 / 2) / sqrt(1 - x^2), x, 0, 1) == G.ellipe(convert(GiacExpr, 1 // 2))
         @test C.integrate(1 / sqrt(cos(x) - cos(π_ / 3)), x, 0, π_ / 3) == sqrt(convert(GiacExpr, 2)) * G.ellipk(convert(GiacExpr, 1 // 4))
         T = C.integrate(1 / sqrt(cos(x) - cos(a)), x, 0, a)
-        @test string(T) == "sqrt(2)*ellipk(sin(a/2)^2)"
-        @test abs(to_julia(C.evalf(substitute(T, a => 1.1))) - sqrt(2) * G.ellipk(sin(0.55)^2)) < 1e-12
+        for a0 in (1.1, -1.1)                   # the integral from 0 to a < 0 is negative
+            @test abs(to_julia(C.evalf(substitute(T, a => a0))) - sign(a0) * sqrt(2) * G.ellipk(sin(a0 / 2)^2)) < 1e-12
+        end
     end
 
     @testset "Jacobi's functions" begin

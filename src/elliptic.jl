@@ -90,12 +90,13 @@ function _elliptic(f::String, args::Node...)
         if f == "ellipe" && whole(m, 1) && _is_constant_real_between(φ, -π_ / 2, π_ / 2)
             return _node(sin(φ))
         end
-        if zero_(invoke_cmd(:simplify, m * sin(φ)^2 - 1))
-            # 1/m = sin²φ, and 1/√m = |sin φ|
+        if _within_quarter_turn(φ, π_) && zero_(invoke_cmd(:simplify, m * sin(φ)^2 - 1))
+            # 1/m = sin²φ, and for |φ| ≤ π/2 the amplitude in the reciprocal parameter is ±π/2,
+            # with the sign of sin φ
             s2 = sin(φ)^2
             K = GiacExpr(_elliptic("ellipk", _node(s2)))
-            f == "ellipf" && return _node(K * abs(sin(φ)))
-            return _node((GiacExpr(_elliptic("ellipe", _node(s2))) - (1 - s2) * K) / abs(sin(φ)))
+            f == "ellipf" && return _node(K * sin(φ))
+            return _node((GiacExpr(_elliptic("ellipe", _node(s2))) - (1 - s2) * K) / sin(φ))
         end
     elseif f == "ellippi"
         n = G[1]
@@ -109,6 +110,13 @@ function _elliptic(f::String, args::Node...)
         end
     end
     return _special(f, args...)
+end
+
+# whether φ is real with |φ| ≤ π/2: a number by its value, else by the signs of π/2 ∓ φ
+function _within_quarter_turn(φ::GiacExpr, π_::GiacExpr)
+    isempty(_free_names(φ)) && return _is_constant_real_between(φ, -π_ / 2, π_ / 2)
+    holds(s) = s in (:positive, :nonnegative, :zero)
+    return holds(sign_of(π_ / 2 - φ; sos = false)) && holds(sign_of(π_ / 2 + φ; sos = false))
 end
 
 # whether e is a real number between lo and hi, decided by its value
@@ -335,13 +343,19 @@ function _elliptic_integral(f::GiacExpr, x::GiacExpr)
 end
 
 # (c, [(base, exponent)]) for f as c times a product of powers, products inside bases with whole
-# exponents spread over their factors
+# exponents spread over their factors. Under a fractional exponent only a real coefficient comes out,
+# (aP)ᵏ = |a|ᵏ (±P)ᵏ, and the rest stays one base: (AB)ᵏ = AᵏBᵏ fails where A and B are negative
 function _power_factors(f::GiacExpr)
     c, out = Ref(one(GiacExpr)), Tuple{GiacExpr, GiacExpr}[]
     function spread(b::Node, k::Node)
-        if b isa MulNode && k isa NumNode && k.v isa Union{Integer, Rational}
+        if b isa MulNode && k isa NumNode && k.v isa Union{Integer, Rational} && isinteger(k.v)
             isone(b.coef) || (c[] *= GiacExpr(NumNode(b.coef))^GiacExpr(k))
             foreach(((bb, kk),) -> spread(bb, _mul(kk, k)), b.factors)
+        elseif b isa MulNode && k isa NumNode && k.v isa Rational && b.coef isa Real && !isone(b.coef)
+            a = b.coef
+            c[] *= GiacExpr(NumNode(abs(a)))^GiacExpr(k)
+            P = _mul((_pow(bb, kk) for (bb, kk) in b.factors)...)
+            push!(out, (GiacExpr(a > 0 ? P : _add(_mul(NumNode(-1), P))), GiacExpr(k)))
         else
             push!(out, (GiacExpr(b), GiacExpr(k)))
         end
