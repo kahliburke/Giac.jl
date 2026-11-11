@@ -25,6 +25,10 @@
                                   C.invoke_cmd(:gbasis, GiacExpr[v - n for (n, v) in zip([L, p, r], vals)], order, giac_eval("plex")), order)
             @test_throws Giac.GiacTimeout Giac.with_timeout(slow, 1)
             @test string(C.factor(x1^2 - 1)) == "(x1-1)*(x1+1)"            # GIAC works again after
+            # nested limits: the one reached reports its own seconds
+            seconds(f) = try f(); nothing catch e; e isa Giac.GiacTimeout ? e.seconds : e end
+            @test seconds(() -> Giac.with_timeout(() -> Giac.with_timeout(slow, 5), 1)) == 1
+            @test seconds(() -> Giac.with_timeout(() -> Giac.with_timeout(slow, 1), 5)) == 1
             # an assumption made in the stopped computation goes with it
             @test_throws Giac.GiacTimeout Giac.with_timeout(() -> (giac_eval("assume(qq > 0)"); slow()), 1)
             @test string(giac_eval("about(qq)")) == "qq"
