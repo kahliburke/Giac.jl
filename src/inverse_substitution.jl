@@ -24,7 +24,7 @@ const _EXP_OF_INVERSE = Dict(
     "atanh" => u -> sqrt((1 + u) / (1 - u)))
 
 # acosh(u) and asinh(u) as GIAC writes them, ln(u + √(u²−1)) and ln(u + √(u²+1)): the function's
-# name and u, or nothing
+# name and u, or nothing. The first is acosh(u) where it is real, u ≥ 1; the second is asinh(u)
 function _log_form(m::Node)
     m isa CallNode && m.f in ("ln", "log") && length(m.args) == 1 && m.args[1] isa AddNode || return nothing
     terms = m.args[1].terms
@@ -34,9 +34,9 @@ function _log_form(m::Node)
         (q === nothing || !isone(cr)) && continue
         um, cu = terms[3 - i]
         u = GiacExpr(_scale(um, cu))
-        d = string(invoke_cmd(:simplify, GiacExpr(q) - u^2))
-        d == "1" && return ("asinh", _node(u))
-        d == "-1" && return ("acosh", _node(u))
+        d = GiacExpr(q) - u^2
+        _is_zero_expr(invoke_cmd(:normal, d - 1)) && return ("asinh", _node(u))
+        _is_zero_expr(invoke_cmd(:normal, d + 1)) && return ("acosh", _node(u))
     end
     return nothing
 end
