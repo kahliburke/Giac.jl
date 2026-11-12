@@ -186,6 +186,7 @@ end
         @test_throws ErrorException to_nemo(giac_eval("3/4"), ZZ)
     end
 end
+
 @testset "Nemo's rings as domains to factor over" begin
     x = giac_eval("x")
     @test string(Giac.Commands.factor(6x^2 - 12, ZZ)) == "(2*3)*(x^2-2)"
