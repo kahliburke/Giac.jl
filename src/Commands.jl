@@ -182,9 +182,9 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return r === nothing ? parentmodule(@__MODULE__)._hold(:series, map(a -> convert(GiacExpr, a), args)) : r
     end
 
-    # GIAC's evalf to n digits of a rootof leaves epsilon at 10⁻ⁿ for the session, after which
-    # numeric integrals return two estimates: epsilon is put back
-    if cmd === :evalf && length(args) >= 2 && !get(task_local_storage(), :giac_evalf_kept, false)
+    # GIAC's evalf to n digits of a rootof, and its desolve, leave epsilon smaller for the session,
+    # after which numeric integrals return two estimates: epsilon is put back
+    if (cmd === :evalf && length(args) >= 2 || cmd === :desolve) && !get(task_local_storage(), :giac_evalf_kept, false)
         return parentmodule(@__MODULE__)._keeping_epsilon() do
             task_local_storage(() -> invoke_cmd(cmd, args...), :giac_evalf_kept, true)
         end

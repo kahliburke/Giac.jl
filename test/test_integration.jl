@@ -146,6 +146,17 @@ end
     @giac_var x
     @test Giac.Commands.integrate(Giac.Commands.erfc(x)^2, x, 0, convert(GiacExpr, Inf)) ==
           (2 - sqrt(convert(GiacExpr, 2))) / sqrt(convert(GiacExpr, π))
+    @giac_var t y(t)
+    Giac.Commands.desolve(Giac.Commands.diff(y, t, 2) + y + y^3 ~ 0, y)   # GIAC's leaves it at 1e-32
+    @test string(giac_eval("epsilon")) == eps
+    # numeric checks do not depend on the session's epsilon
+    giac_eval("epsilon:=1e-32")
+    try
+        @test string(Giac.Commands.integrate(log(1 + x) / (1 + x^2), x, 0, 1)) == "pi*ln(2)/8"
+        @test string(giac_eval("epsilon")) == "1e-32"
+    finally
+        giac_eval("epsilon:=$eps")
+    end
 end
 
 # Reciprocal substitutions u = x ± 1/x, Chebyshev's third case on both sides of 0, and parts

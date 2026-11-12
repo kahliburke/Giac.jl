@@ -60,3 +60,10 @@ function _keeping_epsilon(f)
         string(giac_eval("epsilon")) == old || giac_eval("epsilon:=$old")
     end
 end
+
+# GIAC's epsilon when a session starts
+const _DEFAULT_EPSILON = "1e-12"
+
+# f(), with GIAC's epsilon at its default and as it was after: numeric checks then do not depend on
+# what earlier computations left it at
+_at_default_epsilon(f) = _keeping_epsilon(() -> (giac_eval("epsilon:=$_DEFAULT_EPSILON"); f()))

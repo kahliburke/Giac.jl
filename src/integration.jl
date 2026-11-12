@@ -384,8 +384,10 @@ const _DEFINITE_DRAWS = 4 * _DEFINITE_CHECKS
 # _is_antiderivative takes it: at generic values of the parameters within what is assumed of them,
 # at each where both have values, and at a few such values; else nothing. A value that holds for
 # some of the parameters' values only, as one valid for a parameter's range, is rejected unless
-# that range is assumed.
-function _checked_definite(value::GiacExpr, f::GiacExpr, x::GiacExpr, a, b)
+# that range is assumed. The numeric integrals are taken at GIAC's default epsilon.
+_checked_definite(value::GiacExpr, f::GiacExpr, x::GiacExpr, a, b) = _at_default_epsilon(() -> _agreeing_value(value, f, x, a, b))
+
+function _agreeing_value(value::GiacExpr, f::GiacExpr, x::GiacExpr, a, b)
     vars = [giac_identifier(n) for n in sort(collect(setdiff(_free_names(f + value + convert(GiacExpr, a) + convert(GiacExpr, b)), [string(x)])))]
     ranges = [_assumed_intervals(v) for v in vars]
     needed = isempty(vars) ? 1 : _DEFINITE_CHECKS
@@ -393,16 +395,29 @@ function _checked_definite(value::GiacExpr, f::GiacExpr, x::GiacExpr, a, b)
     for k in 1:(isempty(vars) ? 1 : _DEFINITE_DRAWS)
         at = Dict{GiacExpr, Rational{Int}}(zip(vars, _generic_point(k, ranges)))
         on(e) = isempty(at) ? convert(GiacExpr, e) : substitute(convert(GiacExpr, e), at)
-        numeric = try
-            _approx_value(invoke_cmd(:evalf, _hold(:integrate, (on(f), x, on(a), on(b)))))
-        catch e
-            _stopped(e) && rethrow()
-            nothing
-        end
+        numeric = _numeric_integral(on(f), x, on(a), on(b))
         exact = _approx_value(on(value))
         (numeric isa Number && exact isa Number && isfinite(numeric) && isfinite(exact)) || continue
         abs(numeric - exact) <= _CHECK_TOLERANCE * max(1, abs(exact)) || return nothing
         (agreed += 1) >= needed && return value
     end
     return nothing
+end
+
+# ∫ₐᵇ f dx as a number: GIAC's, or where f has functions GIAC has no values for, over a finite
+# interval by tanh-sinh quadrature (laplace.jl) within its error estimate; else nothing
+function _numeric_integral(f::GiacExpr, x::GiacExpr, a, b)
+    if _has_special(f)
+        lo, hi = _approx_value(convert(GiacExpr, a)), _approx_value(convert(GiacExpr, b))
+        (lo isa Real && hi isa Real && isfinite(lo) && isfinite(hi)) || return nothing
+        q = _tanh_sinh_laplace(f, x, 0.0, lo, hi)
+        (q === nothing || q.err > _CHECK_TOLERANCE * max(1, abs(q.value))) && return nothing
+        return q.value
+    end
+    return try
+        _approx_value(invoke_cmd(:evalf, _hold(:integrate, (f, x, a, b))))
+    catch e
+        _stopped(e) && rethrow()
+        nothing
+    end
 end

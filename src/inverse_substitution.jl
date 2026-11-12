@@ -256,9 +256,8 @@ end
 # points, and an F that holds on part of the domain only, as one with the wrong branch of a root,
 # differs at points of the rest. Where f is real at fewer than two of them, every point where it has
 # a value counts; where it has a value at fewer than two (an unknown function in it), F' - f is
-# simplified. GIAC's evalf to some digits leaves its epsilon at their size, which changes later
-# numeric integrals: it is put back
-_is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr) = _keeping_epsilon(() -> _checked_on_domain(F, f, x))
+# simplified. The values are taken at GIAC's default epsilon, and epsilon is put back after.
+_is_antiderivative(F::GiacExpr, f::GiacExpr, x::GiacExpr) = _at_default_epsilon(() -> _checked_on_domain(F, f, x))
 
 function _checked_on_domain(F::GiacExpr, f::GiacExpr, x::GiacExpr)
     d = invoke_cmd(:diff, F, x) - f
