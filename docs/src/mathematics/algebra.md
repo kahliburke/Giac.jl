@@ -38,6 +38,27 @@ factor(x^4 - 1)
 # Output: (x-1)*(x+1)*(x^2+1)
 ```
 
+### Factoring over other domains
+
+A domain in place of an extension says where the factors may lie:
+
+```julia
+factor(6x^2 - 12, ℤ)          # (2*3)*(x^2-2)
+factor(x^4 - 2, ℝ)            # (x-2^(1/4))*(x+2^(1/4))*(x^2+sqrt(2))
+factor(2x^2 + 3, ℂ)           # 2*(x+(-1/2*i)*sqrt(6))*(x+(1/2*i)*sqrt(6))
+factor(x^4 + 1, Giac.GF(5))   # ((1 % 5)*x^2+2 % 5)*((1 % 5)*x^2-2 % 5)
+factor(x^4 + 1, sqrt(2))      # over ℚ(√2): (x^2+(-sqrt(2))*x+1)*(x^2+sqrt(2)*x+1)
+```
+
+```@docs
+Giac.Domain
+ℤ
+ℚ
+ℝ
+ℂ
+Giac.GF
+```
+
 ## Polynomial Expansion
 
 ### Expanding Products
@@ -204,4 +225,4 @@ solve([x^2 + y^2 ~ 1, x ~ y], [x, y])
 - The `~` operator creates equations for use with `solve`
 - For numerical solutions, convert results using `to_julia`
 - `simplify` may not always produce the simplest form; try `normal` for rational simplification
-- `factor` factors over the rationals by default; use `cfactor` for complex factorization
+- `factor` factors over the rationals by default; `factor(p, ℝ)` and `factor(p, ℂ)` factor over the reals and the complex numbers

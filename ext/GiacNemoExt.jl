@@ -1353,3 +1353,10 @@ end
 export to_giac, to_nemo
 
 end # module GiacNemoExt
+# Nemo's integers, rationals and prime fields as domains to factor over (factor_domains.jl)
+Giac._factor_domain(::ZZRing) = Giac.ℤ
+Giac._factor_domain(::QQField) = Giac.ℚ
+function Giac._factor_domain(F::FqField)
+    degree(F) == 1 || throw(ArgumentError("factoring over $F: only prime fields are supported"))
+    return Giac.GF(BigInt(characteristic(F)))
+end

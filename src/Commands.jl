@@ -202,9 +202,14 @@ function invoke_cmd(cmd::Symbol, args...)::GiacExpr
         return parentmodule(@__MODULE__)._isprime_cmd(args[1])
     end
 
-    # a factorization over the coefficients' field, without square roots joined to it (collect.jl)
+    # a factorization over the coefficients' field, without square roots joined to it (collect.jl),
+    # or over a domain given in place of an extension (factor_domains.jl)
     if cmd === :factor && length(args) == 1 && args[1] isa GiacExpr && !_fastpath_disabled[]
         return parentmodule(@__MODULE__)._factor_cmd(args[1])
+    end
+    if cmd === :factor && length(args) == 2 && args[1] isa GiacExpr
+        K = parentmodule(@__MODULE__)._factor_domain(args[2])
+        K === nothing || return parentmodule(@__MODULE__)._factor_over(args[1], K)
     end
 
     # a polynomial is expanded as a polynomial (collect.jl)

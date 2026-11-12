@@ -115,6 +115,7 @@ include("equations.jl")
 include("first_order.jl")
 include("functions.jl")
 include("collect.jl")
+include("factor_domains.jl")
 include("integration.jl")
 include("parametric_integrals.jl")
 include("inverse_substitution.jl")
@@ -178,6 +179,7 @@ export @matsym, MatExpr, quadratic_form, differential, partial, integral, integr
 # Command invocation (009-commands-submodule)
 # invoke_cmd replaces giac_cmd - available from main module and Giac.Commands
 export invoke_cmd
+export ℤ, ℚ, ℝ, ℂ
 export search_commands, commands_in_category, command_info, list_categories, giac_help
 
 # Command suggestions (005-nearest-command-suggestions)

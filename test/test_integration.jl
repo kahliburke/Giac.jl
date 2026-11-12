@@ -208,3 +208,34 @@ end
     @test string(C.factor(x^4 + 1)) == "x^4+1"
     @test occursin("sqrt(2)", string(C.factor(x^4 + 1, sqrt(convert(GiacExpr, 2)))))
 end
+
+@testset "Factoring over other domains" begin
+    @giac_var x y
+    C = Giac.Commands
+    f(p, K) = string(C.factor(p, K))
+    # the product of the factors is p
+    same(p, K) = all(t -> abs(Giac._approx_value(substitute(C.factor(p, K) - p, x => t))) < 1e-9, (0.37, -1.3, 2.1 + 0.4im))
+    @test f(6x^2 - 12, ℤ) == "(2*3)*(x^2-2)"
+    @test f(-12x^3 + 12x, ℤ) == "-(2^2*3)*x*(x-1)*(x+1)"
+    @test f(x^2 - y^2, ℤ) == "(x-y)*(x+y)"
+    @test_throws ArgumentError C.factor(x^2 / 2 - 1, ℤ)
+    @test f(x^4 + 1, ℚ) == "x^4+1"
+    @test f(x^4 + 1, Giac.GF(5)) == "((1 % 5)*x^2+2 % 5)*((1 % 5)*x^2-2 % 5)"
+    @test f(x^2 / 3 + 1, Giac.GF(5)) == "(2 % 5)*((1 % 5)*x^2+(-2 % 5))"     # 1/3 is 2 mod 5
+    @test_throws ArgumentError C.factor(x^2 / 5 + 1, Giac.GF(5))
+    @test_throws ArgumentError Giac.GF(6)
+    # ℝ: quadratics with no real roots stay; ℂ: linear factors
+    @test f(x^4 - 2, ℝ) == "(x-2^(1/4))*(x+2^(1/4))*(x^2+sqrt(2))"
+    @test f(x^4 + 1, ℝ) == "(x^2-sqrt(2)*x+1)*(x^2+sqrt(2)*x+1)"
+    @test f((x^2 + 1)^2 * (x - 3), ℂ) == "(x-3)*(x-i)^2*(x+i)^2"
+    for p in (x^4 + 1, x^4 - 2, 2x^2 + 3, x^6 - 1, 3x^2 - 5x + 1, x^8 - 16), K in (ℝ, ℂ)
+        @test same(p, K)
+    end
+    @test !occursin("x^2", f(x^8 - 16, ℂ))
+    @test f(7 * one(GiacExpr), ℝ) == "7"
+    @test_throws ArgumentError C.factor(x^3 - 2, ℝ)          # roots beyond square roots
+    @test_throws ArgumentError C.factor(x^2 - y^2, ℝ)
+    # a complex constant in a sum is written with the signs of its parts
+    I = convert(GiacExpr, im)
+    @test string(x - I) == "x-i" && string(x - 1 - I) == "x-1-i" && string(x - 1 // 2 - 3I // 2) == "x-1/2-3/2*i"
+end

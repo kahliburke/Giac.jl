@@ -509,10 +509,18 @@ function _print_args(io::IO, args, from)
     end
 end
 
-# each term written directly: its sign, then its coefficient and factors
+# each term written directly: its sign, then its coefficient and factors. A complex constant is
+# written as its real and imaginary parts, each with its sign.
 function _print(io::IO, n::AddNode)
     for (i, (m, c)) in pairs(n.terms)
-        neg = _negative(c)
+        if m isa NumNode && isone(m.v) && c isa Complex && !iszero(real(c)) && !iszero(imag(c))
+            _negative(real(c)) ? print(io, "-") : i > 1 && print(io, "+")
+            _print_number(io, abs(real(c)))
+            print(io, _negative(imag(c)) ? "-" : "+")
+            _print_number(io, abs(imag(c)) * im)
+            continue
+        end
+        neg = _negative(c) || c isa Complex && iszero(real(c)) && _negative(imag(c))
         neg ? print(io, "-") : i > 1 && print(io, "+")
         a = neg ? -c : c
         m isa NumNode ? _print_number(io, a) : _print_product(io, a, m isa MulNode ? m.factors : (m => _ONE,))
