@@ -132,7 +132,8 @@ end
 _integral_left(r::GiacExpr) = _is_infinite(r) || _any_node(n -> n isa CallNode && n.f == "integrate", _node(r))
 
 # ∫ₐᵇ f with each sin u and cos u written as exponentials of ±iu, term by term: a Gaussian with
-# a cosine is a sum of Gaussians with complex centres
+# a cosine is a sum of Gaussians with complex centres. Checked numerically, as each term's value is
+# GIAC's integral with a complex exponent.
 function _exponential_integral(f::GiacExpr, x::GiacExpr, a, b)
     n, xn = _node(f), _node(x)
     xn isa SymNode || return nothing
@@ -144,7 +145,7 @@ function _exponential_integral(f::GiacExpr, x::GiacExpr, a, b)
         _integral_left(v) && return nothing
         total += v
     end
-    return invoke_cmd(:simplify, total)
+    return _checked_definite(invoke_cmd(:simplify, total), f, x, a, b)
 end
 
 function _trig_as_exponentials(n::Node)
@@ -168,13 +169,16 @@ end
 # ∫ₐᵇ f = ½ ∫ₐᵇ (f + (f∘φ)·|φ′|) for a decreasing involution φ of [a, b]: a+b−x on a finite
 # interval, (1−x)/(1+x) on [0, 1] and 1/x on [0, ∞). Taken when the sum is no longer than f and
 # GIAC integrates it: x g(x) with g symmetric about the midpoint gives (a+b) g(x), and
-# ln(1+x)/(1+x²) on [0, 1] gives ln 2/(1+x²).
+# ln(1+x)/(1+x²) on [0, 1] gives ln 2/(1+x²). The identity needs ∫ₐᵇ f to converge, which the
+# sum's converging does not show, so the value is checked numerically.
 function _reflected_integral(f::GiacExpr, x::GiacExpr, a, b)
     for φ in _involutions(x, convert(GiacExpr, a), convert(GiacExpr, b))
         g = invoke_cmd(:simplify, f - substitute(f, x => φ) * invoke_cmd(:diff, φ, x))
         _size(_node(g)) <= _size(_node(f)) || continue
         v = invoke_cmd(:integrate, g, x, a, b)
-        _integral_left(v) || return invoke_cmd(:simplify, v / 2)
+        _integral_left(v) && continue
+        v = _checked_definite(invoke_cmd(:simplify, v / 2), f, x, a, b)
+        v === nothing || return v
     end
     return nothing
 end
@@ -320,27 +324,17 @@ function _integral_or_parts(f::GiacExpr, x::GiacExpr)
     return task_local_storage(() -> _parts_antiderivative(f, x), :giac_parts_depth, depth + 1)
 end
 
-# ∫ₐᵇ f dx = [uV]ₐᵇ - ∫ₐᵇ u'V, the ends by limits
+# ∫ₐᵇ f dx = [uV]ₐᵇ - ∫ₐᵇ u'V, the ends by limits. Checked numerically, as V, an antiderivative
+# from the search, may jump inside the interval.
 function _parts_integral(f::GiacExpr, x::GiacExpr, a, b)
     p = _parts(f, x)
     p === nothing && return nothing
     u, V, g, depth = p
-    UV = u * V
-    ends = GiacExpr[]
-    for (point, side) in ((b, -1), (a, 1))
-        v = try
-            _is_infinity(point) || _is_infinity(-convert(GiacExpr, point)) ? invoke_cmd(:limit, UV, x, point) :
-                                                                              invoke_cmd(:limit, UV, x, point, side)
-        catch e
-            _stopped(e) && rethrow()
-            return nothing
-        end
-        (_is_finite_value(v) && !_unevaluated(v, "limit")) || return nothing
-        push!(ends, v)
-    end
+    ends = _ends_difference(u * V, x, a, b)
+    ends === nothing && return nothing
     R = task_local_storage(() -> Commands.integrate(g, x, a, b), :giac_parts_depth, depth + 1)
     _integral_left(R) && return nothing
-    return invoke_cmd(:simplify, ends[1] - ends[2] - R)
+    return _checked_definite(invoke_cmd(:simplify, ends - R), f, x, a, b)
 end
 
 # ∫ₐᵇ f dx as F(b⁻) - F(a⁺) for the antiderivative F the search finds, kept only where it agrees
@@ -356,21 +350,17 @@ end
 function _elliptic_definite_integral(f::GiacExpr, x::GiacExpr, a, b)
     F = _elliptic_integral(f, x)
     F === nothing && return nothing
-    # the numeric integral of an integrand singular at an end, as these often are, is good to
-    # about 1e-7 in doubles; a wrong antiderivative is far further off
-    return _between_ends(F, f, x, a, b; tol = 1e-6)
+    return _between_ends(F, f, x, a, b)
 end
 
-# Numeric integrals that check a definite integral, at most and as many as can be had: each is costly
-const _DEFINITE_CHECKS = 3
-const _DEFINITE_DRAWS = 4 * _DEFINITE_CHECKS
+# F(b⁻) - F(a⁺), checked numerically: F' = f makes it the integral where F is continuous on (a, b)
+function _between_ends(F::GiacExpr, f::GiacExpr, x::GiacExpr, a, b)
+    value = _ends_difference(F, x, a, b)
+    return value === nothing ? nothing : _checked_definite(value, f, x, a, b)
+end
 
-# F(b⁻) - F(a⁺) where it agrees with the integral of f computed numerically, within `tol` relative:
-# at generic values of the parameters within what is assumed of them, at each where both have values,
-# and at a few such values; else nothing. F' = f makes F(b⁻) - F(a⁺) the integral where F is
-# continuous on (a, b), which the numeric integrals stand for, and an answer that holds for some of
-# the values only, as one valid for a parameter's range, is rejected unless that range is assumed
-function _between_ends(F::GiacExpr, f::GiacExpr, x::GiacExpr, a, b; tol::Real = 1e-8)
+# F(b⁻) - F(a⁺) by limits, where both are finite; else nothing
+function _ends_difference(F::GiacExpr, x::GiacExpr, a, b)
     ends = GiacExpr[]
     for (point, side) in ((b, -1), (a, 1))
         v = try
@@ -383,7 +373,19 @@ function _between_ends(F::GiacExpr, f::GiacExpr, x::GiacExpr, a, b; tol::Real = 
         (_is_finite_value(v) && !_unevaluated(v, "limit")) || return nothing
         push!(ends, _rebuilt_specials(v))
     end
-    value = invoke_cmd(:simplify, ends[1] - ends[2])
+    return invoke_cmd(:simplify, ends[1] - ends[2])
+end
+
+# Numeric integrals that check a definite integral, at most and as many as can be had: each is costly
+const _DEFINITE_CHECKS = 3
+const _DEFINITE_DRAWS = 4 * _DEFINITE_CHECKS
+
+# `value` where it agrees with ∫ₐᵇ f dx computed numerically, within _CHECK_TOLERANCE relative, as
+# _is_antiderivative takes it: at generic values of the parameters within what is assumed of them,
+# at each where both have values, and at a few such values; else nothing. A value that holds for
+# some of the parameters' values only, as one valid for a parameter's range, is rejected unless
+# that range is assumed.
+function _checked_definite(value::GiacExpr, f::GiacExpr, x::GiacExpr, a, b)
     vars = [giac_identifier(n) for n in sort(collect(setdiff(_free_names(f + value + convert(GiacExpr, a) + convert(GiacExpr, b)), [string(x)])))]
     ranges = [_assumed_intervals(v) for v in vars]
     needed = isempty(vars) ? 1 : _DEFINITE_CHECKS
@@ -399,7 +401,7 @@ function _between_ends(F::GiacExpr, f::GiacExpr, x::GiacExpr, a, b; tol::Real = 
         end
         exact = _approx_value(on(value))
         (numeric isa Number && exact isa Number && isfinite(numeric) && isfinite(exact)) || continue
-        abs(numeric - exact) <= tol * max(1, abs(exact)) || return nothing
+        abs(numeric - exact) <= _CHECK_TOLERANCE * max(1, abs(exact)) || return nothing
         (agreed += 1) >= needed && return value
     end
     return nothing

@@ -650,7 +650,8 @@ end
 
 # ∫ₐᵇ f dx for f with the functions in it: on [0, ∞) the limit at s → 0⁺ of its Laplace
 # transform, where the integral converges (_bessel_integral_converges); elsewhere F(b) - F(a) for
-# the antiderivative F, where both are finite and f has no singularity at 0 between a and b
+# the antiderivative F, where both are finite and f has no singularity at 0 between a and b,
+# checked numerically, as F's terms without the functions are GIAC's and may jump
 function _special_definite_integral(f::GiacExpr, x::GiacExpr, a, b)
     (_has_special(f) && _node(x) isa SymNode) || return nothing
     A, B = convert(GiacExpr, a), convert(GiacExpr, b)
@@ -676,7 +677,7 @@ function _special_definite_integral(f::GiacExpr, x::GiacExpr, a, b)
     for v in (Fa, Fb)
         (_is_finite_value(v) && !_singular_special(_node(v))) || return nothing
     end
-    return _smaller_form(Fb - Fa)
+    return _checked_definite(_smaller_form(Fb - Fa), f, x, A, B)
 end
 
 # whether ∫₀^∞ c xᵖ e^(-αx) Z_ν(kx) dx converges, for numbers p, α, ν and k > 0: at 0 where

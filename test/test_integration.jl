@@ -60,6 +60,9 @@ end
     # Serret's integral, under (1-x)/(1+x); and under 1/x on [0, ∞)
     @test same(log(1 + x) / (1 + x^2), 0, 1, "pi*ln(2)/8")
     @test same(log(x) / (1 + x^2), 0, ∞, "0")
+    # the sum under 1-x is 0 while the integral diverges
+    @test Giac._reflected_integral(1 / x - 1 / (1 - x), x, 0, 1) === nothing
+    @test string(C.integrate(1 / x - 1 / (1 - x), x, 0, 1)) == "undef"
 end
 
 @testset "Checking an antiderivative on the whole line" begin
